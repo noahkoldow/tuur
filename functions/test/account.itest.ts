@@ -120,9 +120,8 @@ describe('account deletion', () => {
     expect((await db.collection('invites').doc('hash2').get()).get('redeemedBy')).toBe('deleted');
     expect((await db.collection('redemptionTokens').get()).size).toBe(0);
     expect((await db.collection('rewardNonces').get()).size).toBe(0);
-    const fb = (await db.collection('feedback').doc(`${u.uid}__k`).get()).data()!;
-    expect(fb['uid']).toBeUndefined();
-    expect(fb['reason']).toBe('wrong_fact');
+    // the report (its id contains the uid and its text may identify the user) is deleted, not just stripped
+    expect((await db.collection('feedback').doc(`${u.uid}__k`).get()).exists).toBe(false);
     expect((await db.collection('rateLimits').doc(`narr_user_${u.uid}`).get()).exists).toBe(false);
     expect((await db.collection('rateLimits').doc('narr_user_other').get()).exists).toBe(true);
     expect((await db.collection('usageDaily').doc('2026-01-01').get()).exists).toBe(true);

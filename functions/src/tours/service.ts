@@ -316,6 +316,18 @@ export async function generateAutoTours(
   );
 
   if (existing.size > 0 && fresh.length > 0 && !input.force) {
+    // Writing texts for a new language costs model calls: gate it like any other generation (limits, budget, kill switch).
+    if ([...existing.values()].some((t) => !t.texts[input.lang])) {
+      try {
+        await consumeRateLimit(deps.db, `tours_user_${uid}`, 10, 3600_000, deps.now());
+      } catch (e) {
+        if (e instanceof RateLimitError)
+          throw new TourError('resource-exhausted', 'Too many requests', { retryAfterMs: e.retryAfterMs });
+        throw e;
+      }
+      const gate = budgetDecision(cfg, await spentToday(deps.db, input.tile, deps.now()));
+      if (!gate.allowed) throw new TourError('unavailable', 'Generation is paused', { reason: gate.reason });
+    }
     await ensureTexts(deps, cfg, [...existing.values()], placeName, input.lang);
     const all = (await deps.db.collection('tours').where('placeId', '==', placeId).get()).docs.map((d) =>
       TourSchema.parse(d.data()),

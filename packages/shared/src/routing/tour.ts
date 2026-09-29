@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NarrationLangSchema } from '../narration/types';
 import { INTERESTS } from '../constants';
 import { LatLngSchema } from '../schemas';
 import { ROUTING_PROFILES } from './matrix';
@@ -88,7 +89,7 @@ export const ComposeRouteRequestSchema = z.object({
   roundTrip: z.boolean().default(false),
   budgetMinutes: z.number().min(10).max(480),
   profile: z.enum(ROUTING_PROFILES),
-  lang: z.string().regex(/^[a-z]{2,3}$/),
+  lang: NarrationLangSchema,
   interests: z.array(z.enum(INTERESTS)).max(8).default([]),
 });
 export type ComposeRouteRequest = z.infer<typeof ComposeRouteRequestSchema>;

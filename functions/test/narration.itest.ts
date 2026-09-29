@@ -231,10 +231,18 @@ describe('getNarration', () => {
     });
   });
 
-  it('reported narrations are blocked, their audio removed, and regenerated on the next request', async () => {
+  it('one report does not pull a narration; three distinct reporters do (audio removed, regenerated next time)', async () => {
     const { deps, store, llm } = mk();
     const first = await getNarration(deps, 'u1', req);
     await reportNarrationIssue(deps, 'u2', { narrationKey: first.key, reason: 'wrong_fact' });
+    await reportNarrationIssue(deps, 'u2', { narrationKey: first.key, reason: 'offensive' }); // same reporter twice
+    expect((await db.collection('narrations').doc(first.key).get()).get('status')).toBe('ok');
+    expect(store.files.has(first.audioPath)).toBe(true);
+    // reports for keys that do not exist are ignored
+    await reportNarrationIssue(deps, 'u9', { narrationKey: 'does__not__exist', reason: 'wrong_fact' });
+    expect((await db.collection('feedback').get()).size).toBe(1);
+    await reportNarrationIssue(deps, 'u4', { narrationKey: first.key, reason: 'wrong_fact' });
+    await reportNarrationIssue(deps, 'u5', { narrationKey: first.key, reason: 'offensive' });
     expect((await db.collection('narrations').doc(first.key).get()).get('status')).toBe('pending_review');
     expect(store.files.has(first.audioPath)).toBe(false);
     const again = await getNarration(deps, 'u3', req);

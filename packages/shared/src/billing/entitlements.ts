@@ -185,6 +185,7 @@ export const RevenueCatEventSchema = z.object({
   new_product_id: z.string().optional(),
   expiration_at_ms: z.number().nullable().optional(),
   event_timestamp_ms: z.number().optional(),
+  environment: z.string().optional(),
   purchased_at_ms: z.number().optional(),
   period_type: z.string().optional(),
   store: z.string().optional(),

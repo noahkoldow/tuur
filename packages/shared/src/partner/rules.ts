@@ -140,5 +140,7 @@ export const dayKeyUtc = (ts: number) => new Date(ts).toISOString().slice(0, 10)
 
 /** Spoken label before partner content (UWG: partner content must be recognizable, spec 7.3). */
 export function partnerIntro(lang: string): string {
-  return lang === 'de' ? 'Eine Vorstellung unseres Partners.' : 'A word from our partner.';
+  return lang === 'de'
+    ? 'Werbung: Eine Vorstellung unseres Partners.'
+    : 'Advertisement: A word from our partner.';
 }

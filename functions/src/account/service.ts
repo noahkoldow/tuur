@@ -1,4 +1,4 @@
-import { FieldPath, FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { FieldPath, type Firestore } from 'firebase-admin/firestore';
 import { syncPartnerPoi, loadPartner, loadPartnerConfig } from '../partners/service';
 import type { PaymentsProvider } from '../partners/payments';
 
@@ -17,6 +17,8 @@ export interface AccountDeps {
   auth: AccountAuth;
   payments: PaymentsProvider;
   now: () => number;
+  /** Removes stored files below a prefix (per-user grounded narrations). */
+  deleteFiles?: (prefix: string) => Promise<void>;
 }
 
 /** Keys of `rateLimits` that embed the user id (document id prefixes); deleted with the account. */
@@ -31,6 +33,11 @@ const RATE_LIMIT_PREFIXES = [
   'partner_save_',
   'checkout_',
   'delete_account_',
+  'invite_',
+  'redeem_',
+  'tours_user_',
+  'teaser_user_',
+  'route_',
   'export_data_',
 ];
 
@@ -84,9 +91,12 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
   );
   summary['rewardNonces'] = await deleteByQuery(db, db.collection('rewardNonces').where('uid', '==', uid));
 
-  const feedback = await db.collection('feedback').where('uid', '==', uid).get();
-  for (const d of feedback.docs) await d.ref.update({ uid: FieldValue.delete(), anonymized: true });
-  summary['feedbackAnonymized'] = feedback.size;
+  // the feedback document id contains the uid and the free text may identify the user: delete the reports outright
+  summary['feedback'] = await deleteByQuery(db, db.collection('feedback').where('uid', '==', uid));
+  summary['revenuecatEvents'] = await deleteByQuery(
+    db,
+    db.collection('revenuecatEvents').where('uid', '==', uid),
+  );
 
   let limits = 0;
   for (const prefix of RATE_LIMIT_PREFIXES) {
@@ -100,6 +110,7 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
   }
   summary['rateLimits'] = limits;
 
+  await deps.deleteFiles?.(`narrations-grounded/${uid}/`);
   await deps.auth.deleteUser(uid);
   return { deleted: true, summary };
 }

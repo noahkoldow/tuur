@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import {
+  budgetDecision,
   scoreWithPartner,
   DEFAULT_QUALITY,
   PoiSchema,
@@ -22,7 +23,8 @@ import type { GeocodingProvider } from '../providers/geocoding';
 import { placeFromGeocode } from '../providers/geocoding';
 import type { LlmProvider } from '../providers/llm';
 import type { PoiSourceClient } from '../providers/poiSources';
-import { logUsage } from '../util/usage';
+import { loadPartnerConfig } from '../partners/service';
+import { logUsage, spentToday } from '../util/usage';
 import { AREAS, markAreaFailed } from './store';
 
 export interface IngestDeps {
@@ -31,7 +33,7 @@ export interface IngestDeps {
   geocoder: GeocodingProvider;
   llm: LlmProvider;
   /** Model names and prices come from `config/ai`, never hard-coded. */
-  ai: Pick<AiConfig, 'models' | 'pricing'>;
+  ai: Pick<AiConfig, 'models' | 'pricing' | 'dailyBudgetUsd' | 'areaDailyBudgetUsd' | 'killSwitch'>;
   now: () => number;
   quality?: QualityOptions;
   ttlMs?: number;
@@ -96,7 +98,10 @@ export async function ingestArea(
     const neighborRawScores = neighborSnap.docs.map((d) => Number(d.get('rawScore') ?? 0));
 
     let result = buildPois(raw, { now: deps.now(), images, neighborRawScores, precision: geohash.length });
-    if (result.unclassified.length) {
+    // Classification costs model calls: the kill switch and the budgets apply here as well (rule-based scores still work).
+    const gate = budgetDecision(deps.ai, await spentToday(db, geohash, deps.now()));
+    if (!gate.allowed) warnings.push(`llm classification skipped: ${gate.reason}`);
+    if (result.unclassified.length && gate.allowed) {
       const llm = await settled(
         deps.llm.classifyInterests(result.unclassified.slice(0, 60), deps.ai.models.lite),
         { interests: {} as Record<string, Interest[]>, usage: {} },
@@ -120,6 +125,7 @@ export async function ingestArea(
 
     const existing = await db.collection('pois').where('tile', '==', geohash).get();
     const existingById = new Map(existing.docs.map((d) => [d.id, d.data()]));
+    const { cfg: partnerCfg } = await loadPartnerConfig(db);
     const pois: Poi[] = result.pois.map((p) => {
       // Preserve moderation state across re-ingests (spec 8): hide flag, weight, facts, partner link.
       const prev = existingById.get(p.id);
@@ -135,6 +141,7 @@ export async function ingestArea(
           p.baseScore,
           Number(prev['adminWeight'] ?? 1),
           Number(prev['partnerBoost'] ?? 0),
+          partnerCfg,
         ),
       };
     });

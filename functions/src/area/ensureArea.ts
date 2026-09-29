@@ -1,6 +1,10 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_CLAIM_POLICY, tileWithNeighbors, tilesAround, type ClaimPolicy } from '@tuur/shared';
+import { FieldValue } from 'firebase-admin/firestore';
 import { claimArea, markAreaFailed } from './store';
+
+/** Global safety net against tile-farming with many throw-away accounts (per UTC day). */
+export const MAX_TILE_CLAIMS_PER_DAY = 3000;
 
 export interface EnsureAreaDeps {
   db: Firestore;
@@ -8,6 +12,7 @@ export interface EnsureAreaDeps {
   enqueueIngest: (geohash: string) => Promise<void>;
   now: () => number;
   policy?: ClaimPolicy;
+  maxClaimsPerDay?: number;
 }
 
 export interface EnsureAreaResult {
@@ -36,6 +41,13 @@ export async function ensureAreas(
         : [geohash];
   const started: string[] = [];
   const skipped: string[] = [];
+  const day = new Date(deps.now()).toISOString().slice(0, 10);
+  const counter = deps.db.collection('usageDaily').doc(day);
+  if (
+    Number((await counter.get()).get('tilesClaimed') ?? 0) >=
+    (deps.maxClaimsPerDay ?? MAX_TILE_CLAIMS_PER_DAY)
+  )
+    return { started, skipped: tiles };
   await Promise.all(
     tiles.map(async (tile) => {
       const now = deps.now();
@@ -44,6 +56,7 @@ export async function ensureAreas(
         skipped.push(tile);
         return;
       }
+      await counter.set({ day, tilesClaimed: FieldValue.increment(1) }, { merge: true });
       try {
         await deps.enqueueIngest(tile);
         started.push(tile);

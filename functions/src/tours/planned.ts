@@ -183,6 +183,11 @@ export async function composePlannedRoute(
     createdAt: now,
     updatedAt: now,
   });
-  await sessionRef.set({ ...tour, kind: 'planned', expiresAt: now + 24 * 3600_000 });
+  await sessionRef.set({
+    ...tour,
+    kind: 'planned',
+    expiresAt: now + 24 * 3600_000,
+    expireAt: new Date(now + 24 * 3600_000),
+  });
   return { tour, dropped: fit.dropped };
 }

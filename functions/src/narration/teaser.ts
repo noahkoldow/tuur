@@ -5,6 +5,7 @@ import {
   sourceText,
   sourceLangsFor,
   unsupportedNumbers,
+  NarrationLangSchema,
 } from '@tuur/shared';
 import { z } from 'zod';
 import { loadAiConfig } from '../util/aiConfig';
@@ -14,7 +15,7 @@ import { NarrationError, type NarrationDeps } from './service';
 
 export const GetTeaserRequestSchema = z.object({
   poiId: z.string().min(1).max(120),
-  lang: z.string().regex(/^[a-z]{2,3}$/),
+  lang: NarrationLangSchema,
   access: z
     .object({
       tourId: z.string().max(200).optional(),

@@ -24,6 +24,7 @@ export interface TransitionResponse {
   text: string;
   audioPath: string;
   audioDurationMs: number;
+  audioUrl?: string;
 }
 
 export interface UserInfo {

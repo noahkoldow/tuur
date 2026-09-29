@@ -54,6 +54,33 @@ export class MockTtsProvider implements TtsProvider {
 }
 
 /** Pure-JS MP3 (no native ffmpeg needed in Cloud Functions): 48 kbps mono keeps a 3 min narration near 1 MB. */
+/**
+ * Minimal ID3v2.3 tag with a user-defined text frame that marks the audio as AI-generated (machine-readable marking of
+ * synthetic audio, EU AI Act Art. 50(2)). Players skip the tag; the Storage object carries the same marker as metadata.
+ */
+export function aiGeneratedId3Tag(
+  note = 'true; generator=tuur; voice=synthetic (Google text-to-speech)',
+): Buffer {
+  const body = Buffer.concat([
+    Buffer.from([0x00]),
+    Buffer.from('AI_GENERATED\0', 'latin1'),
+    Buffer.from(note, 'latin1'),
+  ]);
+  const frameHeader = Buffer.alloc(10);
+  frameHeader.write('TXXX', 0, 'latin1');
+  frameHeader.writeUInt32BE(body.length, 4);
+  const frame = Buffer.concat([frameHeader, body]);
+  const header = Buffer.alloc(10);
+  header.write('ID3', 0, 'latin1');
+  header[3] = 3; // v2.3
+  const size = frame.length;
+  header[6] = (size >> 21) & 0x7f;
+  header[7] = (size >> 14) & 0x7f;
+  header[8] = (size >> 7) & 0x7f;
+  header[9] = size & 0x7f;
+  return Buffer.concat([header, frame]);
+}
+
 export class Mp3AudioEncoder implements AudioEncoder {
   encode(pcm: Uint8Array) {
     const samples = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
@@ -65,6 +92,6 @@ export class Mp3AudioEncoder implements AudioEncoder {
     }
     const tail = enc.flush();
     chunks.push(Buffer.from(tail.buffer, tail.byteOffset, tail.byteLength));
-    return { data: Buffer.concat(chunks), mimeType: 'audio/mpeg', ext: 'mp3' };
+    return { data: Buffer.concat([aiGeneratedId3Tag(), ...chunks]), mimeType: 'audio/mpeg', ext: 'mp3' };
   }
 }

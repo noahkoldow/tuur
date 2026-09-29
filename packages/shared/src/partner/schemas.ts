@@ -42,6 +42,8 @@ export const PartnerPlanSchema = z.object({
   stripeCustomerId: z.string().optional(),
   stripeSubscriptionId: z.string().optional(),
   currency: z.string().optional(),
+  /** Stripe event time of the last applied subscription event (guards against out-of-order delivery). */
+  eventTs: z.number().optional(),
 });
 export type PartnerPlan = z.infer<typeof PartnerPlanSchema>;
 

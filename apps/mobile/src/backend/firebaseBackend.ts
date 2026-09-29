@@ -49,6 +49,7 @@ import {
   type AreaInfo,
   type AuthApi,
   type Backend,
+  type TransitionResponse,
   type Unsubscribe,
   type UserInfo,
 } from './types';
@@ -108,6 +109,8 @@ export function createFirebaseBackend(): Backend {
       throw toBackendError(e instanceof HttpsError ? e : e);
     }
   };
+
+  const signedUrls = new Map<string, string>();
 
   const authApi: AuthApi = {
     current: () => toUser(auth.currentUser),
@@ -193,7 +196,8 @@ export function createFirebaseBackend(): Backend {
     getAutoTours: (tile, lang) => call('generateAutoTours', { tile, lang }),
     watchTours(placeId, cb) {
       return onSnapshot(
-        query(collection(db, 'tours'), where('placeId', '==', placeId)),
+        // the rules only allow queries that provably return unlocked tours
+        query(collection(db, 'tours'), where('placeId', '==', placeId), where('locked', '==', false)),
         (snap) =>
           cb(
             snap.docs.flatMap((d) => {
@@ -230,9 +234,16 @@ export function createFirebaseBackend(): Backend {
     async getTeaser(req) {
       return (await call<{ poiId: string; lang: string }, { text: string }>('getTeaser', req)).text;
     },
-    getNarration: (req: GetNarrationRequest) =>
-      call<GetNarrationRequest, NarrationResponse>('getNarration', req),
-    getTransition: (req) => call('getTransition', req),
+    async getNarration(req: GetNarrationRequest) {
+      const n = await call<GetNarrationRequest, NarrationResponse>('getNarration', req);
+      if (n.audioUrl) signedUrls.set(n.audioPath, n.audioUrl);
+      return n;
+    },
+    async getTransition(req) {
+      const t = await call<typeof req, TransitionResponse>('getTransition', req);
+      if (t.audioUrl) signedUrls.set(t.audioPath, t.audioUrl);
+      return t;
+    },
     watchEntitlements(cb) {
       const uid = () => auth.currentUser?.uid;
       let ents: Entitlement[] = [];
@@ -283,7 +294,12 @@ export function createFirebaseBackend(): Backend {
     createInvite: (tourId) => call('createInvite', { tourId }),
     redeemInvite: (token) => call('redeemInvite', { token }),
     createRewardNonce: () => call('createRewardNonce', {}),
-    audioUrl: (path) => getDownloadURL(ref(storage, path)),
+    // Audio is private: the URL was signed by the server together with the access check that served the narration.
+    async audioUrl(path) {
+      const url = signedUrls.get(path);
+      if (!url) throw new BackendError('not_found', 'No access URL for this audio');
+      return url;
+    },
     async reportNarration(input) {
       await call('reportNarration', input);
     },

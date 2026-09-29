@@ -43,6 +43,8 @@ export class BillingError extends Error {
 export interface BillingDeps {
   db: Firestore;
   now: () => number;
+  /** Accept RevenueCat SANDBOX events (emulator/dev only). */
+  allowSandbox?: boolean;
 }
 
 const ents = (db: Firestore, uid: string) => db.collection('users').doc(uid).collection('entitlements');
@@ -326,6 +328,8 @@ export async function processRevenueCatEvent(
   if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid webhook payload');
   const event = parsed.data.event;
   const { db } = deps;
+  // sandbox purchases never grant production entitlements
+  if (event.environment === 'SANDBOX' && !deps.allowSandbox) return { status: 'ignored' as const, ops: [] };
   const { products } = await loadBillingConfig(db);
   const now = deps.now();
   const ops = planRevenueCatEvent(event, products, now);
@@ -334,21 +338,31 @@ export async function processRevenueCatEvent(
     const seen = await tx.get(eventRef);
     if (seen.exists) return { status: 'duplicate' as const, ops: [] };
     const uid = event.app_user_id;
-    let wallet: Wallet | undefined;
+    const eventTs = event.event_timestamp_ms ?? now;
+    // all reads first (Firestore transactions), then the writes
+    const hasCredits = ops.some((o) => o.op === 'addCredits' || o.op === 'removeCredits');
+    let wallet: Wallet | undefined = hasCredits ? await readWallet(tx, db, uid) : undefined;
+    const subRef = ents(db, uid).doc('subscription');
+    const cur = ops.some((o) => o.op === 'setSubscription') ? await tx.get(subRef) : undefined;
+    // one ledger entry per store transaction and direction: a replayed REFUND/PURCHASE under a new event id is a no-op
+    const ledgerId = (op: { op: string; ref: string }) =>
+      `${op.op}_${op.ref}`.replace(/[^A-Za-z0-9_-]/g, '_');
+    const seenLedger = new Set<string>();
+    for (const op of ops)
+      if (op.op === 'addCredits' || op.op === 'removeCredits')
+        if ((await tx.get(ledger(db, uid).doc(ledgerId(op)))).exists) seenLedger.add(ledgerId(op));
     for (const op of ops) {
       if (op.op === 'setSubscription') {
-        const ref = ents(db, uid).doc('subscription');
-        const cur = await tx.get(ref);
-        // ignore out-of-order events that are older than what we already know
-        if (cur.exists && Number(cur.get('updatedAt')) > now + 60_000) continue;
-        tx.set(ref, op.entitlement);
+        // ignore out-of-order events that are older than what we already know (RevenueCat's own event time)
+        if (cur?.exists && Number(cur.get('eventTs') ?? 0) > eventTs) continue;
+        tx.set(subRef, { ...op.entitlement, eventTs });
       } else if (op.op === 'addCredits' || op.op === 'removeCredits') {
-        wallet ??= await readWallet(tx, db, uid);
+        if (seenLedger.has(ledgerId(op))) continue;
         wallet = {
-          ...wallet,
-          balance: Math.max(0, wallet.balance + (op.op === 'addCredits' ? op.amount : -op.amount)),
+          ...wallet!,
+          balance: Math.max(0, wallet!.balance + (op.op === 'addCredits' ? op.amount : -op.amount)),
         };
-        tx.set(ledger(db, uid).doc(), {
+        tx.set(ledger(db, uid).doc(ledgerId(op)), {
           delta: op.op === 'addCredits' ? op.amount : -op.amount,
           kind: 'purchase',
           ref: op.ref,
@@ -356,7 +370,7 @@ export async function processRevenueCatEvent(
         });
       }
     }
-    if (wallet) tx.set(walletRef(db, uid), wallet);
+    if (wallet && hasCredits) tx.set(walletRef(db, uid), wallet);
     tx.set(eventRef, { type: event.type, uid, processedAt: now, ops: ops.map((o) => o.op) });
     const acting = ops.filter((o) => o.op !== 'ignore');
     return {
@@ -379,23 +393,32 @@ export async function createRewardNonce(
   const { db } = deps;
   const { rewardedPerDay } = await loadBillingConfig(db);
   const now = deps.now();
-  const counter = await db.collection('users').doc(uid).collection('rewardCounters').doc(dayKey(now)).get();
-  const granted = Number(counter.get('granted') ?? 0);
-  const pending = await db
-    .collection('rewardNonces')
-    .where('uid', '==', uid)
-    .where('used', '==', false)
-    .where('expiresAt', '>', now)
-    .get();
-  const d = decideReward(granted + pending.size, rewardedPerDay);
-  if (!d.ok)
-    throw new BillingError('resource-exhausted', 'Daily rewarded limit reached', { reason: d.reason });
   const nonce = randomBytes(18).toString('base64url');
-  await db
-    .collection('rewardNonces')
-    .doc(nonce)
-    .set({ uid, used: false, createdAt: now, expiresAt: now + NONCE_TTL_MS });
-  return { nonce, remainingToday: d.remaining };
+  // counting pending nonces and issuing a new one is one transaction, so parallel calls cannot exceed the daily limit
+  const remainingToday = await db.runTransaction(async (tx) => {
+    const counter = await tx.get(
+      db.collection('users').doc(uid).collection('rewardCounters').doc(dayKey(now)),
+    );
+    const pending = await tx.get(
+      db
+        .collection('rewardNonces')
+        .where('uid', '==', uid)
+        .where('used', '==', false)
+        .where('expiresAt', '>', now),
+    );
+    const d = decideReward(Number(counter.get('granted') ?? 0) + pending.size, rewardedPerDay);
+    if (!d.ok)
+      throw new BillingError('resource-exhausted', 'Daily rewarded limit reached', { reason: d.reason });
+    tx.set(db.collection('rewardNonces').doc(nonce), {
+      uid,
+      used: false,
+      createdAt: now,
+      expiresAt: now + NONCE_TTL_MS,
+      expireAt: new Date(now + 24 * 3600_000),
+    });
+    return d.remaining;
+  });
+  return { nonce, remainingToday };
 }
 
 /** Called after a verified SSV callback: grants one reward credit if nonce and daily limit allow. */

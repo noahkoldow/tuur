@@ -1,11 +1,10 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Shared narration audio (MP3). Written only by Cloud Functions; readable by signed-in users
-    // (the client resolves a download URL via the Storage SDK). Blocked audio is deleted server-side.
+    // Shared narration audio (MP3) is paid content: object names are guessable, so clients can never read it directly.
+    // getNarration/getTransition check the entitlement first and return a short-lived signed URL instead.
     match /narrations/{file} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read, write: if false;
     }
     // Grounded narrations are per-user (Google terms: display only to the requesting end user).
     match /narrations-grounded/{uid}/{file} {

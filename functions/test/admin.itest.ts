@@ -12,6 +12,7 @@ import {
   setAreaLock,
   type AdminDeps,
 } from '../src/admin/service';
+import { retentionSweep } from '../src/util/retention';
 import { loadAiConfig, resetAiConfigCache } from '../src/util/aiConfig';
 import { loadPartnerConfig } from '../src/partners/service';
 import { clearFirestore, testDb } from './helpers';
@@ -238,5 +239,39 @@ describe('configuration', () => {
         },
       }),
     ).rejects.toBeInstanceOf(AdminError);
+  });
+});
+
+describe('retention', () => {
+  it('deletes reports, cost logs and audit entries past their retention and keeps the rest', async () => {
+    const day = 86_400_000;
+    await db
+      .collection('feedback')
+      .doc('old')
+      .set({ createdAt: clock - 400 * day });
+    await db
+      .collection('feedback')
+      .doc('new')
+      .set({ createdAt: clock - 10 * day });
+    await db
+      .collection('usageLogs')
+      .doc('old')
+      .set({ ts: clock - 100 * day });
+    await db
+      .collection('usageLogs')
+      .doc('new')
+      .set({ ts: clock - 5 * day });
+    await db
+      .collection('adminAudit')
+      .doc('old')
+      .set({ ts: clock - 800 * day });
+    await db
+      .collection('adminAudit')
+      .doc('new')
+      .set({ ts: clock - 5 * day });
+    expect(await retentionSweep(db, clock)).toEqual({ feedback: 1, usageLogs: 1, adminAudit: 1 });
+    expect((await db.collection('feedback').get()).docs.map((d) => d.id)).toEqual(['new']);
+    expect((await db.collection('usageLogs').get()).docs.map((d) => d.id)).toEqual(['new']);
+    expect((await db.collection('adminAudit').get()).docs.map((d) => d.id)).toEqual(['new']);
   });
 });

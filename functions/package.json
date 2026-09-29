@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "test:integration": "firebase emulators:exec --config ../firebase.json --only firestore,auth --project demo-tuur \"vitest run --config vitest.integration.config.ts\""
+    "test:integration": "firebase emulators:exec --config ../firebase.json --only firestore,auth,storage --project demo-tuur \"vitest run --config vitest.integration.config.ts\""
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

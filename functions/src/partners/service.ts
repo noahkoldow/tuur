@@ -457,55 +457,61 @@ export async function createRedemptionToken(deps: PartnerDeps, uid: string, raw:
   if (!partner || !poi.exists) throw new PartnerError('not-found', 'Offer not found');
   const { cfg } = await loadPartnerConfig(db);
   const day = dayKeyUtc(now);
-  const mine = await db
-    .collection('redemptionTokens')
-    .where('uid', '==', uid)
-    .where('offerId', '==', offer.data.id)
-    .where('day', '==', day)
-    .get();
-  const used = mine.docs.some((d) => d.get('used') === true);
-  const open = mine.docs.find((d) => d.get('used') !== true && Number(d.get('expiresAt')) > now);
   const redeemedToday = Number((await counterRef(db, offer.data.id, day).get()).get('redeemed') ?? 0);
-  const d = decideCreateToken({
-    partner,
-    offer: offer.data,
-    now,
-    userPosition: parsed.data.position,
-    partnerLocation: poi.get('location') as { lat: number; lng: number },
-    redeemedToday,
-    userRedeemedToday: used,
-    cfg,
-  });
-  if (!d.ok)
-    throw new PartnerError('failed-precondition', `Cannot redeem: ${d.reason}`, { reason: d.reason });
-  if (open)
+  const expiresAt = now + cfg.tokenTtlMs;
+  const fresh = signToken(deps.tokenSecret(), { expiresAt, partnerId: partner.id, offerId: offer.data.id });
+  const freshJti = parseToken(fresh)!.jti;
+  // Checking the listener's tokens of the day and issuing a new one is one transaction: parallel requests cannot
+  // produce several valid tokens for the same offer and day.
+  return db.runTransaction(async (tx) => {
+    const mine = await tx.get(
+      db
+        .collection('redemptionTokens')
+        .where('uid', '==', uid)
+        .where('offerId', '==', offer.data.id)
+        .where('day', '==', day),
+    );
+    const used = mine.docs.some((d) => d.get('used') === true);
+    const open = mine.docs.find((d) => d.get('used') !== true && Number(d.get('expiresAt')) > now);
+    const d = decideCreateToken({
+      partner,
+      offer: offer.data,
+      now,
+      userPosition: parsed.data.position,
+      partnerLocation: poi.get('location') as { lat: number; lng: number },
+      redeemedToday,
+      userRedeemedToday: used,
+      cfg,
+    });
+    if (!d.ok)
+      throw new PartnerError('failed-precondition', `Cannot redeem: ${d.reason}`, { reason: d.reason });
+    if (open)
+      return {
+        token: String(open.get('token')),
+        tokenId: open.id,
+        expiresAt: Number(open.get('expiresAt')),
+        offerTitle: offer.data.title,
+        partnerName: partner.name,
+      };
+    tx.set(db.collection('redemptionTokens').doc(freshJti), {
+      uid,
+      partnerId: partner.id,
+      offerId: offer.data.id,
+      day,
+      token: fresh,
+      used: false,
+      createdAt: now,
+      expiresAt,
+      expireAt: new Date(now + 48 * 3600_000),
+    });
     return {
-      token: String(open.get('token')),
-      tokenId: open.id,
-      expiresAt: Number(open.get('expiresAt')),
+      token: fresh,
+      tokenId: freshJti,
+      expiresAt,
       offerTitle: offer.data.title,
       partnerName: partner.name,
     };
-  const expiresAt = now + cfg.tokenTtlMs;
-  const token = signToken(deps.tokenSecret(), { expiresAt, partnerId: partner.id, offerId: offer.data.id });
-  const jti = parseToken(token)!.jti;
-  await db.collection('redemptionTokens').doc(jti).set({
-    uid,
-    partnerId: partner.id,
-    offerId: offer.data.id,
-    day,
-    token,
-    used: false,
-    createdAt: now,
-    expiresAt,
   });
-  return {
-    token,
-    tokenId: jti,
-    expiresAt,
-    offerTitle: offer.data.title,
-    partnerName: partner.name,
-  };
 }
 
 /** Partner scans the QR: verifies signature, expiry, single use and limits, then marks the token used (transaction). */
@@ -599,12 +605,19 @@ export async function processPaymentEvent(
   if (ev.type === 'ignored') return 'ignored';
   const { db } = deps;
   const evRef = db.collection('stripeEvents').doc(ev.id);
-  const claimed = await db.runTransaction(async (tx) => {
-    if ((await tx.get(evRef)).exists) return false;
-    tx.set(evRef, { type: ev.type, ts: deps.now() });
-    return true;
-  });
-  if (!claimed) return 'duplicate';
+  if ((await evRef.get()).exists) return 'duplicate';
+  // The event is marked as handled only after the work succeeded, so a failed attempt is retried by Stripe instead of
+  // being dropped as a duplicate. The work itself is idempotent (it derives the plan from the event's subscription).
+  const result = await applyPaymentEvent(deps, ev);
+  await evRef.set({ type: ev.type, ts: deps.now(), expireAt: new Date(deps.now() + 90 * 86_400_000) });
+  return result;
+}
+
+async function applyPaymentEvent(
+  deps: PartnerDeps,
+  ev: Exclude<PaymentEvent, { type: 'ignored' }>,
+): Promise<'processed' | 'ignored'> {
+  const { db } = deps;
   const now = deps.now();
   const { cfg } = await loadPartnerConfig(db);
   if (ev.type === 'checkout_completed') {
@@ -629,7 +642,13 @@ export async function processPaymentEvent(
   }
   const p = partnerId ? await loadPartner(db, partnerId) : undefined;
   if (!p) return 'ignored';
-  const plan = planFromStripeSubscription(ev.subscription, ev.deleted);
+  // subscription events can arrive out of order: never let an older one overwrite a newer state
+  if (ev.created !== undefined && p.plan.eventTs !== undefined && ev.created < p.plan.eventTs)
+    return 'ignored';
+  const plan = {
+    ...planFromStripeSubscription(ev.subscription, ev.deleted),
+    ...(ev.created !== undefined ? { eventTs: ev.created } : {}),
+  };
   const next: Partner = { ...p, plan, updatedAt: now };
   await partners(db).doc(p.id).set(PartnerSchema.parse(next));
   await syncPartnerPoi(db, next, cfg, now, p.poiId);

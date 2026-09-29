@@ -3,9 +3,17 @@ import { StripeSubscriptionSchema, type StripeSubscription } from '@tuur/shared'
 
 /** Payment events the app cares about (already validated and narrowed). */
 export type PaymentEvent =
-  | { id: string; type: 'checkout_completed'; partnerId: string; customerId: string; subscriptionId?: string }
   | {
       id: string;
+      created?: number;
+      type: 'checkout_completed';
+      partnerId: string;
+      customerId: string;
+      subscriptionId?: string;
+    }
+  | {
+      id: string;
+      created?: number;
       type: 'subscription';
       partnerId: string | undefined;
       subscription: StripeSubscription;
@@ -78,7 +86,10 @@ export class StripePayments implements PaymentsProvider {
   parseWebhook(rawBody: Buffer, signature: string | undefined): PaymentEvent {
     if (!signature) throw new Error('missing signature');
     const ev = this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
-    return normalizeStripeEvent(ev.id, ev.type, ev.data.object);
+    return {
+      ...normalizeStripeEvent(ev.id, ev.type, ev.data.object),
+      created: ev.created * 1000,
+    } as PaymentEvent;
   }
 }
 
@@ -129,8 +140,10 @@ export class MockPayments implements PaymentsProvider {
     const ev = JSON.parse(rawBody.toString('utf8')) as {
       id: string;
       type: string;
+      created?: number;
       data: { object: unknown };
     };
-    return normalizeStripeEvent(ev.id, ev.type, ev.data.object);
+    const n = normalizeStripeEvent(ev.id, ev.type, ev.data.object);
+    return ev.created ? ({ ...n, created: ev.created * 1000 } as PaymentEvent) : n;
   }
 }

@@ -35,6 +35,18 @@ import { loadPartner } from '../partners/service';
 export interface ObjectStore {
   put(path: string, data: Buffer, mimeType: string): Promise<void>;
   delete(path: string): Promise<void>;
+  /** Short-lived read URL for a private object (production: V4 signed URL). */
+  signedUrl?(path: string, ttlMs: number): Promise<string>;
+}
+
+export const AUDIO_URL_TTL_MS = 6 * 60 * 60_000;
+
+export async function withAudioUrl<T extends { audioPath: string }>(
+  store: ObjectStore,
+  r: T,
+): Promise<T & { audioUrl?: string }> {
+  if (!store.signedUrl) return r;
+  return { ...r, audioUrl: await store.signedUrl(r.audioPath, AUDIO_URL_TTL_MS) };
 }
 
 export interface NarrationDeps {
@@ -91,6 +103,8 @@ async function partnerContext(db: Firestore, poi: Poi, now: number): Promise<Par
   };
 }
 
+export const REPORTS_TO_BLOCK = 3;
+
 const LOCK_TTL_MS = 3 * 60_000;
 const MAX_FAILURES_PER_DAY = 3;
 
@@ -136,6 +150,10 @@ async function loadPoi(db: Firestore, poiId: string): Promise<Poi> {
  * Cache hits are free and never rate limited; only generation is gated by rate limits and budgets.
  */
 export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unknown) {
+  return withAudioUrl(deps.store, await getNarrationChecked(deps, uid, rawReq));
+}
+
+async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unknown) {
   const parsed = GetNarrationRequestSchema.safeParse(rawReq);
   if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
   const req = parsed.data;
@@ -219,7 +237,7 @@ export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unk
   const gotLock = await deps.db.runTransaction(async (tx) => {
     const s = await tx.get(lockRef);
     if (s.exists && deps.now() - Number(s.get('at')) < LOCK_TTL_MS) return false;
-    tx.set(lockRef, { at: deps.now() });
+    tx.set(lockRef, { at: deps.now(), expireAt: new Date(deps.now() + 3600_000) });
     return true;
   });
   if (!gotLock) {
@@ -295,7 +313,7 @@ async function generate(
     const gen = await deps.llm.generateNarration({
       model: cfg.models.narration,
       system: systemPrompt(req.lang),
-      user: userPrompt({ bundle, lang: req.lang, tier, interest, context: req.context }) + retryNote,
+      user: userPrompt({ bundle, lang: req.lang, tier, interest }) + retryNote,
       grounding: grounded,
       bundle,
       lang: req.lang,
@@ -479,6 +497,9 @@ export async function reportNarrationIssue(
   const dupe = deps.db.collection('feedback').doc(`${uid}__${input.narrationKey}`.slice(0, 400));
   const s = await dupe.get();
   if (s.exists) return { id: dupe.id };
+  // only reports about narrations that exist count (no probing of arbitrary keys)
+  const target = await deps.db.collection('narrations').doc(input.narrationKey).get();
+  if (!target.exists) return { id: dupe.id };
   await dupe.set({
     narrationKey: input.narrationKey,
     uid,
@@ -487,7 +508,17 @@ export async function reportNarrationIssue(
     status: 'open',
     createdAt: deps.now(),
   });
-  if (input.reason === 'wrong_fact' || input.reason === 'offensive')
-    await blockNarration(deps, input.narrationKey, 'pending_review');
+  // A shared narration (and its audio) is only pulled after several distinct reporters agree; one account
+  // (or a few throw-away accounts) cannot knock out content and force paid regeneration on its own.
+  if (input.reason === 'wrong_fact' || input.reason === 'offensive') {
+    const same = await deps.db
+      .collection('feedback')
+      .where('narrationKey', '==', input.narrationKey)
+      .where('reason', 'in', ['wrong_fact', 'offensive'])
+      .limit(REPORTS_TO_BLOCK)
+      .get();
+    if (new Set(same.docs.map((d) => d.get('uid'))).size >= REPORTS_TO_BLOCK)
+      await blockNarration(deps, input.narrationKey, 'pending_review');
+  }
   return { id: dupe.id };
 }

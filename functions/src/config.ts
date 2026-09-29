@@ -70,8 +70,18 @@ export function objectStore(): ObjectStore {
         .save(data, {
           contentType: mimeType,
           resumable: false,
-          metadata: { cacheControl: 'public, max-age=31536000, immutable' },
+          // audio is served through short-lived signed URLs only; the marker labels synthetic audio (AI Act Art. 50)
+          metadata: {
+            cacheControl: 'private, max-age=3600',
+            metadata: { aiGenerated: 'true', generator: 'tuur' },
+          },
         });
+    },
+    signedUrl: async (path, ttlMs) => {
+      const [url] = await bucket()
+        .file(path)
+        .getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + ttlMs });
+      return url;
     },
     delete: async (path) => {
       await bucket().file(path).delete({ ignoreNotFound: true });

@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { INTERESTS, LENGTH_TIERS } from '../constants';
+import { NARRATION_LANGS } from './prompt';
+
+/** Supported narration languages as a plain string (keeps client code simple; unknown codes are rejected). */
+export const NarrationLangSchema = z
+  .string()
+  .refine((l) => (NARRATION_LANGS as readonly string[]).includes(l), 'Unsupported language');
 
 export const GetNarrationRequestSchema = z.object({
   poiId: z.string().min(1).max(120),
-  lang: z.string().regex(/^[a-z]{2,3}$/),
+  lang: NarrationLangSchema,
   lengthTier: z.enum(LENGTH_TIERS),
   primaryInterest: z.enum(INTERESTS).optional(),
   /** What the listener is doing; the server checks entitlements against it (never trusts free/bought claims). */
@@ -81,6 +87,8 @@ export interface NarrationResponse {
   /** Cloud Storage path; the client resolves a download URL with the Storage SDK (rules: signed-in read). */
   audioPath: string;
   audioDurationMs: number;
+  /** Short-lived signed URL, issued only after the access check (Storage rules deny direct reads). */
+  audioUrl?: string;
   images: {
     url: string;
     thumbUrl?: string;

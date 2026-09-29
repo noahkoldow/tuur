@@ -3,7 +3,7 @@ import { getFunctions } from 'firebase-admin/functions';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { EnsureAreaRequestSchema, rateLimitDecision } from '@tuur/shared';
+import { EnsureAreaRequestSchema, NarrationLangSchema, rateLimitDecision } from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
 import {
@@ -42,6 +42,8 @@ import {
 } from './admin/service';
 import { deleteAccount as runDeleteAccount, exportMyData as runExportMyData } from './account/service';
 import { getAuth } from 'firebase-admin/auth';
+import { getStorage } from 'firebase-admin/storage';
+import { retentionSweep } from './util/retention';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   PartnerError,
@@ -93,7 +95,7 @@ async function enforceRateLimit(key: string, limit: number, windowMs: number): P
       Date.now(),
       { limit, windowMs },
     );
-    if (d.allowed) tx.set(ref, d.next);
+    if (d.allowed) tx.set(ref, { ...d.next, expireAt: new Date(Date.now() + windowMs * 2) });
     return d;
   });
   if (!res.allowed)
@@ -192,7 +194,7 @@ export const reportNarration = onCall({ enforceAppCheck }, async (request) => {
 const GenerateToursSchema = z.object({
   /** Client sends the geohash tile only (privacy, D10). */
   tile: z.string().regex(/^[0-9bcdefghjkmnpqrstuvwxyz]{4,8}$/),
-  lang: z.string().regex(/^[a-z]{2,3}$/),
+  lang: NarrationLangSchema,
   profile: z.enum(['foot-walking', 'cycling-regular']).optional(),
 });
 
@@ -305,7 +307,10 @@ export const revenueCatWebhook = onRequest(
     if (!verifyBearer(req.get('authorization'), REVENUECAT_WEBHOOK_SECRET.value()))
       return void res.status(401).send('unauthorized');
     try {
-      const out = await processRevenueCatEvent({ db: db(), now: Date.now }, req.body);
+      const out = await processRevenueCatEvent(
+        { db: db(), now: Date.now, allowSandbox: isEmulator || process.env['TUUR_ALLOW_SANDBOX'] === 'true' },
+        req.body,
+      );
       res.status(200).json(out);
     } catch (e) {
       if (e instanceof BillingError && e.code === 'invalid-argument')
@@ -511,6 +516,7 @@ export const sweepPartners = onSchedule(
   { schedule: 'every day 04:00', timeZone: 'Europe/Berlin' },
   async () => {
     await sweepPartnerPlans(partnerDeps());
+    await retentionSweep(db(), Date.now());
   },
 );
 
@@ -554,7 +560,15 @@ export const adminSavePartnerConfig = adminCallable(savePartnerConfig);
 // ---------------------------------------------------------------------------------------------------------------
 // GDPR: account deletion and data export (available in the app settings and the partner portal)
 
-const accountDeps = () => ({ db: db(), auth: getAuth(), payments: payments(), now: Date.now });
+const accountDeps = () => ({
+  db: db(),
+  auth: getAuth(),
+  payments: payments(),
+  now: Date.now,
+  deleteFiles: async (prefix: string) => {
+    await getStorage().bucket().deleteFiles({ prefix });
+  },
+});
 
 export const deleteAccount = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');

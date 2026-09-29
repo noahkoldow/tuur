@@ -1,14 +1,20 @@
 import { z } from 'zod';
-import { NarrationDocSchema, PoiSchema, budgetDecision, type NarrationDoc } from '@tuur/shared';
+import {
+  NarrationLangSchema,
+  NarrationDocSchema,
+  PoiSchema,
+  budgetDecision,
+  type NarrationDoc,
+} from '@tuur/shared';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 import { logUsage, spentToday } from '../util/usage';
-import { NarrationError, renderAudio, type NarrationDeps } from './service';
+import { NarrationError, renderAudio, withAudioUrl, type NarrationDeps } from './service';
 
 export const GetTransitionRequestSchema = z.object({
   fromPoiId: z.string().min(1).max(120),
   toPoiId: z.string().min(1).max(120),
-  lang: z.string().regex(/^[a-z]{2,3}$/),
+  lang: NarrationLangSchema,
   /** Rounded on the server so equal hops share one cache entry. */
   walkMinutes: z.number().min(1).max(240),
   tourTitle: z.string().max(200).optional(),
@@ -22,6 +28,10 @@ export const GetTransitionRequestSchema = z.object({
 
 /** Short optional hand-over between two stops (lite model, cached like narrations, spec 4.4.7). */
 export async function getTransition(deps: NarrationDeps, uid: string, raw: unknown) {
+  return withAudioUrl(deps.store, await getTransitionChecked(deps, uid, raw));
+}
+
+async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unknown) {
   const parsed = GetTransitionRequestSchema.safeParse(raw);
   if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
   const r = parsed.data;
@@ -72,7 +82,6 @@ export async function getTransition(deps: NarrationDeps, uid: string, raw: unkno
     from: from!.name,
     to: to!.name,
     walkMinutes: minutes,
-    ...(r.tourTitle ? { tourTitle: r.tourTitle } : {}),
   });
   await logUsage(
     deps.db,

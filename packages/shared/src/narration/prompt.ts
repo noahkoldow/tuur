@@ -31,6 +31,9 @@ export function paragraphCount(tier: LengthTier): number {
   return tier === 'short' ? 1 : tier === 'medium' ? 2 : 4;
 }
 
+export const NARRATION_LANGS = ['de', 'en', 'fr', 'es', 'it', 'ja', 'pt', 'nl'] as const;
+export type NarrationLang = (typeof NARRATION_LANGS)[number];
+
 const LANG_NAMES: Record<string, string> = {
   de: 'German',
   en: 'English',
