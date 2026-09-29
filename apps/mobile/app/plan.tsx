@@ -14,6 +14,7 @@ import { Text } from '../src/components/Text';
 import { TuurMap } from '../src/components/TuurMap';
 import { usePoiPool } from '../src/hooks/usePoiPool';
 import { startTourSession } from '../src/guide/session';
+import { roundPosition } from '../src/location/privacy';
 import { usePosition } from '../src/location/usePosition';
 import { useSettings } from '../src/state/settings';
 import { colors, radii } from '../src/theme';
@@ -67,7 +68,7 @@ export default function Plan() {
     try {
       const res = await backend.composePlannedRoute({
         stops: preview.stops.map((s) => s.id),
-        start: position,
+        start: roundPosition(position),
         ...(destination ? { end: destination.location } : {}),
         roundTrip: !destination,
         budgetMinutes: minutes,

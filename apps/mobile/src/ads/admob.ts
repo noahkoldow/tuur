@@ -28,7 +28,14 @@ export function createAdMobAds(): AdsProvider {
 
   const ensureInit = async () => {
     if (initialized) return;
-    await ads().default().initialize();
+    const { default: MobileAds, MaxAdContentRating } = ads();
+    // tuur is not directed at children: cap the content rating and do not treat requests as child-directed
+    await MobileAds().setRequestConfiguration({
+      maxAdContentRating: MaxAdContentRating.T,
+      tagForChildDirectedTreatment: false,
+      tagForUnderAgeOfConsent: false,
+    });
+    await MobileAds().initialize();
     initialized = true;
   };
 

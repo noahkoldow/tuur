@@ -113,6 +113,8 @@ export interface Backend {
   deleteAccount(): Promise<void>;
   /** GDPR: everything stored about the account as a JSON document. */
   exportMyData(): Promise<Record<string, unknown>>;
+  /** Records the express consent to immediate delivery (loss of the right of withdrawal) before a purchase. */
+  recordPurchaseConsent(productId: string): Promise<void>;
   demo?: DemoControls;
   getNarration(req: GetNarrationRequest): Promise<NarrationResponse>;
   getTransition(req: {

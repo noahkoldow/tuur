@@ -6,6 +6,9 @@ export interface Offer {
   kind: 'credit' | 'subscription';
   title: string;
   priceString: string;
+  /** Numeric price and ISO currency (for the per-month equivalent and the savings badge). */
+  price?: number;
+  currency?: string;
   /** Subscription period for the mandatory price disclosure. */
   period?: 'month' | 'year';
   credits?: number;

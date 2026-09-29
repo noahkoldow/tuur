@@ -34,6 +34,15 @@ for (const n of [
 need('EXPO_PUBLIC_MAP_STYLE_URL', 'map style (https://<web>/map-style.json)');
 need('EXPO_PUBLIC_WEB_BASE_URL', 'links to legal pages and invites');
 
+// server-side data sources: a real contact in the User-Agent and no public endpoints for production traffic
+need('TUUR_USER_AGENT', 'User-Agent with a contact for Nominatim/Overpass/Wikimedia (usage policies)');
+if ((env.OVERPASS_ENDPOINT ?? 'https://overpass-api.de/api/interpreter').includes('overpass-api.de'))
+  problems.push('OVERPASS_ENDPOINT points at the public Overpass instance (not for production traffic)');
+if (!env.NOMINATIM_ENDPOINT || env.NOMINATIM_ENDPOINT.includes('nominatim.openstreetmap.org'))
+  problems.push(
+    'NOMINATIM_ENDPOINT must be your own or a paid instance (public Nominatim is not for production traffic)',
+  );
+
 // web
 need('NEXT_PUBLIC_FIREBASE_API_KEY', 'web Firebase config');
 need('NEXT_PUBLIC_FIREBASE_PROJECT_ID', 'web Firebase config');

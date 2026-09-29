@@ -42,9 +42,19 @@ export function createRevenueCatBilling(): BillingProvider {
                 kind: 'subscription',
                 title: p.title,
                 priceString: p.priceString,
+                price: p.price,
+                currency: p.currencyCode,
                 period: id === 'tuur_sub_yearly' ? 'year' : 'month',
               }
-            : { id, kind: 'credit', title: p.title, priceString: p.priceString, credits },
+            : {
+                id,
+                kind: 'credit',
+                title: p.title,
+                priceString: p.priceString,
+                price: p.price,
+                currency: p.currencyCode,
+                credits,
+              },
         ];
       });
     },

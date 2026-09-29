@@ -26,7 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSLocationWhenInUseUsageDescription:
         'tuur uses your location on your device to tell you the right story when you arrive at a place.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
-        'tuur keeps your audio tour going while the screen is off. Your exact position never leaves your device.',
+        'tuur keeps your audio tour going while the screen is off. Your position is processed on your device; only a coarse map square is sent to our servers.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -97,6 +97,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         // Google's public test app IDs are the default; real IDs come from the environment at build time.
         androidAppId: process.env.ADMOB_ANDROID_APP_ID ?? 'ca-app-pub-3940256099942544~3347511713',
         iosAppId: process.env.ADMOB_IOS_APP_ID ?? 'ca-app-pub-3940256099942544~1458002511',
+        // the SDK must not start (and measure) before the UMP consent flow has run
+        delayAppMeasurementInit: true,
         userTrackingUsageDescription:
           'tuur uses this identifier to show ads that fit you. You can also use tuur with non-personalized ads.',
       },

@@ -139,11 +139,14 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
     entitlements: await list(db.collection('users').doc(uid).collection('entitlements')),
     wallet: (await db.collection('users').doc(uid).collection('credits').doc('wallet').get()).data() ?? null,
     creditLedger: await list(db.collection('users').doc(uid).collection('creditLedger')),
+    consents: await list(db.collection('users').doc(uid).collection('consents')),
     plannedRoutes: (await list(db.collection('users').doc(uid).collection('sessions'))).map((s) => ({
       id: s.id,
       kind: (s as Record<string, unknown>)['kind'],
       expiresAt: (s as Record<string, unknown>)['expiresAt'],
       placeName: (s as Record<string, unknown>)['placeName'],
+      // the stored route path (start/end of a planned route are part of it)
+      path: (s as Record<string, unknown>)['path'],
     })),
     // invite tokens are stored hashed; only the metadata of your invites is exported
     invitesCreated: invites.map((i) => {

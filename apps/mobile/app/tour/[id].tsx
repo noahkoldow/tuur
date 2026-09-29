@@ -7,6 +7,7 @@ import type { Tour } from '@tuur/shared';
 import { BackendError, useBackend } from '../../src/backend';
 import { canStartTour, useEntitlementStore } from '../../src/billing/entitlements';
 import { config } from '../../src/config';
+import { ImageCredit } from '../../src/components/ImageCredit';
 import { AiBadge } from '../../src/components/AiBadge';
 import { Banner } from '../../src/components/Banner';
 import { Button, IconButton, Row } from '../../src/components/Button';
@@ -187,12 +188,7 @@ export default function TourDetail() {
               contentFit="cover"
               accessibilityIgnoresInvertColors
             />
-            <Text variant="caption" style={{ padding: 8 }}>
-              {t('player.imageBy', {
-                author: tour.coverImage.author ?? 'Wikimedia Commons',
-                license: tour.coverImage.license,
-              })}
-            </Text>
+            <ImageCredit image={tour.coverImage} style={{ padding: 8 }} />
           </View>
         ) : null}
       </ScrollView>

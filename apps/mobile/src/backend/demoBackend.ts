@@ -518,6 +518,9 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       emitEnts();
       setUser(null);
     },
+    async recordPurchaseConsent() {
+      await sleep(0);
+    },
     async exportMyData() {
       return {
         generatedAt: Date.now(),

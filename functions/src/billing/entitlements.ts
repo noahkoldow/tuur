@@ -457,3 +457,26 @@ export async function grantRewardFromSsv(
     return { granted: true };
   });
 }
+
+/**
+ * Proof of the express consent required by Sec. 356(5) German Civil Code: the app calls this before it opens the store
+ * purchase sheet; the record (who, what, when, which wording) lives in the account and is part of the data export.
+ */
+export async function recordWithdrawalConsent(deps: BillingDeps, uid: string, raw: unknown) {
+  const p = z
+    .object({ productId: z.string().min(1).max(80), textVersion: z.string().min(1).max(40) })
+    .safeParse(raw);
+  if (!p.success) throw new BillingError('invalid-argument', 'Invalid request');
+  const now = deps.now();
+  await deps.db
+    .collection('users')
+    .doc(uid)
+    .collection('consents')
+    .add({
+      kind: 'withdrawal_waiver',
+      productId: p.data.productId,
+      textVersion: p.data.textVersion,
+      ts: now,
+    });
+  return { recordedAt: now };
+}

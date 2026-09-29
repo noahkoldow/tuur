@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { Linking, Platform, ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { Checkbox } from '../src/components/Checkbox';
+import { yearlyValue } from '../src/billing/pricing';
 import { useBackend, BackendError } from '../src/backend';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
@@ -32,7 +34,7 @@ type Params = {
  */
 export default function Paywall() {
   const { kind = 'tour', tourId, placeId, mode = 'planned' } = useLocalSearchParams<Params>();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
   const ent = useEntitlementStore();
@@ -40,6 +42,7 @@ export default function Paywall() {
   const [busy, setBusy] = useState<string | undefined>();
   const [message, setMessage] = useState<{ text: string; tone: 'info' | 'warning' | 'error' } | undefined>();
   const [waitingReward, setWaitingReward] = useState(false);
+  const [consent, setConsent] = useState(false);
 
   const unlocked =
     kind === 'tour' && tourId ? canStartTour(ent, tourId, false) : canUseSession(ent, mode, placeId);
@@ -86,6 +89,9 @@ export default function Paywall() {
 
   const buy = (o: Offer) =>
     run(o.id, async () => {
+      if (!consent) return setMessage({ text: t('paywall.consentNeeded'), tone: 'warning' });
+      // express consent to immediate delivery is recorded server-side before the store sheet opens (Sec. 356(5) BGB)
+      await backend.recordPurchaseConsent(o.id);
       const r = await getBilling().purchase(o.id);
       if (r === 'purchased') setMessage({ text: t('paywall.purchasePending'), tone: 'info' });
     });
@@ -120,7 +126,17 @@ export default function Paywall() {
 
   const credits = offers.filter((o) => o.kind === 'credit');
   const subs = offers.filter((o) => o.kind === 'subscription');
+  const monthly = subs.find((o) => o.period === 'month');
+  const yearly = subs.find((o) => o.period === 'year');
+  const value = yearlyValue(monthly, yearly, i18n.language);
   const open = (doc: string) => void Linking.openURL(`${config.legal.webBaseUrl}/legal/${doc}`);
+  const manageSubs = () =>
+    void Linking.openURL(
+      Platform.OS === 'ios'
+        ? 'https://apps.apple.com/account/subscriptions'
+        : 'https://play.google.com/store/account/subscriptions',
+    );
+  const canBuy = consent;
 
   return (
     <Screen padded={false}>
@@ -135,7 +151,6 @@ export default function Paywall() {
           {kind === 'tour' ? t('paywall.subtitleTour') : t('paywall.subtitleSession')}
         </Text>
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
-        <Text variant="caption">{t('paywall.withdrawal')}</Text>
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
 
         {total > 0 ? (
@@ -152,11 +167,15 @@ export default function Paywall() {
           </Card>
         ) : null}
 
+        <Checkbox checked={consent} onChange={setConsent} label={t('paywall.withdrawal')} />
+
         <Card>
           {credits.map((o) => (
             <Button
               key={o.id}
-              variant={total > 0 ? 'secondary' : 'primary'}
+              // one red primary on the screen: the single credit; everything else is an outline button
+              variant={o.credits === 5 || total > 0 ? 'secondary' : 'primary'}
+              disabled={!canBuy}
               label={`${o.credits === 5 ? t('paywall.buyCredits5') : t('paywall.buyCredit')} · ${o.priceString}`}
               loading={busy === o.id}
               onPress={() => void buy(o)}
@@ -168,18 +187,33 @@ export default function Paywall() {
         {subs.length ? (
           <Card>
             <Text variant="heading">{t('paywall.subscribe')}</Text>
-            {subs.map((o) => (
-              <Button
-                key={o.id}
-                variant="secondary"
-                label={t(o.period === 'year' ? 'paywall.subYearly' : 'paywall.subMonthly', {
-                  price: o.priceString,
-                })}
-                loading={busy === o.id}
-                onPress={() => void buy(o)}
-              />
-            ))}
+            {[yearly, monthly]
+              .flatMap((o) => (o ? [o] : []))
+              .map((o) => (
+                <View key={o.id} style={{ gap: 4 }}>
+                  {o.period === 'year' ? (
+                    <Text variant="label" color={colors.brand.redPressed}>
+                      {value && value.savedPercent > 0
+                        ? `${t('paywall.recommended')} · ${t('paywall.saveBadge', { percent: value.savedPercent })}`
+                        : t('paywall.recommended')}
+                    </Text>
+                  ) : null}
+                  <Button
+                    variant="secondary"
+                    disabled={!canBuy}
+                    label={t(o.period === 'year' ? 'paywall.subYearly' : 'paywall.subMonthly', {
+                      price: o.priceString,
+                    })}
+                    loading={busy === o.id}
+                    onPress={() => void buy(o)}
+                  />
+                  {o.period === 'year' && value ? (
+                    <Text variant="caption">{t('paywall.perMonth', { price: value.perMonthString })}</Text>
+                  ) : null}
+                </View>
+              ))}
             <Text variant="caption">{t('paywall.subDisclosure')}</Text>
+            <Button variant="ghost" label={t('paywall.manageSubs')} onPress={manageSubs} />
           </Card>
         ) : null}
 

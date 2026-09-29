@@ -40,7 +40,7 @@ export const en: Widen<typeof de> = {
     interestsHint: 'Optional. Without a choice you get a balanced mix.',
     permissionsTitle: 'Location for your tour',
     permissionsBody:
-      'tuur uses your location on your device to tell the right story exactly when you arrive at a place. Our servers only ever receive a coarse map square, never your exact position.',
+      'tuur uses your location on your device to tell the right story exactly when you arrive at a place. For content only a coarse map square is sent to our servers. Only for a planned route or when redeeming a partner offer is a position sent once.',
     permissionsBackground:
       'To keep the tour going while the screen is off we need “Always allow”. We only ask when you start a tour.',
     allowLocation: 'Allow location',
@@ -118,6 +118,7 @@ export const en: Widen<typeof de> = {
     simulateJump: 'Simulation: jump 120 m',
     simulateWalk: 'Simulate a walk',
     stopSimulation: 'Stop simulation',
+    imageSource: 'Source',
     imageBy: 'Image: {{author}}, {{license}}',
     exit: 'End tour',
     exitConfirm: 'Really end the tour?',
@@ -225,7 +226,12 @@ export const en: Widen<typeof de> = {
     failed: 'That did not work. Please try again later.',
     insufficient: 'Your credits are not enough for this.',
     withdrawal:
-      'By purchasing you agree that delivery starts immediately and confirm that you thereby lose your right of withdrawal for digital content (Sec. 356(5) German Civil Code).',
+      'I expressly agree that tuur starts delivery before the withdrawal period ends and confirm that I thereby lose my right of withdrawal for digital content (Sec. 356(5) German Civil Code).',
+    consentNeeded: 'Please tick the checkbox about the right of withdrawal first.',
+    recommended: 'Popular',
+    saveBadge: 'Save {{percent}}%',
+    perMonth: 'equals {{price}} per month',
+    manageSubs: 'Manage subscription in the store',
     terms: 'Terms',
     privacy: 'Privacy',
     close: 'Close',

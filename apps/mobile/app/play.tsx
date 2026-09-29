@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
 import type { PublicOffer } from '@tuur/shared';
+import { ImageCredit } from '../src/components/ImageCredit';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
@@ -290,12 +291,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
                       accessibilityIgnoresInvertColors
                       accessibilityLabel={n.title}
                     />
-                    <Text variant="caption" style={{ marginTop: 4 }}>
-                      {t('player.imageBy', {
-                        author: item.author ?? 'Wikimedia Commons',
-                        license: item.license,
-                      })}
-                    </Text>
+                    <ImageCredit image={item} style={{ marginTop: 4 }} />
                   </View>
                 )}
               />

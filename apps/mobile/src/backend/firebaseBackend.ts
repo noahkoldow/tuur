@@ -40,6 +40,7 @@ import {
   type Poi,
   type Tour,
   EntitlementSchema,
+  LEGAL_VERSION,
   type Entitlement,
   type Wallet,
 } from '@tuur/shared';
@@ -283,6 +284,9 @@ export function createFirebaseBackend(): Backend {
       await signOut(auth).catch(() => undefined);
     },
     exportMyData: () => call('exportMyData', {}),
+    async recordPurchaseConsent(productId) {
+      await call('recordPurchaseConsent', { productId, textVersion: LEGAL_VERSION });
+    },
     getOffers: (poiIds) => call('getOffers', { poiIds }),
     async recordPartnerEvent(poiId, type) {
       await call('recordPartnerEvent', { poiId, type }).catch(() => undefined);

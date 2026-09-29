@@ -68,6 +68,7 @@ import {
   grantRewardFromSsv,
   previewInvite,
   processRevenueCatEvent,
+  recordWithdrawalConsent as runRecordConsent,
   redeemInvite as runRedeemInvite,
   spendCredit as runSpendCredit,
   verifyBearer,
@@ -267,6 +268,15 @@ export const spendCredit = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   try {
     return await runSpendCredit({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const recordPurchaseConsent = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runRecordConsent({ db: db(), now: Date.now }, request.auth.uid, request.data);
   } catch (e) {
     return toBilling(e);
   }

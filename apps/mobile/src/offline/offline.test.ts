@@ -162,6 +162,7 @@ describe('offline downloads', () => {
       createRewardNonce: dead,
       deleteAccount: dead,
       exportMyData: dead,
+      recordPurchaseConsent: dead,
       getOffers: dead,
       recordPartnerEvent: dead,
       createRedemptionToken: dead,

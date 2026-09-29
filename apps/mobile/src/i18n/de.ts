@@ -36,7 +36,7 @@ export const de = {
     interestsHint: 'Optional. Ohne Auswahl gibt es einen ausgewogenen Mix.',
     permissionsTitle: 'Standort für deine Führung',
     permissionsBody:
-      'tuur nutzt deinen Standort auf dem Gerät, um passende Geschichten genau dann zu erzählen, wenn du an einem Ort ankommst. An unsere Server geht nur ein grobes Kartenquadrat, nie deine genaue Position.',
+      'tuur nutzt deinen Standort auf dem Gerät, um passende Geschichten genau dann zu erzählen, wenn du an einem Ort ankommst. Für die Inhalte geht nur ein grobes Kartenquadrat an unsere Server. Nur bei einer geplanten Route oder beim Einlösen eines Partnerangebots wird einmalig eine Position übermittelt.',
     permissionsBackground:
       'Damit die Führung auch bei ausgeschaltetem Bildschirm weiterläuft, brauchen wir „Immer erlauben“. Das fragen wir erst, wenn du eine Tour startest.',
     allowLocation: 'Standort erlauben',
@@ -115,6 +115,7 @@ export const de = {
     simulateWalk: 'Spaziergang simulieren',
     stopSimulation: 'Simulation beenden',
     imageBy: 'Bild: {{author}}, {{license}}',
+    imageSource: 'Quelle',
     exit: 'Tour beenden',
     exitConfirm: 'Tour wirklich beenden?',
     unavailable: 'Für diese Station gibt es gerade keine Erzählung.',
@@ -224,7 +225,12 @@ export const de = {
     failed: 'Das hat nicht geklappt. Bitte später erneut versuchen.',
     insufficient: 'Dafür reicht dein Guthaben nicht.',
     withdrawal:
-      'Mit dem Kauf stimmst du zu, dass die Bereitstellung sofort beginnt, und bestätigst, dass du dadurch dein Widerrufsrecht für digitale Inhalte verlierst (§ 356 Abs. 5 BGB).',
+      'Ich stimme ausdrücklich zu, dass tuur vor Ablauf der Widerrufsfrist mit der Bereitstellung beginnt, und bestätige, dass ich damit mein Widerrufsrecht für digitale Inhalte verliere (§ 356 Abs. 5 BGB).',
+    consentNeeded: 'Bitte bestätige zuerst das Kontrollkästchen zum Widerrufsrecht.',
+    recommended: 'Beliebt',
+    saveBadge: 'Spare {{percent}} %',
+    perMonth: 'entspricht {{price}} pro Monat',
+    manageSubs: 'Abo im Store verwalten',
     terms: 'AGB',
     privacy: 'Datenschutz',
     close: 'Schließen',
