@@ -63,7 +63,7 @@ export const berlin: RegionFixture = {
   center: { lat: 52.5163, lng: 13.3777 },
   countryCode: 'DE',
   expectedStatus: 'ready',
-  expectedMerged: { min: 14, max: 18 },
+  expectedMerged: { min: 20, max: 26 },
   raw: [
     // Brandenburger Tor in all three sources (must merge into one)
     osm(
@@ -118,6 +118,33 @@ export const berlin: RegionFixture = {
     osm('node/14', 'Kleiner Aussichtspunkt', 52.515, 13.399, { tourism: 'viewpoint' }),
     osm('way/15', 'Alte Kaserne (gesperrt)', 52.512, 13.38, { historic: 'building', access: 'private' }),
     wd('Q9999', 'Kaiser-Friedrich-Denkmal', 52.5193, 13.399, 12, ['monument']),
+    // Unter den Linden axis between Brandenburg Gate and Museum Island
+    osm('way/16', 'Neue Wache', 52.51757, 13.39449, { historic: 'memorial', tourism: 'attraction' }),
+    wd('Q568432', 'Neue Wache', 52.51757, 13.39449, 22, ['memorial']),
+    osm('way/17', 'Bebelplatz', 52.51629, 13.39289, { tourism: 'attraction', historic: 'memorial' }),
+    wp('de', 'Bebelplatz', 52.51629, 13.39289, 22000),
+    osm('way/18', 'Staatsoper Unter den Linden', 52.51672, 13.39482, {
+      amenity: 'theatre',
+      building: 'theatre',
+    }),
+    wd('Q166492', 'Berlin State Opera', 52.51672, 13.39482, 35, ['opera house']),
+    osm(
+      'way/19',
+      'Humboldt Forum',
+      52.51728,
+      13.39969,
+      { tourism: 'museum', wikidata: 'Q116336' },
+      { wikidataId: 'Q116336' },
+    ),
+    wd('Q116336', 'Humboldt Forum', 52.51728, 13.39969, 30, ['museum']),
+    osm('way/20', 'Zeughaus', 52.51748, 13.39647, { tourism: 'museum', historic: 'building' }),
+    wd('Q161080', 'Zeughaus', 52.51748, 13.39647, 28, ['museum', 'armory']),
+    osm('node/21', 'Friedrichswerdersche Kirche', 52.51547, 13.39724, {
+      amenity: 'place_of_worship',
+      building: 'church',
+      historic: 'church',
+    }),
+    wd('Q546510', 'Friedrichswerder Church', 52.51547, 13.39724, 14, ['church building']),
   ],
 };
 
@@ -176,7 +203,7 @@ export const kyoto: RegionFixture = {
   center: { lat: 35.0037, lng: 135.7788 },
   countryCode: 'JP',
   expectedStatus: 'ready',
-  expectedMerged: { min: 8, max: 10 },
+  expectedMerged: { min: 12, max: 14 },
   raw: [
     osm(
       'way/301',
@@ -228,6 +255,43 @@ export const kyoto: RegionFixture = {
       { names: { en: 'Kyoto City Museum of Art' } },
     ),
     osm('node/308', '居酒屋 花', 35.0041, 135.7751, { amenity: 'bar' }),
+    osm(
+      'way/309',
+      '二寧坂',
+      35.00042,
+      135.78113,
+      { tourism: 'attraction', historic: 'district' },
+      { names: { en: 'Ninenzaka' } },
+    ),
+    wp('en', 'Ninenzaka', 35.00042, 135.78113, 9000),
+    osm(
+      'way/310',
+      '高台寺',
+      34.99955,
+      135.78095,
+      { amenity: 'place_of_worship', religion: 'buddhist', tourism: 'attraction' },
+      { names: { en: 'Kodai-ji' } },
+    ),
+    wp('ja', '高台寺', 34.99955, 135.78095, 30000),
+    wd('Q1189396', 'Kōdai-ji', 34.9995, 135.781, 20, ['Buddhist temple']),
+    osm(
+      'way/311',
+      '法観寺 八坂の塔',
+      34.99873,
+      135.77879,
+      { amenity: 'place_of_worship', tourism: 'attraction', historic: 'pagoda' },
+      { names: { en: 'Yasaka Pagoda' } },
+    ),
+    wp('en', 'Hōkan-ji', 34.99873, 135.77879, 12000),
+    osm(
+      'way/312',
+      '知恩院',
+      35.00597,
+      135.78277,
+      { amenity: 'place_of_worship', religion: 'buddhist', tourism: 'attraction', heritage: '1' },
+      { names: { en: 'Chion-in' } },
+    ),
+    wp('ja', '知恩院', 35.00597, 135.78277, 60000),
   ],
 };
 

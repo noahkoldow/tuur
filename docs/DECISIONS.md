@@ -77,3 +77,19 @@ Three layers before anything is stored: (1) prompt rules, (2) deterministic guar
 ## D19 – Cost protection
 
 Cache hits are always free and unthrottled. Generation is gated by per-user and per-area hourly rate limits, a global and per-area daily budget from `usageDaily`/`usageDailyAreas` aggregates, a kill switch in `config/ai`, and single-flight locks (`narrationLocks`) with a post-lock cache re-check. `usageLogs` contain no user identifiers (privacy).
+
+## D20 – Tours are open paths, not loops
+
+Tour durations count walking plus visit time from the first stop to the last (no forced return). The optimizer still runs on a depot model: the start POI (densest cluster of high scores, never a long-visit museum) is forced as first stop; the end node has zero cost. `roundTrip: true` is supported for loops.
+
+## D21 – Tour paths as encoded polyline
+
+Firestore forbids nested arrays, so `tours.path` is an encoded polyline string (precision 5, <= 400 points). Clients decode with `decodePolyline` from `@tuur/shared`.
+
+## D22 – Tour text and order suggestions
+
+The model receives only names, categories and walking times (spoken names without bracketed disambiguation, sanitized against prompt injection) and is forbidden to add facts; story content comes from fact-checked stop narrations. Invalid or markup-laden output falls back to deterministic fact-free texts. A suggested order is accepted only if it is a permutation, all legs are <= 15 min, total time stays within budget and walking time is <= 115% + 1 min of the optimizer's route.
+
+## D23 – Routing fallback
+
+Routing calls go through a Firestore cache (30 days). If the upstream service fails the tour is planned with offline estimates and flagged `routingSource: approx`; approx tours count as stale and are re-planned on the next request.

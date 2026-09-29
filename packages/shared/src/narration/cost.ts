@@ -7,6 +7,7 @@ export interface Usage {
   liteOutputTokens?: number;
   ttsChars?: number;
   groundingQueries?: number;
+  routingCalls?: number;
 }
 
 /** Estimated USD cost of one operation from config prices (used for `usageLogs` and budgets). */
@@ -17,7 +18,8 @@ export function estimateCostUsd(u: Usage, p: AiConfig['pricing']): number {
     ((u.liteInputTokens ?? 0) / 1e6) * p.liteInputPerMTokUsd +
     ((u.liteOutputTokens ?? 0) / 1e6) * p.liteOutputPerMTokUsd +
     ((u.ttsChars ?? 0) / 1e6) * p.ttsPerMCharsUsd +
-    ((u.groundingQueries ?? 0) / 1000) * p.groundingPer1kQueriesUsd;
+    ((u.groundingQueries ?? 0) / 1000) * p.groundingPer1kQueriesUsd +
+    ((u.routingCalls ?? 0) / 1000) * p.routingPer1kCallsUsd;
   return Math.round(c * 1e6) / 1e6;
 }
 

@@ -6,7 +6,8 @@ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { EnsureAreaRequestSchema, rateLimitDecision } from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
-import { GEMINI_API_KEY, db, geocoder, llm, narrationDeps, poiSources } from './config';
+import { GEMINI_API_KEY, ORS_API_KEY, db, geocoder, llm, narrationDeps, poiSources, routing } from './config';
+import { generateAutoTours as runGenerateTours, TourError } from './tours/service';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
 import { loadAiConfig } from './util/aiConfig';
@@ -125,3 +126,41 @@ export const reportNarration = onCall({ enforceAppCheck }, async (request) => {
     throw e;
   }
 });
+
+const GenerateToursSchema = z.object({
+  /** Client sends the geohash tile only (privacy, D10). */
+  tile: z.string().regex(/^[0-9bcdefghjkmnpqrstuvwxyz]{4,8}$/),
+  lang: z.string().regex(/^[a-z]{2,3}$/),
+  profile: z.enum(['foot-walking', 'cycling-regular']).optional(),
+});
+
+export const generateAutoTours = onCall(
+  { enforceAppCheck, secrets: [GEMINI_API_KEY, ORS_API_KEY], timeoutSeconds: 300, memory: '1GiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    const p = GenerateToursSchema.safeParse(request.data);
+    if (!p.success) throw new HttpsError('invalid-argument', 'Invalid request');
+    const nd = narrationDeps();
+    try {
+      return await runGenerateTours(
+        {
+          db: db(),
+          llm: llm(),
+          routing: routing(),
+          now: Date.now,
+          pregenerate: async (ids, lang) => {
+            for (const poiId of ids)
+              await runGetNarration(nd, 'system-pregen', { poiId, lang, lengthTier: 'medium' }).catch(
+                () => undefined,
+              );
+          },
+        },
+        request.auth.uid,
+        p.data,
+      );
+    } catch (e) {
+      if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
+      throw e;
+    }
+  },
+);

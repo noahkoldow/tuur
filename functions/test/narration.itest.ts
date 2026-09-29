@@ -46,6 +46,7 @@ class CountingLlm implements LlmProvider {
     this.calls.facts++;
     return this.inner.checkFacts(r);
   }
+  generateTourConcept: LlmProvider['generateTourConcept'] = (r) => this.inner.generateTourConcept(r);
   async transition(r: Parameters<LlmProvider['transition']>[0]) {
     this.calls.transition++;
     return this.inner.transition(r);

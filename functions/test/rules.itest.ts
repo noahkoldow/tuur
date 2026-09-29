@@ -30,6 +30,8 @@ beforeEach(async () => {
     await setDoc(doc(db, 'pois/a'), { hidden: false, name: 'A' });
     await setDoc(doc(db, 'pois/h'), { hidden: true, name: 'H' });
     await setDoc(doc(db, 'areas/u33dc0'), { status: 'ready' });
+    await setDoc(doc(db, 'tours/t1'), { locked: false });
+    await setDoc(doc(db, 'tours/t2'), { locked: true });
     await setDoc(doc(db, 'users/alice/entitlements/sub'), { active: true });
     await setDoc(doc(db, 'config/public'), { x: 1 });
     await setDoc(doc(db, 'config/ai'), { dailyBudgetUsd: 1 });
@@ -72,6 +74,15 @@ describe('firestore rules', () => {
     await assertFails(setDoc(doc(alice(), 'users/alice'), { language: 'de', admin: true }));
     await assertFails(setDoc(doc(alice(), 'users/alice'), { language: 'xx' }));
     await assertFails(deleteDoc(doc(alice(), 'users/alice')));
+  });
+
+  it('tours: signed-in read of unlocked tours only, never client-writable', async () => {
+    await assertSucceeds(getDoc(doc(alice(), 'tours/t1')));
+    await assertFails(getDoc(doc(alice(), 'tours/t2')));
+    await assertSucceeds(getDoc(doc(admin(), 'tours/t2')));
+    await assertFails(getDoc(doc(anon(), 'tours/t1')));
+    await assertFails(setDoc(doc(alice(), 'tours/t3'), { locked: false }));
+    await assertFails(updateDoc(doc(admin(), 'tours/t1'), { locked: true }));
   });
 
   it('only the public config doc is client-readable', async () => {

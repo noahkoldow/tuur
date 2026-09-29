@@ -29,6 +29,7 @@ export const AiConfigSchema = z.object({
     liteOutputPerMTokUsd: z.number().nonnegative(),
     ttsPerMCharsUsd: z.number().nonnegative(),
     groundingPer1kQueriesUsd: z.number().nonnegative(),
+    routingPer1kCallsUsd: z.number().nonnegative().default(0),
   }),
   rateLimits: z.object({
     perUserPerHour: z.number().int().positive(),
@@ -57,6 +58,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     liteOutputPerMTokUsd: 0.4,
     ttsPerMCharsUsd: 10,
     groundingPer1kQueriesUsd: 35,
+    routingPer1kCallsUsd: 0.5,
   },
   rateLimits: { perUserPerHour: 60, perAreaPerHour: 600 },
 };

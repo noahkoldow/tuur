@@ -1,5 +1,9 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  spokenName,
+  TourConceptSchema,
+  type TourConcept,
+  type TourConceptInput,
   NarrationOutputSchema,
   splitParagraphs,
   paragraphCount,
@@ -54,6 +58,13 @@ export interface LlmProvider {
     walkMinutes: number;
     tourTitle?: string;
   }): Promise<{ text: string; usage: Usage }>;
+  /** Narrative thread for a tour (title, teaser, intro, hand-overs, outro) from route + names (spec 4.3). */
+  generateTourConcept(req: {
+    model: string;
+    system: string;
+    user: string;
+    input: TourConceptInput;
+  }): Promise<{ output: TourConcept; usage: Usage }>;
 }
 
 const NARRATION_SCHEMA = {
@@ -207,6 +218,43 @@ export class GeminiLlmProvider implements LlmProvider {
     return { interests, usage: this.usage(res, true) };
   }
 
+  async generateTourConcept(req: { model: string; system: string; user: string; input: TourConceptInput }) {
+    const res = await this.ai.models.generateContent({
+      model: req.model,
+      contents: req.user,
+      config: {
+        systemInstruction: req.system,
+        temperature: 0.7,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            teaser: { type: Type.STRING },
+            description: { type: Type.STRING },
+            intro: { type: Type.STRING },
+            transitions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  fromPoiId: { type: Type.STRING },
+                  toPoiId: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                },
+                required: ['fromPoiId', 'toPoiId', 'text'],
+              },
+            },
+            outro: { type: Type.STRING },
+            suggestedOrder: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['title', 'teaser', 'description', 'intro', 'transitions', 'outro'],
+        },
+      },
+    });
+    return { output: TourConceptSchema.parse(parseJson(res.text)), usage: this.usage(res, false) };
+  }
+
   async transition(req: {
     model: string;
     lang: string;
@@ -277,10 +325,58 @@ export class MockLlmProvider implements LlmProvider {
     };
   }
 
+  async generateTourConcept(req: { input: TourConceptInput }) {
+    return { output: fallbackTourConcept(req.input), usage: { inputTokens: 200, outputTokens: 200 } };
+  }
+
   async transition(req: { from: string; to: string; walkMinutes: number }) {
     return {
       text: `Weiter geht es von ${req.from} zu ${req.to}, ungefähr ${req.walkMinutes} Minuten zu Fuß.`,
       usage: { liteInputTokens: 20, liteOutputTokens: 20 },
     };
   }
+}
+
+const TEMPLATE_TITLES: Record<string, { de: string; en: string }> = {
+  highlights60: { de: 'Highlights in 60 Minuten', en: 'Highlights in 60 minutes' },
+  grand120: { de: 'Große Runde in 2 Stunden', en: 'Grand tour in 2 hours' },
+  theme_history: { de: 'Geschichte erleben', en: 'Living history' },
+  theme_architecture: { de: 'Architektur entdecken', en: 'Discover the architecture' },
+  theme_art_culture: { de: 'Kunst und Kultur', en: 'Art and culture' },
+  theme_culinary: { de: 'Kulinarischer Streifzug', en: 'Culinary stroll' },
+  theme_nature: { de: 'Natur und Aussicht', en: 'Nature and views' },
+};
+
+/**
+ * Deterministic, fact-free tour texts built from names and walking times only. Used by the mock provider and
+ * as a safe fallback when the model output fails validation.
+ */
+export function fallbackTourConcept(i: TourConceptInput): TourConcept {
+  const de = i.lang === 'de';
+  const t = TEMPLATE_TITLES[i.templateId];
+  const title = t ? (de ? t.de : t.en) : de ? `Tour durch ${i.placeName}` : `Tour of ${i.placeName}`;
+  const first = spokenName(i.stops[0]?.name ?? i.placeName);
+  const last = spokenName(i.stops[i.stops.length - 1]?.name ?? i.placeName);
+  return {
+    title,
+    teaser: de
+      ? `${i.stops.length} Stationen in etwa ${i.durationMinutes} Minuten.`
+      : `${i.stops.length} stops in about ${i.durationMinutes} minutes.`,
+    description: de
+      ? `Diese Tour führt Sie von ${first} bis ${last}. Unterwegs erzählt tuur an jeder Station eine eigene Geschichte.`
+      : `This tour leads you from ${first} to ${last}. Along the way tuur tells a story at every stop.`,
+    intro: de
+      ? `Willkommen in ${i.placeName}. Wir starten bei ${first}.`
+      : `Welcome to ${i.placeName}. We start at ${first}.`,
+    transitions: i.stops.slice(1).map((s, n) => ({
+      fromPoiId: i.stops[n]!.id,
+      toPoiId: s.id,
+      text: de
+        ? `Weiter geht es zu ${spokenName(s.name)}, etwa ${Math.max(1, Math.round(s.walkMinutesFromPrev))} Minuten zu Fuß.`
+        : `Next is ${spokenName(s.name)}, about ${Math.max(1, Math.round(s.walkMinutesFromPrev))} minutes on foot.`,
+    })),
+    outro: de
+      ? `Das war unsere Tour. Danke, dass Sie mit tuur unterwegs waren.`
+      : `That was our tour. Thank you for exploring with tuur.`,
+  };
 }

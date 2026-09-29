@@ -15,6 +15,11 @@ service cloud.firestore {
       allow read: if signedIn() && (resource.data.hidden == false || isAdmin());
     }
 
+    // Tours are readable while not locked by an admin (geometry and texts only; content access is checked in getNarration).
+    match /tours/{id} {
+      allow read: if signedIn() && (resource.data.locked == false || isAdmin());
+    }
+
     // Only the `public` config doc (feature flags, non-sensitive limits) is client-readable.
     match /config/{doc} {
       allow read: if signedIn() && (doc == 'public' || isAdmin());

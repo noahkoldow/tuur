@@ -16,9 +16,12 @@ import {
   MockNarrationSources,
   type NarrationSourceProvider,
 } from './providers/narrationSources';
+import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from './providers/routing';
 import type { NarrationDeps, ObjectStore } from './narration/service';
 
 export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+export const ORS_API_KEY = defineSecret('ORS_API_KEY');
+const ROUTING_PROVIDER = defineString('TUUR_ROUTING_PROVIDER', { default: 'mock' });
 const LLM_PROVIDER = defineString('TUUR_LLM_PROVIDER', { default: 'mock' });
 const TTS_PROVIDER = defineString('TUUR_TTS_PROVIDER', { default: 'mock' });
 const POI_PROVIDER = defineString('TUUR_POI_PROVIDER', { default: 'mock' });
@@ -77,4 +80,10 @@ export function narrationDeps(): NarrationDeps {
     store: objectStore(),
     now: Date.now,
   };
+}
+
+export function routing(): RoutingProvider {
+  return ROUTING_PROVIDER.value() === 'openrouteservice'
+    ? new OrsRoutingProvider(ORS_API_KEY.value())
+    : new MockRoutingProvider();
 }

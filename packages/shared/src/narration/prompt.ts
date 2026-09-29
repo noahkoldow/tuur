@@ -85,7 +85,7 @@ export function userPrompt(i: NarrationPromptInput): string {
       .map(([k, v]) => `- ${k}=${v}`)
       .join('\n') || '(none)';
   const admin = i.bundle.adminFacts.map((f) => `- ${f}`).join('\n') || '(none)';
-  return `Place: ${i.bundle.poiName}
+  return `Place: ${sanitizeForPrompt(i.bundle.poiName)}
 Language of the narration: ${languageName(i.lang)}
 Length: about ${target} ${unit} in exactly ${paras} paragraph${paras > 1 ? 's' : ''}.
 Listener's main interest: ${i.interest ?? 'balanced mix'}. Emphasize matching aspects if the sources contain any.
@@ -115,4 +115,24 @@ export function splitParagraphs(text: string, n: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < sentences.length; i += per) out.push(sentences.slice(i, i + per).join(' '));
   return out;
+}
+
+/**
+ * OSM/Wikipedia text is user-editable and therefore untrusted: strip control characters and line breaks,
+ * collapse whitespace and cap the length before it enters a prompt (prompt-injection hygiene).
+ */
+export function sanitizeForPrompt(s: string, max = 120): string {
+  return (
+    s
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, max)
+  );
+}
+
+/** Spoken form of a place name: prompt-safe and without bracketed disambiguation like "(Rothenburg ob der Tauber)". */
+export function spokenName(s: string, max = 80): string {
+  return sanitizeForPrompt(s.replace(/\s*\([^)]*\)/g, ''), max);
 }
