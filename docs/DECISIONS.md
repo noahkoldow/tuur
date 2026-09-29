@@ -59,3 +59,21 @@ Nominatim public instance is the default live provider (1 request per tile). Its
 ## D15 – Provider modes
 
 `TUUR_POI_PROVIDER=live|mock` (default mock), `TUUR_GEOCODING_PROVIDER=nominatim|mock`. Mock POI provider generates deterministic synthetic POIs for any coordinate so the emulator works offline.
+
+## D16 – Gemini model choice and grounding terms (verified 2026-09-29)
+
+Primary docs (ai.google.dev) were not reachable from the build sandbox (egress proxy); the choice rests on Google's own search snippets of those pages. Defaults in `packages/shared` (`DEFAULT_AI_CONFIG`, overridable in Firestore `config/ai`): text `gemini-3.8-flash` (released 2026-09-02), lite `gemini-3.5-flash-lite`, TTS `gemini-3.8-flash-lite-tts` (cost-efficient, no shutdown date announced; `gemini-3.8-flash-tts` is the higher-fidelity alternative). Gemini 2.5 models are restricted to existing users since 2026-09-18 and `gemini-3.1-flash-tts-preview` is legacy. **Must be re-verified against the live Models/Deprecations pages before launch** (checklist item in docs/RELEASE.md).
+Grounding with Google Search: default off. Per Google's terms as summarized in the docs, grounded output may be shown only to the end user who submitted the prompt, Search Suggestions (`searchEntryPoint`) must be shown with it, and caching/reuse of grounded results is restricted. Decision: grounded narrations are generated and stored per user (`users/{uid}/groundedNarrations`, audio under `narrations-grounded/{uid}/`, 30-day expiry) and never enter the shared cache; the UI must render `grounding.searchEntryPointHtml` beside the text (Phase 4). Legal review must confirm before enabling in production.
+Alternative: cache grounded content globally (rejected: conflicts with the terms).
+
+## D17 – Audio format and encoding
+
+Gemini TTS returns 24 kHz 16-bit mono PCM. Each paragraph is synthesized separately (exact per-paragraph timings, clean stops at paragraph boundaries), joined with 450 ms pauses and encoded to MP3 (48 kbps) with the pure-JS `@breezystack/lamejs` (no native ffmpeg dependency in Cloud Functions). A 3-minute narration is ~1 MB. Clients resolve download URLs through the Storage SDK (rules: signed-in read); blocked narrations are deleted from storage.
+
+## D18 – Fact checking
+
+Three layers before anything is stored: (1) prompt rules, (2) deterministic guards (every number of 3+ digits must occur in the sources, no list/markup/parentheses/URLs), (3) lite-model verdict per `keyFact`; missing verdicts count as unsupported. One regeneration attempt with the rejected claims fed back; then the text is discarded. After 3 failures per key in 24 h the key is answered without further model cost. POIs with too little source material get a shorter tier or no narration (`effectiveTier`).
+
+## D19 – Cost protection
+
+Cache hits are always free and unthrottled. Generation is gated by per-user and per-area hourly rate limits, a global and per-area daily budget from `usageDaily`/`usageDailyAreas` aggregates, a kill switch in `config/ai`, and single-flight locks (`narrationLocks`) with a post-lock cache re-check. `usageLogs` contain no user identifiers (privacy).

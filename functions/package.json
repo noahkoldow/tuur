@@ -16,9 +16,12 @@
     "test:integration": "firebase emulators:exec --config ../firebase.json --only firestore,auth --project demo-tuur \"vitest run --config vitest.integration.config.ts\""
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "@google/genai": "^2.24.0",
     "@tuur/shared": "workspace:*",
     "firebase-admin": "^14.5.0",
-    "firebase-functions": "^7.4.0"
+    "firebase-functions": "^7.4.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

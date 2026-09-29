@@ -6,7 +6,11 @@ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { EnsureAreaRequestSchema, rateLimitDecision } from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
-import { db, geocoder, llm, poiSources } from './config';
+import { GEMINI_API_KEY, db, geocoder, llm, narrationDeps, poiSources } from './config';
+import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
+import { getTransition as runGetTransition } from './narration/transition';
+import { loadAiConfig } from './util/aiConfig';
+import { z } from 'zod';
 
 initializeApp();
 const REGION = 'europe-west1';
@@ -55,6 +59,7 @@ export const ensureArea = onCall({ enforceAppCheck }, async (request) => {
 
 export const ingestArea = onTaskDispatched(
   {
+    secrets: [GEMINI_API_KEY],
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 6, maxDispatchesPerSecond: 3 },
     timeoutSeconds: 540,
@@ -63,9 +68,60 @@ export const ingestArea = onTaskDispatched(
   async (req) => {
     const geohash = (req.data as { geohash?: string }).geohash;
     if (!geohash || !/^[0-9bcdefghjkmnpqrstuvwxyz]{4,8}$/.test(geohash)) return;
+    const ai = await loadAiConfig(db());
     await runIngest(
-      { db: db(), sources: poiSources(), geocoder: geocoder(), llm: llm(), now: Date.now },
+      { db: db(), sources: poiSources(), geocoder: geocoder(), llm: llm(), ai, now: Date.now },
       geohash,
     );
   },
 );
+
+function toHttpsError(e: unknown): never {
+  if (e instanceof NarrationError) throw new HttpsError(e.code, e.message, e.details);
+  throw e;
+}
+
+const genOptions = {
+  enforceAppCheck,
+  secrets: [GEMINI_API_KEY],
+  timeoutSeconds: 300,
+  memory: '1GiB' as const,
+};
+
+export const getNarration = onCall(genOptions, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runGetNarration(narrationDeps(), request.auth.uid, request.data);
+  } catch (e) {
+    return toHttpsError(e);
+  }
+});
+
+export const getTransition = onCall(genOptions, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runGetTransition(narrationDeps(), request.auth.uid, request.data);
+  } catch (e) {
+    return toHttpsError(e);
+  }
+});
+
+const FeedbackSchema = z.object({
+  narrationKey: z.string().min(1).max(300),
+  reason: z.enum(['wrong_fact', 'offensive', 'audio_issue', 'other']),
+  text: z.string().max(1000).optional(),
+});
+
+export const reportNarration = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  const p = FeedbackSchema.safeParse(request.data);
+  if (!p.success) throw new HttpsError('invalid-argument', 'Invalid report');
+  try {
+    const d = narrationDeps();
+    return await reportNarrationIssue(d, request.auth.uid, p.data);
+  } catch (e) {
+    if (e instanceof Error && e.message === 'rate_limited')
+      throw new HttpsError('resource-exhausted', 'Too many reports');
+    throw e;
+  }
+});

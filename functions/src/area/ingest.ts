@@ -10,6 +10,7 @@ import {
   statusForIngest,
   tileWithNeighbors,
   DEFAULT_CLAIM_POLICY,
+  type AiConfig,
   type ImageRef,
   type Interest,
   type Poi,
@@ -20,6 +21,7 @@ import type { GeocodingProvider } from '../providers/geocoding';
 import { placeFromGeocode } from '../providers/geocoding';
 import type { LlmProvider } from '../providers/llm';
 import type { PoiSourceClient } from '../providers/poiSources';
+import { logUsage } from '../util/usage';
 import { AREAS, markAreaFailed } from './store';
 
 export interface IngestDeps {
@@ -27,6 +29,8 @@ export interface IngestDeps {
   sources: PoiSourceClient;
   geocoder: GeocodingProvider;
   llm: LlmProvider;
+  /** Model names and prices come from `config/ai`, never hard-coded. */
+  ai: Pick<AiConfig, 'models' | 'pricing'>;
   now: () => number;
   quality?: QualityOptions;
   ttlMs?: number;
@@ -93,17 +97,23 @@ export async function ingestArea(
     let result = buildPois(raw, { now: deps.now(), images, neighborRawScores, precision: geohash.length });
     if (result.unclassified.length) {
       const llm = await settled(
-        deps.llm.classifyInterests(result.unclassified.slice(0, 60)),
-        {} as Record<string, Interest[]>,
+        deps.llm.classifyInterests(result.unclassified.slice(0, 60), deps.ai.models.lite),
+        { interests: {} as Record<string, Interest[]>, usage: {} },
         'llm',
         warnings,
+      );
+      await logUsage(
+        db,
+        deps.ai.pricing,
+        { kind: 'classify', model: deps.ai.models.lite, usage: llm.usage, tile: geohash, ok: true },
+        deps.now(),
       );
       result = buildPois(raw, {
         now: deps.now(),
         images,
         neighborRawScores,
         precision: geohash.length,
-        llmInterests: new Map(Object.entries(llm)),
+        llmInterests: new Map(Object.entries(llm.interests)),
       });
     }
 

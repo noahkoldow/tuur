@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_AI_CONFIG,
   REGION_FIXTURES,
   encodeGeohash,
   tileWithNeighbors,
@@ -39,6 +40,7 @@ const deps = (raw: RawPoi[]) => ({
   sources: new FixtureSources(raw),
   geocoder: new MockGeocoder(),
   llm: new MockLlmProvider(),
+  ai: DEFAULT_AI_CONFIG,
   now: () => NOW,
 });
 
