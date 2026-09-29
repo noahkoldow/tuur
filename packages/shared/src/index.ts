@@ -36,3 +36,4 @@ export * from './demo/synthetic';
 export * from './routing/planRoute';
 export * from './guide/fork';
 export * from './guide/roam';
+export * from './offline/plan';

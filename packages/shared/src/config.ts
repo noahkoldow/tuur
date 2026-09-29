@@ -34,6 +34,8 @@ export const AiConfigSchema = z.object({
   rateLimits: z.object({
     perUserPerHour: z.number().int().positive(),
     perAreaPerHour: z.number().int().positive(),
+    /** Separate, higher bucket for offline downloads which generate all tiers of a tour at once. */
+    downloadPerUserPerHour: z.number().int().positive().default(300),
   }),
 });
 export type AiConfig = z.infer<typeof AiConfigSchema>;
@@ -60,5 +62,5 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     groundingPer1kQueriesUsd: 35,
     routingPer1kCallsUsd: 0.5,
   },
-  rateLimits: { perUserPerHour: 60, perAreaPerHour: 600 },
+  rateLimits: { perUserPerHour: 60, perAreaPerHour: 600, downloadPerUserPerHour: 300 },
 };

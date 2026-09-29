@@ -182,7 +182,10 @@ describe('getNarration', () => {
   });
 
   it('rate limits generation per user but still serves cache hits', async () => {
-    const { deps } = mk({}, { rateLimits: { perUserPerHour: 2, perAreaPerHour: 100 } });
+    const { deps } = mk(
+      {},
+      { rateLimits: { perUserPerHour: 2, perAreaPerHour: 100, downloadPerUserPerHour: 5 } },
+    );
     await getNarration(deps, 'u1', req);
     await getNarration(deps, 'u1', { ...req, lengthTier: 'short' });
     await expect(getNarration(deps, 'u1', { ...req, lang: 'en' })).rejects.toMatchObject({

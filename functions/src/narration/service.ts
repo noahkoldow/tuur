@@ -148,7 +148,22 @@ export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unk
   }
 
   try {
-    await consumeRateLimit(deps.db, `narr_user_${uid}`, cfg.rateLimits.perUserPerHour, 3600_000, deps.now());
+    if (req.download)
+      await consumeRateLimit(
+        deps.db,
+        `narr_dl_${uid}`,
+        cfg.rateLimits.downloadPerUserPerHour,
+        3600_000,
+        deps.now(),
+      );
+    else
+      await consumeRateLimit(
+        deps.db,
+        `narr_user_${uid}`,
+        cfg.rateLimits.perUserPerHour,
+        3600_000,
+        deps.now(),
+      );
     await consumeRateLimit(
       deps.db,
       `narr_area_${poi.tile}`,

@@ -12,6 +12,7 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { BackendProvider } from '../src/backend';
+import { getOfflineLibrary } from '../src/offline';
 import { useSettings } from '../src/state/settings';
 import { colors } from '../src/theme';
 
@@ -26,6 +27,10 @@ export default function RootLayout() {
   });
   const hydrated = useSettings((s) => s.hydrated);
   const ready = fontsLoaded && hydrated;
+
+  useEffect(() => {
+    void getOfflineLibrary().load();
+  }, []);
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();

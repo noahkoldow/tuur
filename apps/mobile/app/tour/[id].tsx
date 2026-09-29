@@ -14,6 +14,8 @@ import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
 import { startTourSession, tourPath } from '../../src/guide/session';
 import { requestBackground } from '../../src/location/real';
+import { useTourDownload } from '../../src/offline/useDownload';
+import { estimateDownloadBytes, formatBytes } from '@tuur/shared';
 import { useSettings } from '../../src/state/settings';
 import { colors, radii } from '../../src/theme';
 
@@ -26,6 +28,7 @@ export default function TourDetail() {
   const { language, interests, simulator } = useSettings();
   const [tour, setTour] = useState<Tour | null | undefined>(undefined);
   const [starting, setStarting] = useState(false);
+  const dl = useTourDownload(tour, language);
 
   useEffect(() => {
     void backend.getTour(id).then(setTour);
@@ -183,6 +186,37 @@ export default function TourDetail() {
         }}
       >
         <Button label={t('tour.start')} icon="play" loading={starting} onPress={() => void start()} />
+        {dl.complete ? (
+          <Banner icon="check-circle" text={t('downloads.downloaded')} />
+        ) : dl.phase === 'running' ? (
+          <Row gap={10}>
+            <Button
+              style={{ flex: 1 }}
+              variant="secondary"
+              label={t('downloads.downloading', { percent: Math.round(dl.fraction * 100) })}
+              onPress={() => undefined}
+              disabled
+            />
+            <Button variant="ghost" label={t('downloads.cancel')} onPress={dl.cancel} />
+          </Row>
+        ) : (
+          <Button
+            variant="secondary"
+            icon="download"
+            label={
+              dl.partial
+                ? t('downloads.resume')
+                : `${t('downloads.download')} (${t('downloads.size', { size: formatBytes(estimateDownloadBytes(tour)) })})`
+            }
+            onPress={() => void dl.start()}
+          />
+        )}
+        {dl.error ? (
+          <Banner
+            tone="warning"
+            text={dl.error === 'no_space' ? t('downloads.noSpace') : t('downloads.failed')}
+          />
+        ) : null}
       </View>
     </Screen>
   );

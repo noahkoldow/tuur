@@ -63,6 +63,14 @@ export default function Settings() {
             ))}
           </Row>
         </Section>
+        <Section title={t('downloads.title')}>
+          <Button
+            variant="secondary"
+            icon="download"
+            label={t('downloads.title')}
+            onPress={() => router.push('/downloads')}
+          />
+        </Section>
         <Section title={t('settings.legal')}>
           <Button
             variant="secondary"
