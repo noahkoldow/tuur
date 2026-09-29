@@ -511,6 +511,27 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       emitEnts();
       return { tourId: inv.tourId };
     },
+    demo: {
+      grantCredits(n) {
+        wallet = { ...wallet, balance: wallet.balance + n };
+        emitEnts();
+      },
+      grantRewardCredit() {
+        wallet = { ...wallet, rewardBalance: wallet.rewardBalance + 1 };
+        emitEnts();
+      },
+      grantSubscription() {
+        ents.push({
+          type: 'subscription',
+          active: true,
+          productId: 'tuur_sub_monthly',
+          expiresAt: Date.now() + 30 * 24 * 3600_000,
+          willRenew: true,
+          updatedAt: Date.now(),
+        });
+        emitEnts();
+      },
+    },
     async createRewardNonce() {
       await sleep(latency);
       return { nonce: `demo-${Math.random().toString(36).slice(2)}`, remainingToday: 5 };

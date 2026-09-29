@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { INTERESTS, planCustomRoute, type Interest, type Poi, type RoutingProfile } from '@tuur/shared';
 import { useBackend } from '../src/backend';
+import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
@@ -26,6 +27,7 @@ export default function Plan() {
   const backend = useBackend();
   const { language, interests: savedInterests, simulator } = useSettings();
   const { position } = usePosition();
+  const gate = useSessionGate('planned', position);
   const [minutes, setMinutes] = useState(60);
   const [profile, setProfile] = useState<RoutingProfile>('foot-walking');
   const [interests, setInterests] = useState<Interest[]>(savedInterests);
@@ -59,7 +61,7 @@ export default function Plan() {
   };
 
   const start = async () => {
-    if (!preview || !position) return;
+    if (!preview || !position || !gate.require()) return;
     setBusy(true);
     setError(undefined);
     try {

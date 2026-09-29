@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { type RoutingProfile } from '@tuur/shared';
 import { useBackend } from '../src/backend';
+import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
@@ -26,6 +27,7 @@ export default function Fork() {
   const backend = useBackend();
   const { language, interests, simulator } = useSettings();
   const { position } = usePosition();
+  const gate = useSessionGate('fork', position);
   const [minutes, setMinutes] = useState(90);
   const profile: RoutingProfile = 'foot-walking';
   const { pool, ready } = usePoiPool(position, 1);
@@ -33,7 +35,7 @@ export default function Fork() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!ready || !position) return;
+    if (!ready || !position || !gate.unlocked) return;
     let cancelled = false;
     // A throw-away controller only for computing the first options (runtime is created on start).
     const tmp = new ForkController({
@@ -47,12 +49,13 @@ export default function Fork() {
       interests,
       profile,
       budgetMinutes: minutes,
+      access: { mode: 'fork' },
     });
     void tmp.compute(position).then((o) => !cancelled && setOptions(o));
     return () => {
       cancelled = true;
     };
-  }, [ready, position, minutes, backend, pool, language, interests]);
+  }, [ready, position, minutes, backend, pool, language, interests, gate.unlocked]);
 
   const start = async (c: ForkChoice) => {
     if (!position) return;
@@ -101,6 +104,11 @@ export default function Fork() {
           <View style={{ alignItems: 'center', gap: 10, paddingVertical: 24 }}>
             <SpinningMark size={64} label={t('plan.waitArea')} />
             <Text variant="caption">{t('plan.waitArea')}</Text>
+          </View>
+        ) : !gate.unlocked ? (
+          <View style={{ gap: 12 }}>
+            <Banner icon="lock" text={t('paywall.subtitleSession')} />
+            <Button label={t('paywall.titleSession')} icon="lock" onPress={() => void gate.require()} />
           </View>
         ) : options.length === 0 ? (
           <Banner text={t('fork.none')} />

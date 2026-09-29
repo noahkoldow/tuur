@@ -44,6 +44,13 @@ export interface AccessInfo {
 
 export type SpendRequest = { kind: 'tour'; tourId: string } | { kind: 'session'; placeId: string };
 
+/** Only present on the in-memory demo backend: simulates what the store + webhooks would grant. */
+export interface DemoControls {
+  grantCredits(n: number): void;
+  grantRewardCredit(): void;
+  grantSubscription(): void;
+}
+
 export interface AuthApi {
   current(): UserInfo | null;
   onChange(cb: (u: UserInfo | null) => void): Unsubscribe;
@@ -81,6 +88,7 @@ export interface Backend {
   redeemInvite(token: string): Promise<{ tourId: string }>;
   /** Nonce for rewarded-ad server-side verification (daily limit enforced on the server). */
   createRewardNonce(): Promise<{ nonce: string; remainingToday: number }>;
+  demo?: DemoControls;
   getNarration(req: GetNarrationRequest): Promise<NarrationResponse>;
   getTransition(req: {
     fromPoiId: string;

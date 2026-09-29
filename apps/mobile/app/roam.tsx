@@ -11,6 +11,7 @@ import { startRoamSession } from '../src/guide/session';
 import { usePosition } from '../src/location/usePosition';
 import { requestBackground } from '../src/location/real';
 import { useBackend } from '../src/backend';
+import { useSessionGate } from '../src/billing/useSessionGate';
 import { useSettings, type NarrationFrequency } from '../src/state/settings';
 
 /** Roam (spec 5.4): no route, just walk; tuur tells about what lies ahead. Frequency is adjustable. */
@@ -20,10 +21,11 @@ export default function Roam() {
   const backend = useBackend();
   const { language, interests, frequency, simulator, set } = useSettings();
   const { position } = usePosition();
+  const gate = useSessionGate('roam', position);
   const [busy, setBusy] = useState(false);
 
   const start = async () => {
-    if (!position) return;
+    if (!position || !gate.require()) return;
     setBusy(true);
     try {
       if (!simulator && backend.kind === 'firebase') await requestBackground();

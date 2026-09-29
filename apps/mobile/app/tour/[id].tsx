@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, Share, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
-import { useBackend } from '../../src/backend';
+import { BackendError, useBackend } from '../../src/backend';
+import { canStartTour, useEntitlementStore } from '../../src/billing/entitlements';
+import { config } from '../../src/config';
 import { AiBadge } from '../../src/components/AiBadge';
 import { Banner } from '../../src/components/Banner';
 import { Button, IconButton, Row } from '../../src/components/Button';
@@ -29,6 +31,8 @@ export default function TourDetail() {
   const [tour, setTour] = useState<Tour | null | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const dl = useTourDownload(tour, language);
+  const ent = useEntitlementStore();
+  const [shareMsg, setShareMsg] = useState<string | undefined>();
 
   useEffect(() => {
     void backend.getTour(id).then(setTour);
@@ -44,7 +48,29 @@ export default function TourDetail() {
     );
   const text = tour.texts[language] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
 
+  const unlocked = canStartTour(ent, tour.id, tour.free);
+  const bought = ent.entitlements.some(
+    (e) => e.type === 'tour' && e.tourId === tour.id && e.source === 'credit',
+  );
+  const openPaywall = () => router.push({ pathname: '/paywall', params: { kind: 'tour', tourId: tour.id } });
+
+  const share = async () => {
+    setShareMsg(undefined);
+    try {
+      const inv = await backend.createInvite(tour.id);
+      const url = `${config.legal.webBaseUrl}/invite/${inv.token}`;
+      await Share.share({ message: t('paywall.shareMessage', { url }) });
+    } catch (e) {
+      setShareMsg(
+        e instanceof BackendError && e.reason === 'limit_reached'
+          ? t('paywall.shareLimit')
+          : t('paywall.failed'),
+      );
+    }
+  };
+
   const start = async () => {
+    if (!unlocked) return openPaywall();
     setStarting(true);
     try {
       if (!simulator && backend.kind === 'firebase') await requestBackground();
@@ -185,7 +211,22 @@ export default function TourDetail() {
           borderTopColor: colors.border,
         }}
       >
-        <Button label={t('tour.start')} icon="play" loading={starting} onPress={() => void start()} />
+        <Button
+          label={unlocked ? t('tour.start') : t('paywall.title')}
+          icon={unlocked ? 'play' : 'lock'}
+          loading={starting}
+          onPress={() => void start()}
+        />
+        {bought ? (
+          <Button
+            variant="secondary"
+            icon="share-2"
+            label={t('paywall.share')}
+            accessibilityHint={t('paywall.shareHint')}
+            onPress={() => void share()}
+          />
+        ) : null}
+        {shareMsg ? <Banner tone="warning" text={shareMsg} /> : null}
         {dl.complete ? (
           <Banner icon="check-circle" text={t('downloads.downloaded')} />
         ) : dl.phase === 'running' ? (
@@ -208,7 +249,7 @@ export default function TourDetail() {
                 ? t('downloads.resume')
                 : `${t('downloads.download')} (${t('downloads.size', { size: formatBytes(estimateDownloadBytes(tour)) })})`
             }
-            onPress={() => void dl.start()}
+            onPress={() => (unlocked ? void dl.start() : openPaywall())}
           />
         )}
         {dl.error ? (

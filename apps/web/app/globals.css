@@ -73,3 +73,13 @@ h3 {
   font-weight: 700;
   text-decoration: none;
 }
+
+.stores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+.small {
+  font-size: 0.9rem !important;
+}

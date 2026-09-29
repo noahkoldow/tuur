@@ -35,14 +35,33 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 - `RoutingProvider` (OpenRouteService, mock, Firestore-cached, approx fallback), orienteering heuristic (greedy insertion + 2-opt, deterministic, partner share/detour caps), validation (min stops, max leg, duplicates, accessibility, budget, partner share), templates (highlights 60, grand 120, theme tours), `generateAutoTours` with lock, versions, free tour, texts per language, model order suggestions re-checked.
 - Tests: heuristic properties, fixtures produce valid tours, integration tests for generation/locks/edited tours/fallbacks.
 
-## Phases 4-12: NOT STARTED
+## Phase 4 – App core: DONE
 
-Next: Phase 4 (Expo app core: navigation, onboarding, map with heart-pin markers, location, audio player, standard tour E2E).
-Must-do reminders for later phases:
+- Expo Router app (dev build only): onboarding, home (area exploring with spinning mark, auto tours), tour detail, player with map/sheet/transcript, settings, legal placeholders. Guide runtime executes the pure engine (`packages/shared/src/guide`). Web build is a demo-backend preview.
+- Verified by typecheck, lint, unit + simulated-GPS end-to-end tests, Android/web bundle export, Playwright screenshots of the web preview. **Not verified on a real device or simulator.**
 
-- Phase 9: wire `authorize` hook in `getNarration` (entitlements: free tour / credits / subscription / invites) — currently every signed-in user may generate/read any narration.
-- Phase 4: render `grounding.searchEntryPointHtml` next to grounded text if grounding is ever enabled; show AI-generated notice and Commons attribution.
-- Firestore rules for users/sessions/downloads/invites/partners/offers/etc. are added with their phase; `rateLimits`, `narrationLocks`, `usageLogs` etc. are server-only (default deny).
+## Phases 5-7 – Planned route, pacing, crossroads, roam: DONE
+
+- Plan screen (`planCustomRoute` + server re-check `composePlannedRoute`/`fitToBudget`), pacing (speed/vehicle aware), crossroads (`ForkController`, two teasers per waypoint) and roam (`RoamController`, corridor ahead). Open routes are the default (D20).
+
+## Phase 8 – Offline: DONE
+
+- `DownloadManager` (resumable, storage check), `OfflineLibrary`, offline-first backend wrapper, MapLibre offline packs. Tested with a fully dead network backend.
+
+## Phase 9 – Monetization: DONE (needs store accounts to verify)
+
+- Server: entitlements (`users/{uid}/entitlements`, function-written only), credits (permanent tour or 24 h session), subscription via RevenueCat webhook, invites (max 2 per bought tour, hashed single-use tokens), rewarded-ad SSV with nonce + daily limit. Access is decided server-side before any generation (production wiring covered by emulator tests).
+- Client: `access` context on every narration/transition/teaser/download request, `locked` handling, paywall (credit, subscription disclosure, rewarded ad, restore, terms/privacy links), tour and mode gating, share flow, `invite/[token]` deep link, interstitial policy hook (only between stops, consent first, never for subscribers), demo billing/ads for web + tests.
+- Web: invite landing page, `apple-app-site-association` and `assetlinks.json` templates (placeholders for team id / signing fingerprint).
+- **Not verified:** real RevenueCat purchases, AdMob ads/UMP, SSV callbacks, deep links on devices.
+
+## Phases 10-12: NOT STARTED
+
+Next: Phase 10 (partner portal, offers, QR redemption), Phase 11 (admin), Phase 12 (GDPR, release).
+Reminders:
+
+- Render `grounding.searchEntryPointHtml` next to grounded text if grounding is ever enabled (done in the player); AI notice and Commons attribution are shown.
+- Firestore rules for partners/offers etc. are added with their phase.
 
 ## Critic gate (must pass before handing over)
 

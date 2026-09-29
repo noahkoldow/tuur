@@ -93,3 +93,19 @@ The model receives only names, categories and walking times (spoken names withou
 ## D23 – Routing fallback
 
 Routing calls go through a Firestore cache (30 days). If the upstream service fails the tour is planned with offline estimates and flagged `routingSource: approx`; approx tours count as stale and are re-planned on the next request.
+
+## D24 – Offline-first wrapper, downloads use the network backend
+
+Downloaded tours are served from `OfflineLibrary` before the network is touched; the download manager talks to the base backend directly and sends `download: true` plus the access context, so paid tours can only be downloaded after unlocking.
+
+## D25 – Entitlements are server truth
+
+The client never derives access from a purchase result. RevenueCat/AdMob/spend/invite only trigger server writes; the app listens to `users/{uid}/entitlements` and `credits/wallet`. The paywall closes itself when access appears. Reward credits (ads) only unlock standard tours, never 24 h sessions.
+
+## D26 – Dynamic modes are 24 h sessions per place
+
+Planned route, crossroads and roam cost one credit per place for 24 hours (server derives the place from the POI's area, not from client input). Standard tours are permanent per tour. Subscribers get everything without ads.
+
+## D27 – Ads only after consent, only between stops
+
+UMP consent runs before any ad request; interstitials follow the pure `decideInterstitial` policy (between waypoints, nothing playing, foreground, daily and gap caps). Default AdMob IDs are Google's test IDs so dev builds cannot serve real ads.

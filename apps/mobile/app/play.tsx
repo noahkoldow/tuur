@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
@@ -36,6 +37,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
     fork?.getSnapshot ?? (() => NO_FORK),
     () => NO_FORK,
   );
+  useInterstitials(runtime, ui);
   const { t } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
@@ -91,13 +93,15 @@ function PlayInner({ session }: { session: ActiveSession }) {
         ? t('player.vehicleResumed')
         : ui.notice === 'unavailable'
           ? t('player.unavailable')
-          : ui.notice === 'generation_paused'
-            ? t('errors.paused')
-            : ui.notice === 'rate_limited'
-              ? t('errors.rateLimited')
-              : ui.notice === 'offline'
-                ? t('errors.network')
-                : undefined;
+          : ui.notice === 'locked'
+            ? t('errors.locked')
+            : ui.notice === 'generation_paused'
+              ? t('errors.paused')
+              : ui.notice === 'rate_limited'
+                ? t('errors.rateLimited')
+                : ui.notice === 'offline'
+                  ? t('errors.network')
+                  : undefined;
 
   const header = (
     <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 12 }}>

@@ -90,6 +90,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       '@react-native-google-signin/google-signin',
       { iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME ?? 'com.googleusercontent.apps.REPLACE_ME' },
     ],
+    [
+      'react-native-google-mobile-ads',
+      {
+        // Google's public test app IDs are the default; real IDs come from the environment at build time.
+        androidAppId: process.env.ADMOB_ANDROID_APP_ID ?? 'ca-app-pub-3940256099942544~3347511713',
+        iosAppId: process.env.ADMOB_IOS_APP_ID ?? 'ca-app-pub-3940256099942544~1458002511',
+        userTrackingUsageDescription:
+          'tuur uses this identifier to show ads that fit you. You can also use tuur with non-personalized ads.',
+      },
+    ],
     'expo-dev-client',
   ],
   experiments: { typedRoutes: true },

@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["REPLACE_TEAMID.app.tuur.guide"],
+        "components": [{ "/": "/invite/*" }]
+      }
+    ]
+  }
+}
