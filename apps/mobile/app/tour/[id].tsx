@@ -12,7 +12,7 @@ import { Chip } from '../../src/components/Chip';
 import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
-import { startSession, tourPath } from '../../src/guide/session';
+import { startTourSession, tourPath } from '../../src/guide/session';
 import { requestBackground } from '../../src/location/real';
 import { useSettings } from '../../src/state/settings';
 import { colors, radii } from '../../src/theme';
@@ -45,7 +45,7 @@ export default function TourDetail() {
     setStarting(true);
     try {
       if (!simulator && backend.kind === 'firebase') await requestBackground();
-      await startSession({
+      await startTourSession({
         tour,
         lang: language,
         ...(interests[0] ? { interest: interests[0] } : {}),

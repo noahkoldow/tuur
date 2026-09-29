@@ -58,6 +58,8 @@ export interface GuideUi {
   offerMore?: { poiId: string; tier: LengthTier };
   notice?: Notice;
   travelMode: TravelMode;
+  /** Open routes (crossroads, roam): the last stop is done and the next one has to be chosen. */
+  awaitingRoute: boolean;
   user?: { lat: number; lng: number; heading?: number };
 }
 
@@ -90,6 +92,7 @@ export class GuideRuntime {
     playing: false,
     paragraphIndex: 0,
     travelMode: 'stationary',
+    awaitingRoute: false,
   };
   private readonly listeners = new Set<() => void>();
   private readonly narrations = new Map<string, NarrationResponse>();
@@ -100,6 +103,8 @@ export class GuideRuntime {
   private unsubLocation: (() => void) | undefined;
   private disposed = false;
   /** Guards against re-entrancy when commands dispatch events synchronously. */
+  private commandListeners = new Set<(c: GuideCommand) => void>();
+  private fixListeners = new Set<(f: Fix) => void>();
   private queue: GuideEvent[] = [];
   private draining = false;
 
@@ -182,6 +187,7 @@ export class GuideRuntime {
           }
         : {}),
       travelMode: s.travel.mode,
+      awaitingRoute: s.awaitingRoute,
       positionMs: this.audioPosition(),
       playing: this.deps.audio.isPlaying() && !s.paused && !s.vehiclePaused,
       ...patch,
@@ -211,14 +217,51 @@ export class GuideRuntime {
   }
 
   // ---- lifecycle ----
-  async start(stops: GuideStop[], source?: LocationSource, startIndex = 0) {
+  async start(
+    stops: GuideStop[],
+    source?: LocationSource,
+    opts: { startIndex?: number; open?: boolean } = {},
+  ) {
     await this.deps.audio.init();
-    this.dispatch({ type: 'setRoute', stops, startIndex });
+    this.dispatch({
+      type: 'setRoute',
+      stops,
+      startIndex: opts.startIndex ?? 0,
+      ...(opts.open ? { open: true } : {}),
+    });
     if (source) this.unsubLocation = await source.subscribe((fix) => this.onFix(fix));
   }
 
-  setRoute(stops: GuideStop[], startIndex = 0) {
-    this.dispatch({ type: 'setRoute', stops, startIndex });
+  setRoute(stops: GuideStop[], startIndex = 0, open?: boolean) {
+    this.dispatch({ type: 'setRoute', stops, startIndex, ...(open !== undefined ? { open } : {}) });
+  }
+
+  /** Appends a stop to an open route and keeps the current position in it (crossroads choice). */
+  appendStop(stop: GuideStop) {
+    const s = this.state;
+    const route = [...s.route, stop];
+    this.dispatch({
+      type: 'setRoute',
+      stops: route,
+      startIndex: s.awaitingRoute ? route.length - 1 : s.index,
+      open: true,
+    });
+  }
+
+  /** Replaces the target of a roam route with `stop` (the previous, unreached target is dropped). */
+  retarget(stop: GuideStop) {
+    const s = this.state;
+    const keep = s.route.slice(0, s.awaitingRoute ? s.route.length : s.index);
+    this.dispatch({ type: 'setRoute', stops: [...keep, stop], startIndex: keep.length, open: true });
+  }
+
+  addCommandListener(cb: (c: GuideCommand) => void) {
+    this.commandListeners.add(cb);
+    return () => void this.commandListeners.delete(cb);
+  }
+  addFixListener(cb: (f: Fix) => void) {
+    this.fixListeners.add(cb);
+    return () => void this.fixListeners.delete(cb);
   }
 
   onFix(fix: Fix) {
@@ -227,6 +270,7 @@ export class GuideRuntime {
       user: { lat: fix.lat, lng: fix.lng, ...(fix.heading !== undefined ? { heading: fix.heading } : {}) },
     };
     this.dispatch({ type: 'location', fix });
+    this.fixListeners.forEach((l) => l(fix));
   }
 
   async dispose() {
@@ -254,6 +298,7 @@ export class GuideRuntime {
         this.state = res.state;
         for (const c of res.commands) {
           this.deps.onCommand?.(c);
+          this.commandListeners.forEach((l) => l(c));
           this.execute(c);
         }
         this.refreshUi();

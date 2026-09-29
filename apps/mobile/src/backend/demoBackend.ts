@@ -6,8 +6,13 @@ import {
   encodePolyline,
   estimateSpeechMs,
   fallbackTourConcept,
+  distanceMeters,
   geohashCenter,
   geohashNeighbors,
+  tilesAround,
+  fitToBudget,
+  haversineMatrix,
+  type ComposeRouteRequest,
   layoutParagraphs,
   narrationKey,
   pickFreeTourId,
@@ -80,6 +85,84 @@ export function demoNarrationParagraphs(poi: Poi, lang: string, tier: 'short' | 
   return Array.from({ length: n }, (_, i) => pool.slice(i * per, (i + 1) * per).join(' ')).filter(Boolean);
 }
 
+interface DemoTourInput {
+  id: string;
+  placeId: string;
+  placeName: string;
+  source: Tour['source'];
+  template: string;
+  stops: Poi[];
+  legMinutes: number[];
+  totalMinutes: number;
+  walkMinutes: number;
+  distanceMeters: number;
+  profile?: Tour['profile'];
+  lang: string;
+  now: number;
+}
+
+/** Builds a Tour document for the demo backend with fact-free fallback texts. */
+function makeDemoTour(i: DemoTourInput): Tour {
+  const stops = i.stops.map((s, n) => ({
+    poiId: s.id,
+    order: n,
+    name: s.name,
+    location: s.location,
+    dwellMinutes: s.dwellMinutes,
+    walkMinutesFromPrev: n === 0 ? 0 : (i.legMinutes[n] ?? 0),
+    partner: false,
+  }));
+  const concept = fallbackTourConcept({
+    lang: i.lang,
+    templateId: i.template,
+    durationMinutes: Math.round(i.totalMinutes),
+    placeName: i.placeName,
+    themes: [],
+    stops: stops.map((s) => ({
+      id: s.poiId,
+      name: s.name,
+      kind: 'place',
+      walkMinutesFromPrev: s.walkMinutesFromPrev,
+    })),
+  });
+  const { suggestedOrder: _s, ...text } = concept;
+  void _s;
+  const lats = i.stops.map((p) => p.location.lat);
+  const lngs = i.stops.map((p) => p.location.lng);
+  const cover = i.stops.flatMap((s) => s.imageRefs)[0];
+  return {
+    id: i.id,
+    placeId: i.placeId,
+    placeName: i.placeName,
+    source: i.source,
+    version: 1,
+    template: i.template,
+    profile: i.profile ?? 'foot-walking',
+    themes: themesOf(i.stops),
+    stops,
+    path: encodePolyline(i.stops.map((p) => [p.location.lat, p.location.lng] as [number, number])),
+    durationMinutes: i.totalMinutes,
+    walkMinutes: i.walkMinutes,
+    distanceMeters: i.distanceMeters,
+    bbox: {
+      south: Math.min(...lats),
+      north: Math.max(...lats),
+      west: Math.min(...lngs),
+      east: Math.max(...lngs),
+    },
+    routingSource: 'mock',
+    fingerprint: '',
+    free: false,
+    locked: false,
+    pinned: false,
+    hasPartner: false,
+    ...(cover ? { coverImage: cover } : {}),
+    texts: { [i.lang]: text },
+    createdAt: i.now,
+    updatedAt: i.now,
+  };
+}
+
 export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
   const latency = opts.latencyMs ?? 300;
   const areas = new Map<string, AreaInfo>();
@@ -140,8 +223,8 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
   const backend: Backend = {
     kind: 'demo',
     auth,
-    async ensureArea(tile) {
-      const all = [tile, ...geohashNeighbors(tile)];
+    async ensureArea(tile, rings) {
+      const all = rings !== undefined ? tilesAround(tile, rings) : [tile, ...geohashNeighbors(tile)];
       for (const t of all) {
         if (areas.has(t)) continue;
         setArea(t, { status: 'ingesting', poiCount: 0 });
@@ -177,64 +260,22 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
         });
         if (!res || res.plan.issues.length) continue;
         const { plan } = res;
-        const stops = plan.stops.map((s, i) => ({
-          poiId: s.id,
-          order: i,
-          name: s.name,
-          location: s.location,
-          dwellMinutes: s.dwellMinutes,
-          walkMinutesFromPrev: i === 0 ? 0 : plan.legMinutes[i]!,
-          partner: false,
-        }));
-        const concept = fallbackTourConcept({
-          lang,
-          templateId: template.id,
-          durationMinutes: Math.round(plan.result.totalMinutes),
-          placeName: region.placeName,
-          themes: [],
-          stops: stops.map((s) => ({
-            id: s.poiId,
-            name: s.name,
-            kind: 'place',
-            walkMinutesFromPrev: s.walkMinutesFromPrev,
-          })),
-        });
-        const { suggestedOrder: _s, ...text } = concept;
-        void _s;
-        const lats = plan.stops.map((p) => p.location.lat);
-        const lngs = plan.stops.map((p) => p.location.lng);
-        const cover = plan.stops.flatMap((s) => s.imageRefs)[0];
-        built.push({
-          id: tourId(region.placeId, template.id),
-          placeId: region.placeId,
-          placeName: region.placeName,
-          source: 'auto',
-          version: 1,
-          template: template.id,
-          profile: 'foot-walking',
-          themes: themesOf(plan.stops),
-          stops,
-          path: encodePolyline(plan.stops.map((p) => [p.location.lat, p.location.lng] as [number, number])),
-          durationMinutes: plan.result.totalMinutes,
-          walkMinutes: plan.result.walkMinutes,
-          distanceMeters: plan.distanceMeters,
-          bbox: {
-            south: Math.min(...lats),
-            north: Math.max(...lats),
-            west: Math.min(...lngs),
-            east: Math.max(...lngs),
-          },
-          routingSource: 'mock',
-          fingerprint: '',
-          free: false,
-          locked: false,
-          pinned: false,
-          hasPartner: false,
-          ...(cover ? { coverImage: cover } : {}),
-          texts: { [lang]: text },
-          createdAt: now,
-          updatedAt: now,
-        });
+        built.push(
+          makeDemoTour({
+            id: tourId(region.placeId, template.id),
+            placeId: region.placeId,
+            placeName: region.placeName,
+            source: 'auto',
+            template: template.id,
+            stops: plan.stops,
+            legMinutes: plan.legMinutes,
+            totalMinutes: plan.result.totalMinutes,
+            walkMinutes: plan.result.walkMinutes,
+            distanceMeters: plan.distanceMeters,
+            lang,
+            now,
+          }),
+        );
       }
       const freeId = pickFreeTourId(built);
       for (const t of built) {
@@ -267,6 +308,54 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
     async getPois(tiles) {
       const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
       return [...regions.values()].filter((r) => keys.has(r.key)).flatMap((r) => r.pois);
+    },
+    async composePlannedRoute(req: ComposeRouteRequest) {
+      await sleep(latency);
+      const pois = req.stops.map((id) => poiIndex.get(id)).filter((p): p is Poi => Boolean(p));
+      if (pois.length === 0) throw new BackendError('not_found', 'Unknown stops');
+      const startPt = req.start ?? pois[0]!.location;
+      const endPt = req.end ?? (req.roundTrip ? startPt : pois[pois.length - 1]!.location);
+      const m = haversineMatrix([startPt, ...pois.map((p) => p.location), endPt], req.profile);
+      const open = !req.end && !req.roundTrip;
+      const minutes = m.minutes.map((row, i) =>
+        row.map((v, j) => (open && j === row.length - 1 ? 0 : !req.start && i === 0 ? 0 : v)),
+      );
+      const fit = fitToBudget(pois, { minutes, meters: m.meters }, req.budgetMinutes, req.interests);
+      const kept = fit.order.map((id) => pois.find((p) => p.id === id)!);
+      const legs: number[] = [];
+      let prev = 0;
+      for (const p of kept) {
+        const n = pois.indexOf(p) + 1;
+        legs.push(minutes[prev]![n]!);
+        prev = n;
+      }
+      const region = [...regions.values()].find((r) => r.pois.some((p) => p.id === pois[0]!.id));
+      const tour = makeDemoTour({
+        id: `planned_${Date.now().toString(36)}`,
+        placeId: region?.placeId ?? 'DEMO_planned',
+        placeName: region?.placeName ?? 'Demo City',
+        source: 'planned',
+        template: 'planned',
+        stops: kept,
+        legMinutes: legs,
+        totalMinutes: fit.totalMinutes,
+        walkMinutes: legs.reduce((a, b) => a + b, 0),
+        distanceMeters: Math.round(
+          kept.reduce((d, p, i) => d + (i ? distanceMeters(kept[i - 1]!.location, p.location) : 0), 0) * 1.3,
+        ),
+        profile: req.profile,
+        lang: req.lang,
+        now: Date.now(),
+      });
+      tours.set(tour.id, tour);
+      return { tour, dropped: fit.dropped };
+    },
+    async getTeaser(req) {
+      const poi = poiIndex.get(req.poiId);
+      const kind = poi?.osmTags['tourism'] ?? poi?.osmTags['historic'] ?? poi?.osmTags['amenity'] ?? 'place';
+      return req.lang === 'de'
+        ? `Ein Ort der Kategorie ${kind}, an dem sich ein kurzer Halt lohnt.`
+        : `A ${kind} that is worth a short stop.`;
     },
     async getNarration(req: GetNarrationRequest): Promise<NarrationResponse> {
       await sleep(latency);

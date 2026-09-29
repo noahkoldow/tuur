@@ -112,7 +112,7 @@ export default function Home() {
                 accessibilityRole="button"
                 accessibilityLabel={`${t(`home.${m.key}`)}. ${t(`home.${m.hint}`)}`}
                 accessibilityState={{ selected: i === 0 }}
-                onPress={() => (m.enabled ? undefined : router.push(m.route as never))}
+                onPress={() => (m.route === '/home' ? undefined : router.push(m.route as never))}
                 style={{
                   width: 132,
                   padding: 10,
@@ -148,7 +148,7 @@ export default function Home() {
         <View style={{ gap: 14 }}>
           {session ? (
             <Button
-              label={session.tour.texts[lang]?.title ?? t('player.exit')}
+              label={session.tour?.texts[lang]?.title ?? t('home.continueTour')}
               icon="headphones"
               onPress={() => router.push('/play')}
             />

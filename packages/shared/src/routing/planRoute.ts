@@ -37,7 +37,8 @@ export interface PlannedRoute {
   issues: TourIssue[];
 }
 
-const eligible = (p: Poi, minScore: number) => !p.hidden && p.accessible && p.interests.length > 0 && p.score >= minScore;
+const eligible = (p: Poi, minScore: number) =>
+  !p.hidden && p.accessible && p.interests.length > 0 && p.score >= minScore;
 
 /**
  * Curates the best route for a personal request (spec 5.2 / 4.5): orienteering heuristic over the POIs around the
@@ -48,10 +49,20 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
   const minScore = req.minScore ?? 15;
   const speed = req.profile === 'cycling-regular' ? 14 : 4.5;
   const reachM = ((speed * 1000 * (req.budgetMinutes / 60)) / 1.3) * (req.end ? 1 : 0.5);
-  const pool = dedupeNearby(req.pois.filter((p) => eligible(p, minScore)), DEFAULT_TOUR_RULES.minStopDistanceM)
-    .map((p) => ({ p, d: distanceMeters(req.start, p.location) + (req.end ? distanceMeters(p.location, req.end) - distanceMeters(req.start, req.end) : 0) }))
+  const pool = dedupeNearby(
+    req.pois.filter((p) => eligible(p, minScore)),
+    DEFAULT_TOUR_RULES.minStopDistanceM,
+  )
+    .map((p) => ({
+      p,
+      d:
+        distanceMeters(req.start, p.location) +
+        (req.end ? distanceMeters(p.location, req.end) - distanceMeters(req.start, req.end) : 0),
+    }))
     .filter((x) => x.d <= reachM * 2)
-    .sort((a, b) => b.p.score / (1 + a.d / 1000) - a.p.score / (1 + b.d / 1000) || a.p.id.localeCompare(b.p.id))
+    .sort(
+      (a, b) => b.p.score / (1 + a.d / 1000) - a.p.score / (1 + b.d / 1000) || a.p.id.localeCompare(b.p.id),
+    )
     .slice(0, req.maxCandidates ?? 30)
     .map((x) => x.p);
   if (pool.length === 0) return undefined;
@@ -59,7 +70,14 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
   // nodes: 0 start, 1..n candidates, n+1 end (destination, or a copy of the start for round trips)
   const points: LatLng[] = [req.start, ...pool.map((p) => p.location), req.end ?? req.start];
   const m = haversineMatrix(points, req.profile);
-  const candidates: Candidate[] = pool.map((p) => ({ id: p.id, location: p.location, score: p.score, dwellMinutes: p.dwellMinutes, interests: p.interests, ...(p.partnerId ? { partner: true } : {}) }));
+  const candidates: Candidate[] = pool.map((p) => ({
+    id: p.id,
+    location: p.location,
+    score: p.score,
+    dwellMinutes: p.dwellMinutes,
+    interests: p.interests,
+    ...(p.partnerId ? { partner: true } : {}),
+  }));
   const maxLeg = req.maxLegMinutes ?? 20;
   const result = solveOrienteering({
     candidates,
@@ -68,14 +86,22 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
     interests: req.interests,
     maxLegMinutes: maxLeg,
     maxPartnerShare: req.maxPartnerShare ?? 0.25,
-    ...(req.maxPartnerDetourMinutes !== undefined ? { maxPartnerDetourMinutes: req.maxPartnerDetourMinutes } : {}),
+    ...(req.maxPartnerDetourMinutes !== undefined
+      ? { maxPartnerDetourMinutes: req.maxPartnerDetourMinutes }
+      : {}),
   });
   if (result.order.length === 0) return undefined;
   return assemble(req, pool, m, result.order, result.totalScore);
 }
 
 /** Builds the route summary for a given order (also used to re-evaluate a corrected order). */
-export function assemble(req: Pick<PlanRequest, 'budgetMinutes' | 'profile'>, pool: Poi[], m: TravelMatrix, order: string[], score: number): PlannedRoute {
+export function assemble(
+  req: Pick<PlanRequest, 'budgetMinutes' | 'profile'>,
+  pool: Poi[],
+  m: TravelMatrix,
+  order: string[],
+  score: number,
+): PlannedRoute {
   const idx = new Map(pool.map((p, i) => [p.id, i + 1]));
   const end = pool.length + 1;
   const nodes = order.map((id) => idx.get(id)!);
@@ -98,13 +124,27 @@ export function assemble(req: Pick<PlanRequest, 'budgetMinutes' | 'profile'>, po
   const total = round1(walk + dwell);
   const issues = validateTour(
     {
-      stops: stops.map((p) => ({ id: p.id, location: p.location, accessible: p.accessible, partner: Boolean(p.partnerId) })),
+      stops: stops.map((p) => ({
+        id: p.id,
+        location: p.location,
+        accessible: p.accessible,
+        partner: Boolean(p.partnerId),
+      })),
       legMinutes: legMinutes.slice(1),
       totalMinutes: total,
     },
     { ...DEFAULT_TOUR_RULES, minStops: 1, maxLegMinutes: 20, budgetMinutes: req.budgetMinutes },
   );
-  return { stops, legMinutes, finalLegMinutes: round1(finalLeg), totalMinutes: total, walkMinutes: round1(walk), distanceMeters: Math.round(dist), score, issues };
+  return {
+    stops,
+    legMinutes,
+    finalLegMinutes: round1(finalLeg),
+    totalMinutes: total,
+    walkMinutes: round1(walk),
+    distanceMeters: Math.round(dist),
+    score,
+    issues,
+  };
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
@@ -119,7 +159,13 @@ export function fitToBudget(
   budgetMinutes: number,
   interests: Interest[],
 ): { order: string[]; totalMinutes: number; dropped: string[] } {
-  const cands: Candidate[] = stops.map((p) => ({ id: p.id, location: p.location, score: p.score, dwellMinutes: p.dwellMinutes, interests: p.interests }));
+  const cands: Candidate[] = stops.map((p) => ({
+    id: p.id,
+    location: p.location,
+    score: p.score,
+    dwellMinutes: p.dwellMinutes,
+    interests: p.interests,
+  }));
   let order = stops.map((s) => s.id);
   const dropped: string[] = [];
   const weight = (id: string) => {
@@ -128,7 +174,8 @@ export function fitToBudget(
   };
   for (;;) {
     const ev = evaluateOrder({ candidates: cands, minutes: matrix.minutes }, order);
-    if (!ev || ev.totalMinutes <= budgetMinutes + 1e-6 || order.length <= 1) return { order, totalMinutes: ev?.totalMinutes ?? 0, dropped };
+    if (!ev || ev.totalMinutes <= budgetMinutes + 1e-6 || order.length <= 1)
+      return { order, totalMinutes: ev?.totalMinutes ?? 0, dropped };
     const worst = [...order].sort((a, b) => weight(a) - weight(b) || a.localeCompare(b))[0]!;
     order = order.filter((id) => id !== worst);
     dropped.push(worst);

@@ -46,8 +46,8 @@ class CountingLlm implements LlmProvider {
     this.calls.facts++;
     return this.inner.checkFacts(r);
   }
-  generateTourConcept: LlmProvider["generateTourConcept"] = (r) => this.inner.generateTourConcept(r);
-  teaser: LlmProvider["teaser"] = (r) => this.inner.teaser(r);
+  generateTourConcept: LlmProvider['generateTourConcept'] = (r) => this.inner.generateTourConcept(r);
+  teaser: LlmProvider['teaser'] = (r) => this.inner.teaser(r);
   async transition(r: Parameters<LlmProvider['transition']>[0]) {
     this.calls.transition++;
     return this.inner.transition(r);
@@ -286,7 +286,11 @@ describe('getTeaser', () => {
       }
     }
     const { deps } = mk({ llm: new Bad() });
-    await expect(getTeaser(deps, 'u1', { poiId: 'wd_Q82425', lang: 'de' })).rejects.toMatchObject({ code: 'failed-precondition' });
-    await expect(getTeaser(deps, 'u1', { poiId: 'nope', lang: 'de' })).rejects.toMatchObject({ code: 'not-found' });
+    await expect(getTeaser(deps, 'u1', { poiId: 'wd_Q82425', lang: 'de' })).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    await expect(getTeaser(deps, 'u1', { poiId: 'nope', lang: 'de' })).rejects.toMatchObject({
+      code: 'not-found',
+    });
   });
 });

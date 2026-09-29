@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { REGION_FIXTURES } from '../fixtures/regions';
-import { angleDiff, bearingDegrees, destinationPoint, distanceMeters, encodeGeohash, geohashBounds } from '../geo/geohash';
+import {
+  angleDiff,
+  bearingDegrees,
+  destinationPoint,
+  distanceMeters,
+  encodeGeohash,
+  geohashBounds,
+} from '../geo/geohash';
 import { buildPois } from '../poi/pipeline';
 import type { Poi } from '../schemas';
 import { guideStep, initialGuideState, type GuideCommand } from './engine';
@@ -13,14 +20,23 @@ const pois = buildPois(REGION_FIXTURES[0]!.raw, { now: NOW }).pois;
 const here = { lat: 52.5165, lng: 13.3905 };
 
 describe('pickForkOptions (crossroads)', () => {
-  const base = { here, candidates: pois, visitedIds: [] as string[], remainingMinutes: 60, interests: [], profile: 'foot-walking' as const };
+  const base = {
+    here,
+    candidates: pois,
+    visitedIds: [] as string[],
+    remainingMinutes: 60,
+    interests: [],
+    profile: 'foot-walking' as const,
+  };
 
   it('returns two distinct options that fit the remaining time', () => {
     const opts = pickForkOptions(base);
     expect(opts.length).toBe(2);
     const [a, b] = opts as [(typeof opts)[0], (typeof opts)[0]];
     expect(a.poi.id).not.toBe(b.poi.id);
-    expect(a.poi.primaryInterest !== b.poi.primaryInterest || angleDiff(a.bearing, b.bearing) >= 60).toBe(true);
+    expect(a.poi.primaryInterest !== b.poi.primaryInterest || angleDiff(a.bearing, b.bearing) >= 60).toBe(
+      true,
+    );
     for (const o of opts) expect(o.walkMinutes + o.poi.dwellMinutes).toBeLessThanOrEqual(60);
   });
 
@@ -37,7 +53,7 @@ describe('pickForkOptions (crossroads)', () => {
   });
 
   it('respects the time left including the way to the destination', () => {
-    const destination = { lat: 52.5193, lng: 13.3990 };
+    const destination = { lat: 52.5193, lng: 13.399 };
     const tight = pickForkOptions({ ...base, remainingMinutes: 12, destination });
     for (const o of tight) {
       expect(o.walkMinutes + o.poi.dwellMinutes).toBeLessThanOrEqual(12);
@@ -55,7 +71,8 @@ describe('pickForkOptions (crossroads)', () => {
   it('prefers the selected interests', () => {
     const nature = pickForkOptions({ ...base, interests: ['nature'] });
     const history = pickForkOptions({ ...base, interests: ['history'] });
-    const share = (o: typeof nature, i: 'nature' | 'history') => o.filter((x) => x.poi.interests.includes(i)).length;
+    const share = (o: typeof nature, i: 'nature' | 'history') =>
+      o.filter((x) => x.poi.interests.includes(i)).length;
     expect(share(nature, 'nature')).toBeGreaterThanOrEqual(share(history, 'nature'));
   });
 
@@ -67,14 +84,27 @@ describe('pickForkOptions (crossroads)', () => {
 });
 
 describe('roam mode', () => {
-  const start = { lat: 52.5140, lng: 13.3800 };
+  const start = { lat: 52.514, lng: 13.38 };
   const east = 90;
-  const base = { pos: start, heading: east, mode: 'walking' as const, speedMps: 1.3, candidates: pois, seenIds: [] as string[], interests: [], frequency: 'normal' as const };
+  const base = {
+    pos: start,
+    heading: east,
+    mode: 'walking' as const,
+    speedMps: 1.3,
+    candidates: pois,
+    seenIds: [] as string[],
+    interests: [],
+    frequency: 'normal' as const,
+  };
 
   it('only picks POIs ahead in the corridor and never behind', () => {
     const t = pickRoamTarget(base);
     if (t) expect(angleDiff(bearingDegrees(start, t.location), east)).toBeLessThanOrEqual(40);
-    const west = pickRoamTarget({ ...base, heading: 270, candidates: pois.filter((p) => p.location.lng > start.lng + 0.001) });
+    const west = pickRoamTarget({
+      ...base,
+      heading: 270,
+      candidates: pois.filter((p) => p.location.lng > start.lng + 0.001),
+    });
     expect(west).toBeUndefined();
   });
 
@@ -95,7 +125,14 @@ describe('roam mode', () => {
     expect(new Set(picked).size).toBe(picked.length);
     const dup = { ...pois.find((p) => p.name.includes('Reichstag'))!, id: 'dup', score: 99 } as Poi;
     const orig = pois.find((p) => p.name.includes('Reichstag'))!;
-    const res = pickRoamTarget({ ...base, pos: orig.location, heading: undefined, candidates: [orig, dup], seenIds: [orig.id], frequency: 'high' });
+    const res = pickRoamTarget({
+      ...base,
+      pos: orig.location,
+      heading: undefined,
+      candidates: [orig, dup],
+      seenIds: [orig.id],
+      frequency: 'high',
+    });
     expect(res).toBeUndefined();
   });
 
@@ -106,7 +143,13 @@ describe('roam mode', () => {
       let pos = start;
       for (let step = 0; step < 60; step++) {
         pos = destinationPoint(pos, east, 60);
-        const t = pickRoamTarget({ ...base, pos, seenIds: seen, frequency: f, ...(last ? { lastNarratedAt: last } : {}) });
+        const t = pickRoamTarget({
+          ...base,
+          pos,
+          seenIds: seen,
+          frequency: f,
+          ...(last ? { lastNarratedAt: last } : {}),
+        });
         if (t) {
           seen.push(t.id);
           last = t.location;
@@ -140,7 +183,11 @@ describe('roam mode', () => {
 describe('guide engine with open routes (crossroads / roam)', () => {
   const s0 = { id: 'a', name: 'A', location: destinationPoint({ lat: 52.5, lng: 13.4 }, 90, 60) };
   const s1 = { id: 'b', name: 'B', location: destinationPoint({ lat: 52.5, lng: 13.4 }, 90, 260) };
-  const readyInfo = { durationMs: 30_000, lastParagraphMs: 30_000, paragraphs: [{ startMs: 0, durationMs: 30_000 }] };
+  const readyInfo = {
+    durationMs: 30_000,
+    lastParagraphMs: 30_000,
+    paragraphs: [{ startMs: 0, durationMs: 30_000 }],
+  };
 
   it('emits a waypoint once the stop was heard, waits for the next stop instead of finishing, then continues', () => {
     let state = guideStep(initialGuideState(), { type: 'setRoute', stops: [s0], open: true }).state;
@@ -154,7 +201,8 @@ describe('guide engine with open routes (crossroads / roam)', () => {
     let ended = false;
     for (const f of simulateRoute(path, { startTs: NOW, speedMps: 1.35 })) {
       feed({ type: 'location', fix: f });
-      if (cmds.some((c) => c.type === 'prefetch') && !state.ready['a:short'] && !state.ready['a:medium']) feed({ type: 'ready', poiId: 'a', tier: (state.tierFor['a'] ?? 'short'), info: readyInfo });
+      if (cmds.some((c) => c.type === 'prefetch') && !state.ready['a:short'] && !state.ready['a:medium'])
+        feed({ type: 'ready', poiId: 'a', tier: state.tierFor['a'] ?? 'short', info: readyInfo });
       if (state.playback && !ended && f.ts - state.playback.startedTs > 31_000) {
         ended = true;
         feed({ type: 'ended', poiId: 'a', kind: 'stop', completed: true, ts: f.ts });

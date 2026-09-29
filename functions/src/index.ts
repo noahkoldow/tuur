@@ -173,7 +173,11 @@ export const composePlannedRoute = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     try {
-      return await runComposeRoute({ db: db(), llm: llm(), routing: routing(), now: Date.now }, request.auth.uid, request.data);
+      return await runComposeRoute(
+        { db: db(), llm: llm(), routing: routing(), now: Date.now },
+        request.auth.uid,
+        request.data,
+      );
     } catch (e) {
       if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
       throw e;
@@ -181,11 +185,14 @@ export const composePlannedRoute = onCall(
   },
 );
 
-export const getTeaser = onCall({ enforceAppCheck, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
-  try {
-    return await runGetTeaser(narrationDeps(), request.auth.uid, request.data);
-  } catch (e) {
-    return toHttpsError(e);
-  }
-});
+export const getTeaser = onCall(
+  { enforceAppCheck, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runGetTeaser(narrationDeps(), request.auth.uid, request.data);
+    } catch (e) {
+      return toHttpsError(e);
+    }
+  },
+);

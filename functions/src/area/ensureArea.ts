@@ -28,7 +28,12 @@ export async function ensureAreas(
   withNeighbors: boolean,
   rings?: number,
 ): Promise<EnsureAreaResult> {
-  const tiles = rings !== undefined ? tilesAround(geohash, rings) : withNeighbors ? tileWithNeighbors(geohash) : [geohash];
+  const tiles =
+    rings !== undefined
+      ? tilesAround(geohash, rings)
+      : withNeighbors
+        ? tileWithNeighbors(geohash)
+        : [geohash];
   const started: string[] = [];
   const skipped: string[] = [];
   await Promise.all(

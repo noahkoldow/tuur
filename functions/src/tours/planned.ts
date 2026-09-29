@@ -24,7 +24,11 @@ import { TourError, conceptInput, kindOf, makeConcept, type TourDeps } from './s
  * valuable stops if the budget would be exceeded, adds the narrative thread and stores it as a private session.
  * Start/end coordinates are only used for routing and are never persisted.
  */
-export async function composePlannedRoute(deps: TourDeps, uid: string, raw: unknown): Promise<{ tour: Tour; dropped: string[] }> {
+export async function composePlannedRoute(
+  deps: TourDeps,
+  uid: string,
+  raw: unknown,
+): Promise<{ tour: Tour; dropped: string[] }> {
   const parsed = ComposeRouteRequestSchema.safeParse(raw);
   if (!parsed.success) throw new TourError('invalid-argument', 'Invalid route request');
   const req = parsed.data;
@@ -34,15 +38,18 @@ export async function composePlannedRoute(deps: TourDeps, uid: string, raw: unkn
   const pois: Poi[] = [];
   for (const s of snaps) {
     const p = s.exists ? PoiSchema.safeParse(s.data()) : undefined;
-    if (!p?.success || p.data.hidden || !p.data.accessible) throw new TourError('not-found', 'Unknown or unavailable stop');
+    if (!p?.success || p.data.hidden || !p.data.accessible)
+      throw new TourError('not-found', 'Unknown or unavailable stop');
     pois.push(p.data);
   }
-  if (new Set(req.stops).size !== req.stops.length) throw new TourError('invalid-argument', 'Duplicate stops');
+  if (new Set(req.stops).size !== req.stops.length)
+    throw new TourError('invalid-argument', 'Duplicate stops');
 
   try {
     await consumeRateLimit(deps.db, `route_user_${uid}`, 20, 3600_000, deps.now());
   } catch (e) {
-    if (e instanceof RateLimitError) throw new TourError('resource-exhausted', 'Too many requests', { retryAfterMs: e.retryAfterMs });
+    if (e instanceof RateLimitError)
+      throw new TourError('resource-exhausted', 'Too many requests', { retryAfterMs: e.retryAfterMs });
     throw e;
   }
   const tile = pois[0]!.tile;
@@ -62,15 +69,38 @@ export async function composePlannedRoute(deps: TourDeps, uid: string, raw: unkn
   const minutes = req.start ? withOpenEnd : withOpenEnd.map((row, i) => (i === 0 ? row.map(() => 0) : row));
   const fit = fitToBudget(pois, { minutes, meters: m.meters }, req.budgetMinutes, req.interests);
   const kept = fit.order.map((id) => pois.find((p) => p.id === id)!);
-  if (kept.length === 0 || fit.totalMinutes > req.budgetMinutes + 0.5) throw new TourError('failed-precondition', 'No stops fit the time budget');
+  if (kept.length === 0 || fit.totalMinutes > req.budgetMinutes + 0.5)
+    throw new TourError('failed-precondition', 'No stops fit the time budget');
 
   const ev = evaluateOrder(
-    { candidates: pois.map((p) => ({ id: p.id, location: p.location, score: p.score, dwellMinutes: p.dwellMinutes, interests: p.interests })), minutes },
+    {
+      candidates: pois.map((p) => ({
+        id: p.id,
+        location: p.location,
+        score: p.score,
+        dwellMinutes: p.dwellMinutes,
+        interests: p.interests,
+      })),
+      minutes,
+    },
     fit.order,
   );
-  const dirPoints = [...(req.start ? [req.start] : []), ...kept.map((p) => p.location), ...(req.end ? [req.end] : req.roundTrip ? [startPt] : [])];
-  const dir = dirPoints.length > 1 ? await routing.directions(dirPoints, req.profile) : { path: dirPoints.map((p) => [p.lat, p.lng] as [number, number]), meters: 0, minutes: 0 };
-  if (routing.upstreamCalls) await logUsage(deps.db, cfg.pricing, { kind: 'routing', usage: { routingCalls: routing.upstreamCalls }, tile, ok: true }, deps.now());
+  const dirPoints = [
+    ...(req.start ? [req.start] : []),
+    ...kept.map((p) => p.location),
+    ...(req.end ? [req.end] : req.roundTrip ? [startPt] : []),
+  ];
+  const dir =
+    dirPoints.length > 1
+      ? await routing.directions(dirPoints, req.profile)
+      : { path: dirPoints.map((p) => [p.lat, p.lng] as [number, number]), meters: 0, minutes: 0 };
+  if (routing.upstreamCalls)
+    await logUsage(
+      deps.db,
+      cfg.pricing,
+      { kind: 'routing', usage: { routingCalls: routing.upstreamCalls }, tile, ok: true },
+      deps.now(),
+    );
 
   // walking minutes per stop (from the previous point)
   const idxOf = new Map(pois.map((p, i) => [p.id, i + 1]));
@@ -83,10 +113,20 @@ export async function composePlannedRoute(deps: TourDeps, uid: string, raw: unkn
   }
   const areaDoc = await deps.db.collection('areas').doc(tile).get();
   const placeId = (areaDoc.get('placeId') as string | undefined) ?? 'planned';
-  const placeName = ((await deps.db.collection('places').doc(placeId).get()).get('name') as string | undefined) ?? placeId;
+  const placeName =
+    ((await deps.db.collection('places').doc(placeId).get()).get('name') as string | undefined) ?? placeId;
   const themes = themesOf(kept);
-  const stopInfo = kept.map((p, i) => ({ poiId: p.id, name: p.name, walkMinutesFromPrev: i === 0 ? 0 : legs[i]!, kind: kindOf(p) }));
-  const input = conceptInput(placeName, { template: 'planned', durationMinutes: ev?.totalMinutes ?? req.budgetMinutes, themes, stops: stopInfo }, req.lang);
+  const stopInfo = kept.map((p, i) => ({
+    poiId: p.id,
+    name: p.name,
+    walkMinutesFromPrev: i === 0 ? 0 : legs[i]!,
+    kind: kindOf(p),
+  }));
+  const input = conceptInput(
+    placeName,
+    { template: 'planned', durationMinutes: ev?.totalMinutes ?? req.budgetMinutes, themes, stops: stopInfo },
+    req.lang,
+  );
   const concept = await makeConcept(deps, cfg, input, tile);
   const { suggestedOrder: _ignored, ...text } = concept as TourConcept;
   void _ignored;
@@ -105,16 +145,39 @@ export async function composePlannedRoute(deps: TourDeps, uid: string, raw: unkn
     template: 'planned',
     profile: req.profile,
     themes,
-    stops: kept.map((p, i) => ({ poiId: p.id, order: i, name: p.name, location: p.location, dwellMinutes: p.dwellMinutes, walkMinutesFromPrev: i === 0 ? 0 : Math.round(legs[i]! * 10) / 10, partner: Boolean(p.partnerId) })),
+    stops: kept.map((p, i) => ({
+      poiId: p.id,
+      order: i,
+      name: p.name,
+      location: p.location,
+      dwellMinutes: p.dwellMinutes,
+      walkMinutesFromPrev: i === 0 ? 0 : Math.round(legs[i]! * 10) / 10,
+      partner: Boolean(p.partnerId),
+    })),
     path: encodePolyline(simplifyPath(dir.path, 400)),
     durationMinutes: ev?.totalMinutes ?? req.budgetMinutes,
     walkMinutes: ev?.walkMinutes ?? 0,
     distanceMeters: Math.round(dir.meters),
-    bbox: { south: Math.min(...lats), north: Math.max(...lats), west: Math.min(...lngs), east: Math.max(...lngs) },
+    bbox: {
+      south: Math.min(...lats),
+      north: Math.max(...lats),
+      west: Math.min(...lngs),
+      east: Math.max(...lngs),
+    },
     routingSource: routing.source,
     fingerprint: kept.map((p) => p.id).join('|'),
     hasPartner: kept.some((p) => p.partnerId),
-    ...(cover ? { coverImage: { url: cover.thumbUrl ?? cover.url, ...(cover.author ? { author: cover.author } : {}), license: cover.license, ...(cover.licenseUrl ? { licenseUrl: cover.licenseUrl } : {}), sourceUrl: cover.sourceUrl } } : {}),
+    ...(cover
+      ? {
+          coverImage: {
+            url: cover.thumbUrl ?? cover.url,
+            ...(cover.author ? { author: cover.author } : {}),
+            license: cover.license,
+            ...(cover.licenseUrl ? { licenseUrl: cover.licenseUrl } : {}),
+            sourceUrl: cover.sourceUrl,
+          },
+        }
+      : {}),
     texts: { [req.lang]: text },
     createdAt: now,
     updatedAt: now,

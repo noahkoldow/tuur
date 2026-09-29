@@ -59,7 +59,12 @@ export interface LlmProvider {
     tourTitle?: string;
   }): Promise<{ text: string; usage: Usage }>;
   /** One-sentence teaser for a place from its sources (crossroads cards, spec 5.3). */
-  teaser(req: { model: string; lang: string; name: string; sources: string }): Promise<{ text: string; usage: Usage }>;
+  teaser(req: {
+    model: string;
+    lang: string;
+    name: string;
+    sources: string;
+  }): Promise<{ text: string; usage: Usage }>;
   /** Narrative thread for a tour (title, teaser, intro, hand-overs, outro) from route + names (spec 4.3). */
   generateTourConcept(req: {
     model: string;
@@ -341,7 +346,8 @@ export class MockLlmProvider implements LlmProvider {
   }
 
   async teaser(req: { name: string; sources: string }): Promise<{ text: string; usage: Usage }> {
-    const first = req.sources.split(/(?<=[.!?])\s+/).find((x) => x.length > 20 && !x.includes('=')) ?? req.name;
+    const first =
+      req.sources.split(/(?<=[.!?])\s+/).find((x) => x.length > 20 && !x.includes('=')) ?? req.name;
     return { text: first.trim(), usage: { liteInputTokens: 20, liteOutputTokens: 20 } };
   }
 

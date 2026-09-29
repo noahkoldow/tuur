@@ -4,29 +4,38 @@ import { Image } from 'expo-image';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBackend } from '../src/backend';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
+import { OptionCard } from '../src/components/OptionCard';
 import { ProgressBar } from '../src/components/ProgressBar';
 import { Sheet } from '../src/components/Sheet';
 import { Text } from '../src/components/Text';
 import { TuurMap } from '../src/components/TuurMap';
-import { useBackend } from '../src/backend';
-import { endSession, tourPath, useActiveSession } from '../src/guide/session';
+import type { ForkSnapshot } from '../src/guide/modes';
+import { endSession, tourPath, useActiveSession, type ActiveSession } from '../src/guide/session';
 import { useSettings } from '../src/state/settings';
 import { colors, radii } from '../src/theme';
+
+const NO_FORK: ForkSnapshot = { options: [], loading: false };
+const noopSubscribe = () => () => undefined;
 
 /** Tour screen (spec 11): map on top, player sheet below (title, image carousel, red progress, transcript). */
 export default function Play() {
   const session = useActiveSession();
   if (!session) return <Redirect href="/home" />;
-  return <PlayInner />;
+  return <PlayInner session={session} />;
 }
 
-function PlayInner() {
-  const session = useActiveSession()!;
-  const { runtime, tour, simulator } = session;
+function PlayInner({ session }: { session: ActiveSession }) {
+  const { runtime, tour, simulator, fork } = session;
   const ui = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
+  const forkState = useSyncExternalStore(
+    fork?.subscribe ?? noopSubscribe,
+    fork?.getSnapshot ?? (() => NO_FORK),
+    () => NO_FORK,
+  );
   const { t } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
@@ -36,20 +45,18 @@ function PlayInner() {
   const [showText, setShowText] = useState(false);
   const [sheet, setSheet] = useState(1);
   const [reported, setReported] = useState(false);
-  const path = useMemo(() => tourPath(tour), [tour]);
-  const text = tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
+  const path = useMemo(() => (tour ? tourPath(tour) : ui.stops.map((s) => s.location)), [tour, ui.stops]);
+  const text = tour ? (tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0]) : undefined;
   const n = ui.narration;
+  const lastP = n?.paragraphs[n.paragraphs.length - 1];
   const progress =
-    n && n.kind === 'stop'
-      ? ui.positionMs /
-        Math.max(
-          1,
-          n.paragraphs[n.paragraphs.length - 1]
-            ? n.paragraphs[n.paragraphs.length - 1]!.startMs +
-                n.paragraphs[n.paragraphs.length - 1]!.durationMs
-            : 1,
-        )
-      : 0;
+    n && n.kind === 'stop' && lastP ? ui.positionMs / Math.max(1, lastP.startMs + lastP.durationMs) : 0;
+  const modeTitle =
+    session.mode === 'roam'
+      ? t('roam.title')
+      : session.mode === 'fork'
+        ? t('fork.title')
+        : (text?.title ?? '');
   const title =
     ui.phase === 'finished'
       ? t('player.finished')
@@ -57,7 +64,9 @@ function PlayInner() {
         ? n.title
         : ui.target
           ? t('player.walkingTo', { name: ui.target.name })
-          : (text?.title ?? '');
+          : session.mode === 'roam'
+            ? t('roam.exploringAhead')
+            : modeTitle;
 
   const exit = () =>
     Alert.alert(t('player.exit'), t('player.exitConfirm'), [
@@ -113,14 +122,16 @@ function PlayInner() {
     </View>
   );
 
+  const center = tour?.stops[0]?.location ?? ui.user ?? ui.stops[0]?.location ?? { lat: 52.52, lng: 13.405 };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
       <TuurMap
-        center={tour.stops[0]!.location}
+        center={center}
         route={path}
         user={ui.user}
         follow={Boolean(ui.user)}
-        fit={ui.user ? undefined : path}
+        {...(ui.user ? {} : { fit: path })}
         bottomInset={360}
         stops={ui.stops.map((s, i) => ({
           id: s.id,
@@ -132,7 +143,7 @@ function PlayInner() {
               : s.state === 'current'
                 ? 'current'
                 : 'upcoming',
-          partner: tour.stops[i]?.partner ?? false,
+          partner: tour?.stops[i]?.partner ?? false,
         }))}
       />
       <View
@@ -171,6 +182,34 @@ function PlayInner() {
               icon={ui.notice === 'vehicle_paused' ? 'truck' : undefined}
             />
           ) : null}
+
+          {fork && (forkState.options.length > 0 || ui.awaitingRoute) ? (
+            <View style={{ gap: 10 }}>
+              <Text variant="heading" accessibilityRole="header">
+                {t('fork.choose')}
+              </Text>
+              <Text variant="caption">
+                {forkState.loading ? t('fork.loadingTeasers') : t('fork.chooseHint')}
+              </Text>
+              {forkState.options.length === 0 ? (
+                <Banner text={t('fork.none')} />
+              ) : (
+                <Row gap={12} style={{ alignItems: 'stretch' }}>
+                  {forkState.options.map((o) => (
+                    <OptionCard
+                      key={o.poi.id}
+                      poi={o.poi}
+                      walkMinutes={o.walkMinutes}
+                      teaser={o.teaser}
+                      onPress={() => fork.choose(o.poi.id)}
+                    />
+                  ))}
+                </Row>
+              )}
+            </View>
+          ) : null}
+
+          {session.mode === 'roam' && !n ? <Banner icon="compass" text={t('roam.hint')} /> : null}
           {ui.offerMore ? (
             <Button label={t('player.more')} icon="plus-circle" onPress={runtime.more} />
           ) : null}

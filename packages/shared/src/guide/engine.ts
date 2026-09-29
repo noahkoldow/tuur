@@ -205,7 +205,14 @@ export function guideStep(
 
   switch (event.type) {
     case 'setRoute': {
-      s = { ...s, route: event.stops, index: event.startIndex ?? 0, finished: event.stops.length === 0 && !(event.open ?? s.open), open: event.open ?? s.open, awaitingRoute: false };
+      s = {
+        ...s,
+        route: event.stops,
+        index: event.startIndex ?? 0,
+        finished: event.stops.length === 0 && !(event.open ?? s.open),
+        open: event.open ?? s.open,
+        awaitingRoute: false,
+      };
       break;
     }
     case 'location': {
@@ -531,7 +538,8 @@ function handleTarget(
     (s.playback?.kind === 'stop' && s.playback.poiId === target.id) || s.pending?.poiId === target.id;
   if (!blocked && !narrationDone && !alreadyPlayingOrQueued) {
     const ready = Boolean(s.ready[key(target.id, tier)]);
-    const due = atStop || eta <= startAt;
+    // Open routes (roam) have no navigation: passing within ~110 m counts as "there" ("on your left...").
+    const due = atStop || eta <= startAt || (s.open && dist <= 110);
     if (due && ready) {
       if (s.playback) {
         s.pending = { poiId: target.id, tier };

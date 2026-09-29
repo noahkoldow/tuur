@@ -141,8 +141,12 @@ export function createFirebaseBackend(): Backend {
   return {
     kind: 'firebase',
     auth: authApi,
-    async ensureArea(tile) {
-      await call('ensureArea', { geohash: tile, withNeighbors: true });
+    async ensureArea(tile, rings) {
+      await call('ensureArea', {
+        geohash: tile,
+        withNeighbors: true,
+        ...(rings !== undefined ? { rings } : {}),
+      });
     },
     watchArea(tile, cb) {
       return onSnapshot(
@@ -198,6 +202,10 @@ export function createFirebaseBackend(): Backend {
         }
       }
       return out;
+    },
+    composePlannedRoute: (req) => call('composePlannedRoute', req),
+    async getTeaser(req) {
+      return (await call<{ poiId: string; lang: string }, { text: string }>('getTeaser', req)).text;
     },
     getNarration: (req: GetNarrationRequest) =>
       call<GetNarrationRequest, NarrationResponse>('getNarration', req),

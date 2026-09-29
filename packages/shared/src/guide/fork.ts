@@ -27,7 +27,8 @@ export interface ForkInput {
   minDistanceM?: number;
 }
 
-const walkMinutes = (a: LatLng, b: LatLng, profile: RoutingProfile) => haversineMatrix([a, b], profile).minutes[0]![1]!;
+const walkMinutes = (a: LatLng, b: LatLng, profile: RoutingProfile) =>
+  haversineMatrix([a, b], profile).minutes[0]![1]!;
 
 /**
  * Crossroads (spec 5.3): proposes two next stops that fit the remaining time, roughly the direction to the
@@ -51,14 +52,27 @@ export function pickForkOptions(inp: ForkInput): ForkOption[] {
     if (walk + poi.dwellMinutes + onward > inp.remainingMinutes + 1e-6) continue;
     const bearing = bearingDegrees(inp.here, poi.location);
     if (destBearing !== undefined && angleDiff(bearing, destBearing) > 100) continue;
-    const c = { id: poi.id, location: poi.location, score: poi.score, dwellMinutes: poi.dwellMinutes, interests: poi.interests };
+    const c = {
+      id: poi.id,
+      location: poi.location,
+      score: poi.score,
+      dwellMinutes: poi.dwellMinutes,
+      interests: poi.interests,
+    };
     const value = weightedScore(c, inp.interests) / (1 + walk / 10);
-    options.push({ poi, walkMinutes: Math.round(walk * 10) / 10, bearing, distanceM: Math.round(dist), value });
+    options.push({
+      poi,
+      walkMinutes: Math.round(walk * 10) / 10,
+      bearing,
+      distanceM: Math.round(dist),
+      value,
+    });
   }
   options.sort((a, b) => b.value - a.value || a.poi.id.localeCompare(b.poi.id));
   const first = options[0];
   if (!first) return [];
-  const distinct = (a: ForkOption, b: ForkOption) => a.poi.primaryInterest !== b.poi.primaryInterest || angleDiff(a.bearing, b.bearing) >= 60;
+  const distinct = (a: ForkOption, b: ForkOption) =>
+    a.poi.primaryInterest !== b.poi.primaryInterest || angleDiff(a.bearing, b.bearing) >= 60;
   const second = options.slice(1).find((o) => distinct(first, o));
   const strip = ({ value: _v, ...o }: ForkOption & { value: number }): ForkOption => {
     void _v;
@@ -68,4 +82,5 @@ export function pickForkOptions(inp: ForkInput): ForkOption[] {
 }
 
 /** Remaining minutes after having spent `usedMinutes`. */
-export const remainingAfter = (budgetMinutes: number, usedMinutes: number) => Math.max(0, budgetMinutes - usedMinutes);
+export const remainingAfter = (budgetMinutes: number, usedMinutes: number) =>
+  Math.max(0, budgetMinutes - usedMinutes);
