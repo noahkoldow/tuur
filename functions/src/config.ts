@@ -81,6 +81,28 @@ export function narrationDeps(): NarrationDeps {
     sources: narrationSources(),
     store: objectStore(),
     now: Date.now,
+    // Entitlements are checked before any content is served or generated. `system-pregen` is the internal warm-up
+    // after tour creation (first stops only, cost brake spec 4.3) and never reaches clients.
+    authorize: async (uid, poi, access) => {
+      if (uid === 'system-pregen') return;
+      try {
+        await authorizeContent({ db: db(), now: Date.now }, uid, {
+          tourId: access?.tourId,
+          mode: access?.mode,
+          poiIds: [poi.id],
+          tile: poi.tile,
+        });
+      } catch (e) {
+        if (e instanceof BillingError) {
+          throw new NarrationError(
+            e.code === 'not-found' ? 'not-found' : 'permission-denied',
+            e.message,
+            e.details,
+          );
+        }
+        throw e;
+      }
+    },
   };
 }
 
@@ -88,4 +110,26 @@ export function routing(): RoutingProvider {
   return ROUTING_PROVIDER.value() === 'openrouteservice'
     ? new OrsRoutingProvider(ORS_API_KEY.value())
     : new MockRoutingProvider();
+}
+
+import type { TourDeps } from './tours/service';
+import { TourError } from './tours/service';
+
+/** Deps of the planned-route callable, including the entitlement check for the paid 24 h session. */
+export function plannedRouteDeps(): TourDeps {
+  return {
+    db: db(),
+    llm: llm(),
+    routing: routing(),
+    now: Date.now,
+    authorize: async (uid, r) => {
+      try {
+        await authorizeContent({ db: db(), now: Date.now }, uid, { mode: r.mode, poiIds: [], tile: r.tile });
+      } catch (e) {
+        if (e instanceof BillingError)
+          throw new TourError('failed-precondition', 'Route planning needs an unlocked session', e.details);
+        throw e;
+      }
+    },
+  };
 }

@@ -6,7 +6,17 @@ import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { EnsureAreaRequestSchema, rateLimitDecision } from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
-import { GEMINI_API_KEY, ORS_API_KEY, db, geocoder, llm, narrationDeps, poiSources, routing } from './config';
+import {
+  GEMINI_API_KEY,
+  ORS_API_KEY,
+  db,
+  geocoder,
+  llm,
+  narrationDeps,
+  plannedRouteDeps,
+  poiSources,
+  routing,
+} from './config';
 import { generateAutoTours as runGenerateTours, TourError } from './tours/service';
 import { composePlannedRoute as runComposeRoute } from './tours/planned';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
@@ -16,7 +26,6 @@ import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
 import {
   BillingError,
-  authorizeContent,
   createInvite as runCreateInvite,
   createRewardNonce as runCreateRewardNonce,
   grantRewardFromSsv,
@@ -188,11 +197,7 @@ export const composePlannedRoute = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     try {
-      return await runComposeRoute(
-        { db: db(), llm: llm(), routing: routing(), now: Date.now },
-        request.auth.uid,
-        request.data,
-      );
+      return await runComposeRoute(plannedRouteDeps(), request.auth.uid, request.data);
     } catch (e) {
       if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
       throw e;

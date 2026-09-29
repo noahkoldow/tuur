@@ -474,3 +474,46 @@ describe('getNarration is locked before generation (spec 6.4)', () => {
     expect(llm.calls).toBe(1);
   });
 });
+
+import { narrationDeps, plannedRouteDeps } from '../src/config';
+import { composePlannedRoute } from '../src/tours/planned';
+
+describe('production wiring enforces entitlements', () => {
+  it('narrationDeps() denies locked content and lets the internal pre-generation through', async () => {
+    const poi = buildPois(REGION_FIXTURES[0]!.raw, { now: 1 }).pois.find((p) => p.id === 'wd_Q82425')!;
+    await seedTour();
+    const authorize = narrationDeps().authorize!;
+    await expect(authorize('u1', poi, { tourId: 'tour1', mode: 'tour' })).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(authorize('u1', poi, undefined)).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(authorize('system-pregen', poi, undefined)).resolves.toBeUndefined();
+    await wallet('u1', 1);
+    await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
+    await expect(authorize('u1', poi, { tourId: 'tour1', mode: 'tour' })).resolves.toBeUndefined();
+  });
+
+  it('plannedRouteDeps() requires an unlocked session before a planned route is composed', async () => {
+    const pois = buildPois(REGION_FIXTURES[0]!.raw, { now: 1 })
+      .pois.filter((p) => p.accessible && p.score > 30)
+      .slice(0, 3);
+    for (const p of pois)
+      await db
+        .collection('pois')
+        .doc(p.id)
+        .set({ ...p, tile: 'u33dc0' });
+    const req = {
+      stops: pois.map((p) => p.id),
+      budgetMinutes: 60,
+      profile: 'foot-walking',
+      lang: 'de',
+      interests: [],
+    };
+    await expect(composePlannedRoute(plannedRouteDeps(), 'u1', req)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    await wallet('u1', 1);
+    await spendCredit(deps(), 'u1', { kind: 'session', placeId: 'DE_berlin' });
+    await expect(composePlannedRoute(plannedRouteDeps(), 'u1', req)).resolves.toBeDefined();
+  });
+});
