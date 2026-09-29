@@ -37,3 +37,5 @@ export * from './routing/planRoute';
 export * from './guide/fork';
 export * from './guide/roam';
 export * from './offline/plan';
+export * from './billing/entitlements';
+export * from './billing/ads';

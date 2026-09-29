@@ -65,7 +65,14 @@ describe('firestore rules', () => {
     await assertFails(updateDoc(doc(alice(), 'users/alice/entitlements/sub'), { active: false }));
     await assertFails(deleteDoc(doc(alice(), 'users/alice/entitlements/sub')));
     await assertFails(setDoc(doc(admin(), 'users/alice/entitlements/pro'), { active: true }));
-    await assertFails(setDoc(doc(alice(), 'users/alice/credits/c1'), { amount: 100 }));
+    await assertFails(
+      setDoc(doc(alice(), 'users/alice/credits/wallet'), { balance: 100, rewardBalance: 100 }),
+    );
+    await assertFails(setDoc(doc(alice(), 'users/alice/creditLedger/x'), { delta: 5 }));
+    await assertFails(setDoc(doc(alice(), 'invites/abc'), { tourId: 't', ownerUid: 'alice' }));
+    await assertFails(getDoc(doc(alice(), 'invites/abc')));
+    await assertFails(setDoc(doc(alice(), 'users/alice/rewardCounters/2026-01-01'), { granted: 0 }));
+    await assertFails(setDoc(doc(alice(), 'users/alice/sessions/s1'), { expiresAt: 1 }));
   });
 
   it('users can only edit their own whitelisted profile fields', async () => {

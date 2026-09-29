@@ -43,7 +43,12 @@ export interface NarrationDeps {
   store: ObjectStore;
   now: () => number;
   /** Hook for entitlement checks (Phase 9); throws to deny. */
-  authorize?: (uid: string, poi: Poi) => Promise<void>;
+  authorize?: (
+    uid: string,
+    poi: Poi,
+    access:
+      { tourId?: string | undefined; mode?: 'tour' | 'planned' | 'fork' | 'roam' | undefined } | undefined,
+  ) => Promise<void>;
   /** Overrides config loading in tests. */
   config?: () => Promise<AiConfig>;
 }
@@ -51,7 +56,12 @@ export interface NarrationDeps {
 export class NarrationError extends Error {
   constructor(
     readonly code:
-      'not-found' | 'resource-exhausted' | 'failed-precondition' | 'unavailable' | 'invalid-argument',
+      | 'not-found'
+      | 'permission-denied'
+      | 'resource-exhausted'
+      | 'failed-precondition'
+      | 'unavailable'
+      | 'invalid-argument',
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
@@ -108,7 +118,7 @@ export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unk
   const req = parsed.data;
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const poi = await loadPoi(deps.db, req.poiId);
-  await deps.authorize?.(uid, poi);
+  await deps.authorize?.(uid, poi, req.access);
 
   const key = narrationKey(
     { ...req, primaryInterest: req.primaryInterest ?? poi.primaryInterest },

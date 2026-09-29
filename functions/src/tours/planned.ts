@@ -53,6 +53,7 @@ export async function composePlannedRoute(
     throw e;
   }
   const tile = pois[0]!.tile;
+  await deps.authorize?.(uid, { mode: 'planned', tile });
   const budget = budgetDecision(cfg, await spentToday(deps.db, tile, deps.now()));
   if (!budget.allowed) throw new TourError('unavailable', 'Generation is paused', { reason: budget.reason });
 

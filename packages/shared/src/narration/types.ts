@@ -6,6 +6,13 @@ export const GetNarrationRequestSchema = z.object({
   lang: z.string().regex(/^[a-z]{2,3}$/),
   lengthTier: z.enum(LENGTH_TIERS),
   primaryInterest: z.enum(INTERESTS).optional(),
+  /** What the listener is doing; the server checks entitlements against it (never trusts free/bought claims). */
+  access: z
+    .object({
+      tourId: z.string().max(200).optional(),
+      mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+    })
+    .optional(),
   /** Set by the offline download manager: uses the download rate-limit bucket. */
   download: z.boolean().optional(),
   /** Optional narrative context, e.g. previous stop title for smooth hand-over. */

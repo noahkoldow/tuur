@@ -12,6 +12,12 @@ export const GetTransitionRequestSchema = z.object({
   /** Rounded on the server so equal hops share one cache entry. */
   walkMinutes: z.number().min(1).max(240),
   tourTitle: z.string().max(200).optional(),
+  access: z
+    .object({
+      tourId: z.string().max(200).optional(),
+      mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+    })
+    .optional(),
 });
 
 /** Short optional hand-over between two stops (lite model, cached like narrations, spec 4.4.7). */
@@ -27,6 +33,7 @@ export async function getTransition(deps: NarrationDeps, uid: string, raw: unkno
       return PoiSchema.parse(s.data());
     }),
   );
+  await deps.authorize?.(uid, to!, r.access);
   const minutes = Math.max(1, Math.round(r.walkMinutes / 2) * 2);
   const key = `tr__${from!.id}__${to!.id}__${r.lang}__${minutes}__${cfg.promptVersion}`.replace(
     /[^A-Za-z0-9_-]/g,

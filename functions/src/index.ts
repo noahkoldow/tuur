@@ -14,6 +14,21 @@ import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
 import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
+import {
+  BillingError,
+  authorizeContent,
+  createInvite as runCreateInvite,
+  createRewardNonce as runCreateRewardNonce,
+  grantRewardFromSsv,
+  previewInvite,
+  processRevenueCatEvent,
+  redeemInvite as runRedeemInvite,
+  spendCredit as runSpendCredit,
+  verifyBearer,
+} from './billing/entitlements';
+import { fetchVerifierKeys, verifyAdmobSignature } from './billing/ssv';
+import { onRequest } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 
 initializeApp();
 const REGION = 'europe-west1';
@@ -196,3 +211,91 @@ export const getTeaser = onCall(
     }
   },
 );
+
+// ---- Monetization (spec 6): all entitlement writes happen here, never on the client ----
+
+const REVENUECAT_WEBHOOK_SECRET = defineSecret('REVENUECAT_WEBHOOK_SECRET');
+
+function toBilling(e: unknown): never {
+  if (e instanceof BillingError) throw new HttpsError(e.code, e.message, e.details);
+  throw e;
+}
+
+export const spendCredit = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runSpendCredit({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const createInvite = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runCreateInvite({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const redeemInvite = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runRedeemInvite({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const createRewardNonce = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runCreateRewardNonce({ db: db(), now: Date.now }, request.auth.uid);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+/** RevenueCat webhook: authenticated by a shared bearer secret; events are idempotent. */
+export const revenueCatWebhook = onRequest(
+  { secrets: [REVENUECAT_WEBHOOK_SECRET], cors: false },
+  async (req, res) => {
+    if (req.method !== 'POST') return void res.status(405).send('method not allowed');
+    if (!verifyBearer(req.get('authorization'), REVENUECAT_WEBHOOK_SECRET.value()))
+      return void res.status(401).send('unauthorized');
+    try {
+      const out = await processRevenueCatEvent({ db: db(), now: Date.now }, req.body);
+      res.status(200).json(out);
+    } catch (e) {
+      if (e instanceof BillingError && e.code === 'invalid-argument')
+        return void res.status(400).send('bad request');
+      res.status(500).send('error'); // RevenueCat retries with backoff
+    }
+  },
+);
+
+/** AdMob rewarded-ad server-side verification callback (spec 6.2): signature-checked, single-use nonce. */
+export const admobSsv = onRequest({ cors: false }, async (req, res) => {
+  const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1) : '';
+  let keys = await fetchVerifierKeys().catch(() => []);
+  let check = verifyAdmobSignature(query, keys);
+  if (!check.ok && !keys.some((k) => String(k.keyId) === check.params.get('key_id'))) {
+    keys = await fetchVerifierKeys(fetch, Date.now(), true).catch(() => keys);
+    check = verifyAdmobSignature(query, keys);
+  }
+  if (!check.ok) return void res.status(403).send('invalid signature');
+  const userId = check.params.get('user_id');
+  const nonce = check.params.get('custom_data');
+  const transactionId = check.params.get('transaction_id');
+  if (!userId || !nonce || !transactionId) return void res.status(400).send('missing params');
+  const out = await grantRewardFromSsv({ db: db(), now: Date.now }, { userId, nonce, transactionId });
+  res.status(200).json(out);
+});
+
+/** Public invite preview for the landing page (no personal data). */
+export const invitePreview = onRequest({ cors: true }, async (req, res) => {
+  const token = String(req.query['token'] ?? '');
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json(await previewInvite({ db: db(), now: Date.now }, token));
+});

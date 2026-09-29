@@ -15,6 +15,12 @@ import { NarrationError, type NarrationDeps } from './service';
 export const GetTeaserRequestSchema = z.object({
   poiId: z.string().min(1).max(120),
   lang: z.string().regex(/^[a-z]{2,3}$/),
+  access: z
+    .object({
+      tourId: z.string().max(200).optional(),
+      mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -28,11 +34,12 @@ export async function getTeaser(
 ): Promise<{ text: string; cached: boolean }> {
   const parsed = GetTeaserRequestSchema.safeParse(raw);
   if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
-  const { poiId, lang } = parsed.data;
+  const { poiId, lang, access } = parsed.data;
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const snap = await deps.db.collection('pois').doc(poiId).get();
   if (!snap.exists || snap.get('hidden')) throw new NarrationError('not-found', 'POI not found');
   const poi = PoiSchema.parse(snap.data());
+  await deps.authorize?.(uid, poi, access);
   const ref = deps.db
     .collection('teasers')
     .doc(`${poiId}__${lang}__${cfg.promptVersion}`.replace(/[^A-Za-z0-9_-]/g, '_'));

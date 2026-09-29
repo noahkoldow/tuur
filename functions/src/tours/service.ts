@@ -43,6 +43,8 @@ export interface TourDeps {
   now: () => number;
   templates?: TourTemplate[];
   config?: () => Promise<AiConfig>;
+  /** Entitlement check for paid dynamic modes (planned route); throws to deny. */
+  authorize?: (uid: string, req: { mode: 'planned'; tile: string }) => Promise<void>;
   /** Best-effort pre-generation of the first stop narrations (cost brake, spec 4.3). */
   pregenerate?: (poiIds: string[], lang: string) => Promise<void>;
 }

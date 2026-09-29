@@ -18,6 +18,8 @@ import {
 } from './providers/narrationSources';
 import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from './providers/routing';
 import type { NarrationDeps, ObjectStore } from './narration/service';
+import { BillingError, authorizeContent } from './billing/entitlements';
+import { NarrationError } from './narration/service';
 
 export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 export const ORS_API_KEY = defineSecret('ORS_API_KEY');
