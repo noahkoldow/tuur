@@ -78,6 +78,9 @@ export function objectStore(): ObjectStore {
         });
     },
     signedUrl: async (path, ttlMs) => {
+      // the Storage emulator cannot sign: local development gets the plain emulator URL
+      if (process.env['FIREBASE_STORAGE_EMULATOR_HOST'])
+        return `http://${process.env['FIREBASE_STORAGE_EMULATOR_HOST']}/v0/b/${bucket().name}/o/${encodeURIComponent(path)}?alt=media`;
       const [url] = await bucket()
         .file(path)
         .getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + ttlMs });

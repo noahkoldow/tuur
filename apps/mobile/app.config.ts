@@ -26,7 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSLocationWhenInUseUsageDescription:
         'tuur uses your location on your device to tell you the right story when you arrive at a place.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
-        'tuur keeps your audio tour going while the screen is off. Your position is processed on your device; only a coarse map square is sent to our servers.',
+        'tuur keeps your audio tour going while the screen is off. Your position is processed on your device. Only a coarse map square is sent to our servers, plus a one-time position for route planning or offer redemption.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },

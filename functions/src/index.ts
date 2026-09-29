@@ -526,7 +526,6 @@ export const sweepPartners = onSchedule(
   { schedule: 'every day 04:00', timeZone: 'Europe/Berlin' },
   async () => {
     await sweepPartnerPlans(partnerDeps());
-    await retentionSweep(db(), Date.now());
   },
 );
 
@@ -591,3 +590,11 @@ export const exportMyData = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }
   await enforceRateLimit(`export_data_${request.auth.uid}`, 5, 3600_000);
   return runExportMyData(accountDeps(), request.auth.uid);
 });
+
+/** Daily retention purge (privacy policy periods); separate from the partner sweep so one failure cannot skip the other. */
+export const retentionPurge = onSchedule(
+  { schedule: 'every day 04:30', timeZone: 'Europe/Berlin', timeoutSeconds: 540 },
+  async () => {
+    await retentionSweep(db(), Date.now());
+  },
+);

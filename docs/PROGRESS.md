@@ -85,7 +85,7 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 Four independent reviews (frontend, backend, legal, design), each >= 4/5, findings fixed, re-reviewed until all pass.
 
 - Round 1: frontend 3, backend 2, legal 3, design 3. Blockers: paid audio readable straight from Storage, tour list query rejected by the rules, unenforced consent for the withdrawal waiver, false "exact position never leaves the device" claim. All findings were addressed in round 2 (private signed audio URLs, rules-conformant query with rules tests, consent checkbox with server-side record, corrected texts and retention, GPS/audio teardown, error paths, paywall/home/player redesign, cost guards, webhook ordering).
-- Round 2: see the summary at the end of this file once the re-review has finished.
+- Round 2: **frontend 4, backend 4, legal 4, design 4** — no blockers and no unresolved majors. Remaining minors (nonce-based CSP, sockpuppet-resistant report blocking, consent-evidence retention wording, durable-medium purchase receipt, partner-terms lawyer review, hook tests) are listed in the critic reports and docs/RELEASE.md.
 
 ## Known issues / notes
 
