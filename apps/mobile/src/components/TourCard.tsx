@@ -3,14 +3,26 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
+import { formatKm } from '../format';
 import { colors, radii } from '../theme';
 import { Text } from './Text';
 
 /** Card in the tour list (spec 5.1): cover, title, duration, length, themes, free / partner markers. */
-export function TourCard({ tour, lang, onPress }: { tour: Tour; lang: string; onPress: () => void }) {
+export function TourCard({
+  tour,
+  lang,
+  locked,
+  onPress,
+}: {
+  tour: Tour;
+  lang: string;
+  /** Not yet unlocked (paid tour): shows a lock so the price wall is no surprise. */
+  locked?: boolean;
+  onPress: () => void;
+}) {
   const { t } = useTranslation();
   const text = tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
-  const km = (tour.distanceMeters / 1000).toFixed(1);
+  const km = formatKm(tour.distanceMeters, lang);
   return (
     <Pressable
       accessibilityRole="button"
@@ -61,6 +73,12 @@ export function TourCard({ tour, lang, onPress }: { tour: Tour; lang: string; on
           <Text variant="caption">{t('common.km', { value: km })}</Text>
           <Text variant="caption">·</Text>
           <Text variant="caption">{t('common.stops', { count: tour.stops.length })}</Text>
+          {locked && !tour.free ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Feather name="lock" size={13} color={colors.ink.secondary} />
+              <Text variant="caption">{t('paywall.locked')}</Text>
+            </View>
+          ) : null}
           {tour.free ? (
             <View
               style={{

@@ -5,7 +5,7 @@ export const colors = {
   surface: { base: '#FFFFFF', subtle: '#F6F6F6' },
   border: '#E6E6E6',
   // Deliberately far from brand red so that red is never read as "error" alone; pair with icon + text.
-  status: { success: '#1E7F4F', warning: '#B26A00', error: '#7A1F5C' },
+  status: { success: '#1E7F4F', warning: '#8F5400', error: '#7A1F5C' },
   /** Marker states for the heart-pin (spec 2.2). */
   marker: { current: '#ED0516', visited: '#9A9A9A', upcoming: '#ED0516' },
 } as const;

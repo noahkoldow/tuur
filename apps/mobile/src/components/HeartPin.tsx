@@ -1,6 +1,6 @@
 import Svg, { G, Path, Text as SvgText } from 'react-native-svg';
 import { View } from 'react-native';
-import { MARK_ASPECT_RATIO, MARK_PATH, MARK_VIEWBOX, colors } from '@tuur/ui';
+import { MARK_ASPECT_RATIO, MARK_PATH, MARK_VIEWBOX, colors, fonts } from '@tuur/ui';
 import { Text } from './Text';
 
 export type PinState = 'current' | 'visited' | 'upcoming';
@@ -52,6 +52,7 @@ export function HeartPin({
               x={VB_W / 2}
               y={VB_H * 0.78}
               fontSize={VB_H * 0.3}
+              fontFamily={fonts.heading}
               fontWeight="800"
               textAnchor="middle"
               fill={filled ? '#FFFFFF' : colors.brand.redPressed}

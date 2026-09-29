@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
-import type { PublicOffer } from '@tuur/shared';
+import { bearingDegrees, type PublicOffer } from '@tuur/shared';
+import { Feather } from '@expo/vector-icons';
 import { ImageCredit } from '../src/components/ImageCredit';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
@@ -126,14 +127,42 @@ function PlayInner({ session }: { session: ActiveSession }) {
                   ? t('errors.network')
                   : undefined;
 
+  const targetStop = ui.target ? ui.stops.find((s) => s.id === ui.target?.id) : undefined;
+  const arrowDeg =
+    ui.user && targetStop
+      ? Math.round((bearingDegrees(ui.user, targetStop.location) - (ui.user.heading ?? 0) + 360) % 360)
+      : undefined;
+
   const header = (
     <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 12 }}>
       <Text variant="title" numberOfLines={2} accessibilityRole="header" accessibilityLiveRegion="polite">
         {title}
       </Text>
       {ui.target?.distanceM !== undefined && ui.phase !== 'finished' ? (
-        <Text variant="caption">{`${ui.target.distanceM} m`}</Text>
+        <View
+          accessible
+          accessibilityLabel={`${t('player.nextStop', { name: ui.target.name })}, ${ui.target.distanceM} m`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}
+        >
+          {arrowDeg !== undefined ? (
+            <View style={{ transform: [{ rotate: `${arrowDeg}deg` }] }} accessibilityElementsHidden>
+              <Feather name="navigation" size={32} color={colors.brand.redPressed} />
+            </View>
+          ) : null}
+          <View style={{ flex: 1 }}>
+            {/* distance is the most useful outdoor cue: large and high-contrast */}
+            <Text variant="display">
+              {ui.target.distanceM >= 1000
+                ? `${(ui.target.distanceM / 1000).toFixed(1).replace('.', ',')} km`
+                : `${ui.target.distanceM} m`}
+            </Text>
+            <Text variant="bodySecondary" numberOfLines={1}>
+              {t('player.nextStop', { name: ui.target.name })}
+            </Text>
+          </View>
+        </View>
       ) : null}
+      {n ? <AiBadge /> : null}
       <ProgressBar value={progress} />
       <Row gap={16} style={{ justifyContent: 'center' }}>
         <IconButton icon="skip-back" label={t('player.previous')} onPress={runtime.previous} />

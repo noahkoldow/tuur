@@ -25,10 +25,10 @@ export function fallbackTourConcept(i: TourConceptInput): TourConcept {
   return {
     title,
     teaser: de
-      ? `${i.stops.length} Stationen in etwa ${i.durationMinutes} Minuten.`
-      : `${i.stops.length} stops in about ${i.durationMinutes} minutes.`,
+      ? `Von ${first} bis ${last}.`
+      : `From ${first} to ${last}.`,
     description: de
-      ? `Diese Tour führt Sie von ${first} bis ${last}. Unterwegs erzählt tuur an jeder Station eine eigene Geschichte.`
+      ? `Diese Tour führt dich von ${first} bis ${last}. Unterwegs erzählt tuur an jeder Station eine eigene Geschichte.`
       : `This tour leads you from ${first} to ${last}. Along the way tuur tells a story at every stop.`,
     intro: de
       ? `Willkommen in ${spokenName(i.placeName)}. Wir starten bei ${first}.`
@@ -41,7 +41,7 @@ export function fallbackTourConcept(i: TourConceptInput): TourConcept {
         : `Next is ${spokenName(s.name)}, about ${Math.max(1, Math.round(s.walkMinutesFromPrev))} minutes on foot.`,
     })),
     outro: de
-      ? 'Das war unsere Tour. Danke, dass Sie mit tuur unterwegs waren.'
+      ? 'Das war unsere Tour. Danke, dass du mit tuur unterwegs waren.'
       : 'That was our tour. Thank you for exploring with tuur.',
   };
 }

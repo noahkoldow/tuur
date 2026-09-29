@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,7 @@ import { Button, IconButton } from '../src/components/Button';
 import { Sheet } from '../src/components/Sheet';
 import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
+import { canStartTour, useEntitlementStore } from '../src/billing/entitlements';
 import { TourCard } from '../src/components/TourCard';
 import { TuurMap } from '../src/components/TuurMap';
 import { useActiveSession } from '../src/guide/session';
@@ -58,6 +59,7 @@ export default function Home() {
   const { permission, position, request } = usePosition();
   const area = useArea(position);
   const session = useActiveSession();
+  const ent = useEntitlementStore();
   const [sheetIndex, setSheetIndex] = useState(1);
   const place = area.tours[0]?.placeName;
   const center = position ?? REGION_FIXTURES[0]!.center;
@@ -105,7 +107,7 @@ export default function Home() {
           <Text variant="label" style={{ marginBottom: 8, paddingHorizontal: 4 }}>
             {t('home.modes')}
           </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {MODES.map((m, i) => (
               <Pressable
                 key={m.key}
@@ -114,12 +116,14 @@ export default function Home() {
                 accessibilityState={{ selected: i === 0 }}
                 onPress={() => (m.route === '/home' ? undefined : router.push(m.route as never))}
                 style={{
-                  width: 132,
+                  // 2 x 2 grid: all four modes are visible at once, nothing is cut off
+                  flexBasis: '47%',
+                  flexGrow: 1,
                   padding: 10,
                   borderRadius: radii.md,
                   backgroundColor: i === 0 ? colors.brand.redTint : colors.surface.subtle,
                   gap: 4,
-                  minHeight: 78,
+                  minHeight: 72,
                 }}
               >
                 <Feather
@@ -135,7 +139,7 @@ export default function Home() {
                 </Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </View>
         </View>
       </View>
 
@@ -207,6 +211,7 @@ export default function Home() {
                 key={tour.id}
                 tour={tour}
                 lang={lang}
+                locked={!canStartTour(ent, tour.id, tour.free)}
                 onPress={() => router.push({ pathname: '/tour/[id]', params: { id: tour.id } })}
               />
             ))}

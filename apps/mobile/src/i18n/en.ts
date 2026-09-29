@@ -101,6 +101,7 @@ export const en: Widen<typeof de> = {
   },
   map: { position: 'Your location' },
   player: {
+    nextStop: 'Next stop: {{name}}',
     notification: 'tuur is guiding your way.',
     foregroundOnly:
       'Without the “always” location permission the guide only follows you while the screen is on.',
@@ -260,9 +261,11 @@ export const en: Widen<typeof de> = {
     home: 'Go to home',
   },
   partner: {
+    errorTitle: 'Cannot redeem',
     label: 'Partner',
     adLabel: 'Ad',
-    introNote: 'Partner introduction – content provided by the partner.',
+    introNote:
+      'Partner introduction – content provided by the partner. Partner places are highlighted for payment.',
     offer: 'Offer',
     redeem: 'Redeem offer',
     validUntil: 'Valid until {{date}}',

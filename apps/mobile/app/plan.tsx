@@ -14,6 +14,7 @@ import { Text } from '../src/components/Text';
 import { TuurMap } from '../src/components/TuurMap';
 import { usePoiPool } from '../src/hooks/usePoiPool';
 import { startTourSession } from '../src/guide/session';
+import { formatKm } from '../src/format';
 import { roundPosition } from '../src/location/privacy';
 import { usePosition } from '../src/location/usePosition';
 import { useSettings } from '../src/state/settings';
@@ -216,7 +217,7 @@ export default function Plan() {
               />
               <Fact
                 label={t('tour.distance')}
-                value={t('common.km', { value: (preview.distanceMeters / 1000).toFixed(1) })}
+                value={t('common.km', { value: formatKm(preview.distanceMeters, language) })}
               />
               <Fact label={t('tour.stopsTitle')} value={String(preview.stops.length)} />
             </Row>

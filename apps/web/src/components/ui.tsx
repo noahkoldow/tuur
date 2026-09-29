@@ -64,7 +64,11 @@ export function Notice({
 }) {
   return (
     <div className={`notice notice-${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
-      {children}
+      {/* the symbol makes the state readable without color */}
+      <span aria-hidden className="notice-icon">
+        {tone === 'success' ? '✓' : tone === 'error' ? '✕' : tone === 'warning' ? '!' : 'i'}
+      </span>
+      <div>{children}</div>
     </div>
   );
 }

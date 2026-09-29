@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { BackendError, useBackend, type RedemptionToken } from '../src/backend';
 import { Banner } from '../src/components/Banner';
@@ -88,7 +89,13 @@ export default function Redeem() {
           <SpinningMark size={72} label={t('common.loading')} />
         ) : error ? (
           <>
-            <Banner tone="warning" text={error} />
+            <Feather name="alert-circle" size={44} color={colors.ink.secondary} />
+            <Text variant="title" accessibilityRole="header" style={{ textAlign: 'center' }}>
+              {t('partner.errorTitle')}
+            </Text>
+            <Text variant="bodySecondary" style={{ textAlign: 'center' }}>
+              {error}
+            </Text>
             <Button variant="secondary" label={t('partner.newCode')} onPress={() => void create()} />
           </>
         ) : token && done ? (

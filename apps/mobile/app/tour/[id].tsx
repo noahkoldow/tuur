@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
 import { BackendError, useBackend } from '../../src/backend';
 import { canStartTour, useEntitlementStore } from '../../src/billing/entitlements';
+import { formatKm } from '../../src/format';
 import { config } from '../../src/config';
 import { ImageCredit } from '../../src/components/ImageCredit';
 import { AiBadge } from '../../src/components/AiBadge';
@@ -149,7 +150,7 @@ export default function TourDetail() {
           />
           <Fact
             label={t('tour.distance')}
-            value={t('common.km', { value: (tour.distanceMeters / 1000).toFixed(1) })}
+            value={t('common.km', { value: formatKm(tour.distanceMeters, language) })}
           />
           <Fact label={t('tour.stopsTitle')} value={String(tour.stops.length)} />
         </Row>

@@ -5,6 +5,7 @@ import {
   decideInvite,
   decideSpend,
   isSubscriber,
+  partnerIntro,
   type Entitlement,
   type Wallet,
   REGION_FIXTURES,
@@ -204,6 +205,9 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
     );
     if (!d.allowed) throw new BackendError('locked', 'Content is locked', undefined, d.reason);
   };
+  /** Demo partners: every sixth POI is a "partner" so the labels, offers and the QR screen can be tried in the preview. */
+  const demoPartners = Boolean(opts.enforceAccess);
+  const isDemoPartner = (poiId: string) => [...poiIndex.keys()].indexOf(poiId) % 6 === 2;
   const entListeners = new Set<(s: EntitlementState) => void>();
   const emitEnts = () => entListeners.forEach((cb) => cb({ entitlements: [...ents], wallet: { ...wallet } }));
   const poiIndex = new Map<string, Poi>();
@@ -399,7 +403,11 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       gate(req.access);
       const poi = poiIndex.get(req.poiId);
       if (!poi) throw new BackendError('not_found', 'POI not found');
-      const paras = demoNarrationParagraphs(poi, req.lang, req.lengthTier);
+      const sponsored = demoPartners && isDemoPartner(poi.id);
+      const paras = [
+        ...(sponsored ? [partnerIntro(req.lang)] : []),
+        ...demoNarrationParagraphs(poi, req.lang, req.lengthTier),
+      ];
       const layout = layoutParagraphs(
         paras.map((text) => ({
           text,
@@ -422,6 +430,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         images: poi.imageRefs,
         cached: false,
         aiGenerated: true,
+        ...(sponsored ? { sponsored: true } : {}),
       };
     },
     async getTransition(req) {
@@ -529,15 +538,33 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         wallet,
       };
     },
-    async getOffers() {
-      return [];
+    async getOffers(poiIds) {
+      if (!demoPartners) return [];
+      return poiIds.filter(isDemoPartner).map((poiId) => ({
+        id: `demo-offer-${poiId}`,
+        poiId,
+        partnerName: 'Café Linde',
+        title: '10 % auf Kuchen',
+        description: 'Gegen Vorlage des QR-Codes.',
+        terms: 'Nicht kombinierbar.',
+        validUntil: Date.now() + 7 * 86_400_000,
+      }));
     },
     async recordPartnerEvent() {
       await sleep(0);
     },
     async createRedemptionToken() {
       await sleep(latency);
-      throw new BackendError('redeem_denied', 'no offers in demo', undefined, 'offer_inactive');
+      if (!demoPartners)
+        throw new BackendError('redeem_denied', 'no offers in demo', undefined, 'offer_inactive');
+      const expiresAt = Date.now() + 10 * 60_000;
+      return {
+        token: `tuur1.DemoTokenDemo.${expiresAt}.${'A'.repeat(43)}`,
+        tokenId: 'demo',
+        expiresAt,
+        offerTitle: '10 % auf Kuchen',
+        partnerName: 'Café Linde',
+      };
     },
     watchRedemption: () => () => undefined,
     demo: {

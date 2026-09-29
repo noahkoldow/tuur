@@ -97,6 +97,7 @@ export const de = {
   },
   map: { position: 'Dein Standort' },
   player: {
+    nextStop: 'Nächste Station: {{name}}',
     notification: 'tuur begleitet deinen Weg.',
     foregroundOnly:
       'Ohne Standortfreigabe „Immer“ läuft die Erzählung nur bei eingeschaltetem Bildschirm mit.',
@@ -260,9 +261,10 @@ export const de = {
     home: 'Zur Startseite',
   },
   partner: {
+    errorTitle: 'Einlösen nicht möglich',
     label: 'Partner',
     adLabel: 'Anzeige',
-    introNote: 'Partnervorstellung – Inhalt vom Partner.',
+    introNote: 'Partnervorstellung – Inhalt vom Partner. Partnerorte werden bezahlt hervorgehoben.',
     offer: 'Angebot',
     redeem: 'Angebot einlösen',
     validUntil: 'Gültig bis {{date}}',

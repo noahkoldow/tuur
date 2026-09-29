@@ -48,7 +48,7 @@ export type AiConfig = z.infer<typeof AiConfigSchema>;
 export const DEFAULT_AI_CONFIG: AiConfig = {
   models: { narration: 'gemini-3.8-flash', lite: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
   voices: { default: 'Kore', de: 'Kore', en: 'Kore' },
-  promptVersion: 'v1',
+  promptVersion: 'v2',
   groundingEnabled: false,
   dailyBudgetUsd: 20,
   areaDailyBudgetUsd: 3,
