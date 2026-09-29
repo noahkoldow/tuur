@@ -160,6 +160,8 @@ describe('offline downloads', () => {
       createInvite: dead,
       redeemInvite: dead,
       createRewardNonce: dead,
+      deleteAccount: dead,
+      exportMyData: dead,
       getOffers: dead,
       recordPartnerEvent: dead,
       createRedemptionToken: dead,

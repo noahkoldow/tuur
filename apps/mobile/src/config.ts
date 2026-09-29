@@ -10,6 +10,18 @@ export const config = {
   mapStyleUrl: process.env.EXPO_PUBLIC_MAP_STYLE_URL,
   /** Geohash precision of ingest tiles (must match the backend default). */
   tilePrecision: 6,
+  /** Operator details for the legal texts (imprint, privacy); the release check fails while values are missing. */
+  operator: {
+    name: process.env.EXPO_PUBLIC_OPERATOR_NAME,
+    address: process.env.EXPO_PUBLIC_OPERATOR_ADDRESS,
+    email: process.env.EXPO_PUBLIC_OPERATOR_EMAIL,
+    phone: process.env.EXPO_PUBLIC_OPERATOR_PHONE,
+    register: process.env.EXPO_PUBLIC_OPERATOR_REGISTER,
+    vatId: process.env.EXPO_PUBLIC_OPERATOR_VAT_ID,
+    representative: process.env.EXPO_PUBLIC_OPERATOR_REPRESENTATIVE,
+    privacyEmail: process.env.EXPO_PUBLIC_OPERATOR_PRIVACY_EMAIL,
+    authority: process.env.EXPO_PUBLIC_OPERATOR_SUPERVISORY_AUTHORITY,
+  },
   /** Shown in legal/settings screens; set by the operator. */
   legal: {
     supportEmail: process.env.EXPO_PUBLIC_SUPPORT_EMAIL ?? 'support@tuur.app',

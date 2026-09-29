@@ -223,6 +223,8 @@ export const de = {
     purchasePending: 'Kauf wird bestätigt…',
     failed: 'Das hat nicht geklappt. Bitte später erneut versuchen.',
     insufficient: 'Dafür reicht dein Guthaben nicht.',
+    withdrawal:
+      'Mit dem Kauf stimmst du zu, dass die Bereitstellung sofort beginnt, und bestätigst, dass du dadurch dein Widerrufsrecht für digitale Inhalte verlierst (§ 356 Abs. 5 BGB).',
     terms: 'AGB',
     privacy: 'Datenschutz',
     close: 'Schließen',
@@ -264,6 +266,27 @@ export const de = {
     already: 'Du hast dieses Angebot heute schon eingelöst.',
     unavailable: 'Dieses Angebot ist nicht mehr verfügbar.',
     limit: 'Das Tageslimit dieses Angebots ist erreicht.',
+  },
+  account: {
+    title: 'Konto & Datenschutz',
+    status: 'Angemeldet als {{name}}',
+    anonymous: 'Du nutzt tuur ohne Registrierung.',
+    analytics: 'Absturzberichte senden',
+    analyticsHint: 'Hilft uns, Fehler zu beheben. Ohne deine Zustimmung wird nichts gesendet.',
+    adChoices: 'Werbe-Einstellungen',
+    adChoicesNone: 'Für dein Land sind keine Werbe-Einstellungen nötig.',
+    aiInfo:
+      'Erzählungen werden von KI aus öffentlichen Quellen erstellt und als KI-generiert gekennzeichnet.',
+    export: 'Meine Daten exportieren',
+    exportFailed: 'Der Export hat nicht geklappt.',
+    delete: 'Konto löschen',
+    deleteTitle: 'Konto endgültig löschen?',
+    deleteBody:
+      'Dein Konto, Guthaben, Freischaltungen und Einstellungen werden gelöscht. Das lässt sich nicht rückgängig machen. Abonnements und Käufe beim Store musst du dort selbst beenden.',
+    deleteConfirm: 'Endgültig löschen',
+    deleteFailed: 'Das Konto konnte nicht gelöscht werden.',
+    deleted: 'Dein Konto wurde gelöscht.',
+    version: 'Stand der Rechtstexte: {{version}}',
   },
   settings: {
     title: 'Einstellungen',

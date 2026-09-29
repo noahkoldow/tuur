@@ -14,6 +14,7 @@ import {
 import { BackendProvider } from '../src/backend';
 import { useEntitlementSync } from '../src/billing/entitlements';
 import { getOfflineLibrary } from '../src/offline';
+import { setCrashReporting } from '../src/telemetry';
 import { useSettings } from '../src/state/settings';
 import { colors } from '../src/theme';
 
@@ -29,6 +30,11 @@ export default function RootLayout() {
   useEntitlementSync();
   const hydrated = useSettings((s) => s.hydrated);
   const ready = fontsLoaded && hydrated;
+  const analyticsConsent = useSettings((s) => s.analyticsConsent);
+
+  useEffect(() => {
+    if (hydrated) void setCrashReporting(analyticsConsent);
+  }, [hydrated, analyticsConsent]);
 
   useEffect(() => {
     void getOfflineLibrary().load();

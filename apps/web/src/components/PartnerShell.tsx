@@ -14,6 +14,7 @@ export const PARTNER_NAV: { href: string; key: TKey }[] = [
   { href: '/partner/plan', key: 'nav.plan' },
   { href: '/partner/stats', key: 'nav.stats' },
   { href: '/partner/scanner', key: 'nav.scanner' },
+  { href: '/partner/account', key: 'nav.account' },
 ];
 
 export function LangSwitch() {
@@ -46,7 +47,7 @@ interface ShellProps {
 /** Frame of the partner portal / admin area: brand header, navigation, language switch and the sign-in gate. */
 export function AppShell({ children, nav, home, titleKey, adminOnly }: ShellProps) {
   const { user, loading, signOut, isAdmin } = useAuth();
-  const { t } = useT();
+  const { t, lang } = useT();
   const path = usePathname();
   const router = useRouter();
   const loginPath = `${home}/login`;
@@ -91,9 +92,9 @@ export function AppShell({ children, nav, home, titleKey, adminOnly }: ShellProp
         {adminOnly && user && !isAdmin ? <Notice tone="error">{t('admin.forbidden')}</Notice> : children}
       </main>
       <footer className="foot">
-        <Link href="/legal/partner-terms">{t('common.terms')}</Link>
-        <Link href="/legal/privacy">{t('common.privacy')}</Link>
-        <Link href="/legal/imprint">{t('common.imprint')}</Link>
+        <Link href={`/legal/partner-terms?lang=${lang}`}>{t('common.terms')}</Link>
+        <Link href={`/legal/privacy?lang=${lang}`}>{t('common.privacy')}</Link>
+        <Link href={`/legal/imprint?lang=${lang}`}>{t('common.imprint')}</Link>
       </footer>
     </div>
   );

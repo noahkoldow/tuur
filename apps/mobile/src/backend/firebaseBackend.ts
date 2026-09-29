@@ -267,6 +267,11 @@ export function createFirebaseBackend(): Backend {
         unsubs.forEach((u) => u());
       };
     },
+    async deleteAccount() {
+      await call('deleteAccount', {});
+      await signOut(auth).catch(() => undefined);
+    },
+    exportMyData: () => call('exportMyData', {}),
     getOffers: (poiIds) => call('getOffers', { poiIds }),
     async recordPartnerEvent(poiId, type) {
       await call('recordPartnerEvent', { poiId, type }).catch(() => undefined);

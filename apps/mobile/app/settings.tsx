@@ -1,18 +1,65 @@
-import { ScrollView, Switch, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, Share, Switch, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { INTERESTS, SUPPORTED_UI_LANGUAGES } from '@tuur/shared';
+import { getAds } from '../src/billing/entitlements';
+import { useBackend } from '../src/backend';
+import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
 import { Screen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { isDev } from '../src/config';
+import { setCrashReporting } from '../src/telemetry';
+import { endSession } from '../src/guide/session';
 import { useSettings, type NarrationFrequency } from '../src/state/settings';
 
 export default function Settings() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { language, interests, frequency, simulator, set } = useSettings();
+  const { language, interests, frequency, simulator, analyticsConsent, set } = useSettings();
+  const backend = useBackend();
+  const [notice, setNotice] = useState<{ tone: 'info' | 'warning'; text: string } | undefined>();
+
+  const toggleAnalytics = (v: boolean) => {
+    set({ analyticsConsent: v });
+    void setCrashReporting(v);
+  };
+  const adChoices = async () => {
+    const shown = await getAds().showPrivacyOptions();
+    if (!shown) setNotice({ tone: 'info', text: t('account.adChoicesNone') });
+  };
+  const exportData = async () => {
+    try {
+      await backend.auth.ensureSignedIn();
+      const data = await backend.exportMyData();
+      await Share.share({ message: JSON.stringify(data, null, 2), title: 'tuur-data.json' });
+    } catch {
+      setNotice({ tone: 'warning', text: t('account.exportFailed') });
+    }
+  };
+  const deleteAccount = () =>
+    Alert.alert(t('account.deleteTitle'), t('account.deleteBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('account.deleteConfirm'),
+        style: 'destructive',
+        onPress: () =>
+          void (async () => {
+            try {
+              await endSession();
+              await backend.deleteAccount();
+              set({ onboarded: false, interests: [], analyticsConsent: false });
+              void setCrashReporting(false);
+              router.replace('/');
+            } catch {
+              setNotice({ tone: 'warning', text: t('account.deleteFailed') });
+            }
+          })(),
+      },
+    ]);
+
   return (
     <Screen>
       <Row style={{ justifyContent: 'space-between', paddingVertical: 8 }}>
@@ -70,6 +117,35 @@ export default function Settings() {
             label={t('downloads.title')}
             onPress={() => router.push('/downloads')}
           />
+        </Section>
+        <Section title={t('account.title')}>
+          {notice ? <Banner tone={notice.tone} text={notice.text} /> : null}
+          <Banner icon="cpu" text={t('account.aiInfo')} />
+          <Row style={{ justifyContent: 'space-between', gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text variant="body">{t('account.analytics')}</Text>
+              <Text variant="caption">{t('account.analyticsHint')}</Text>
+            </View>
+            <Switch
+              value={analyticsConsent}
+              onValueChange={toggleAnalytics}
+              trackColor={{ true: '#ED0516', false: '#E6E6E6' }}
+              accessibilityLabel={t('account.analytics')}
+            />
+          </Row>
+          <Button
+            variant="secondary"
+            icon="sliders"
+            label={t('account.adChoices')}
+            onPress={() => void adChoices()}
+          />
+          <Button
+            variant="secondary"
+            icon="download"
+            label={t('account.export')}
+            onPress={() => void exportData()}
+          />
+          <Button variant="secondary" icon="trash-2" label={t('account.delete')} onPress={deleteAccount} />
         </Section>
         <Section title={t('settings.legal')}>
           <Button

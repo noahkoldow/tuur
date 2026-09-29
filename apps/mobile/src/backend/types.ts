@@ -108,6 +108,10 @@ export interface Backend {
   }): Promise<RedemptionToken>;
   /** Fires once the partner has scanned the token. */
   watchRedemption(tokenId: string, cb: (used: boolean) => void): Unsubscribe;
+  /** GDPR: deletes the account and all its data on the server (then signs out). */
+  deleteAccount(): Promise<void>;
+  /** GDPR: everything stored about the account as a JSON document. */
+  exportMyData(): Promise<Record<string, unknown>>;
   demo?: DemoControls;
   getNarration(req: GetNarrationRequest): Promise<NarrationResponse>;
   getTransition(req: {

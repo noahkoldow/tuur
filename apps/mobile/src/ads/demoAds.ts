@@ -14,6 +14,7 @@ export function createDemoAds(backend: Backend): AdsProvider {
       backend.demo?.grantRewardCredit();
       return 'earned';
     },
+    showPrivacyOptions: async () => false,
     preloadInterstitial: () => undefined,
     showInterstitial: async () => false,
   };

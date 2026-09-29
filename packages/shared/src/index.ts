@@ -42,3 +42,4 @@ export * from './billing/ads';
 export * from './partner/schemas';
 export * from './partner/rules';
 export * from './partner/stripe';
+export * from './legal';

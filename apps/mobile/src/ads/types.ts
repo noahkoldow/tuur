@@ -12,6 +12,8 @@ export interface AdsProvider {
   consent(): ConsentState;
   /** Shows a rewarded ad with SSV options; resolves when the ad is closed. */
   showRewarded(o: { userId: string; nonce: string }): Promise<RewardedOutcome>;
+  /** Re-opens the UMP privacy options form (withdraw or change ad consent); false when not applicable. */
+  showPrivacyOptions(): Promise<boolean>;
   /** Preloads an interstitial; `show` resolves false when none was ready. */
   preloadInterstitial(): void;
   showInterstitial(): Promise<boolean>;

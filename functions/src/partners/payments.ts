@@ -27,6 +27,8 @@ export interface CheckoutRequest {
 export interface PaymentsProvider {
   createCheckout(req: CheckoutRequest): Promise<{ url: string }>;
   createPortal(customerId: string, returnUrl: string): Promise<{ url: string }>;
+  /** Cancels a subscription immediately (account deletion); a missing subscription is not an error. */
+  cancelSubscription(subscriptionId: string): Promise<void>;
   /** Verifies the signature and returns a normalized event; throws on invalid signatures. */
   parseWebhook(rawBody: Buffer, signature: string | undefined): PaymentEvent;
 }
@@ -63,6 +65,14 @@ export class StripePayments implements PaymentsProvider {
       return_url: returnUrl,
     });
     return { url: s.url };
+  }
+
+  async cancelSubscription(subscriptionId: string) {
+    try {
+      await this.stripe.subscriptions.cancel(subscriptionId);
+    } catch (e) {
+      if ((e as { code?: string }).code !== 'resource_missing') throw e;
+    }
   }
 
   parseWebhook(rawBody: Buffer, signature: string | undefined): PaymentEvent {
@@ -109,6 +119,10 @@ export class MockPayments implements PaymentsProvider {
   }
   async createPortal(_customerId: string, returnUrl: string) {
     return { url: returnUrl };
+  }
+  cancelled: string[] = [];
+  async cancelSubscription(subscriptionId: string) {
+    this.cancelled.push(subscriptionId);
   }
   parseWebhook(rawBody: Buffer, signature: string | undefined): PaymentEvent {
     if (signature !== 'mock') throw new Error('bad signature');

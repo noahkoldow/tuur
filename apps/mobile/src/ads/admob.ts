@@ -73,6 +73,18 @@ export function createAdMobAds(): AdsProvider {
         ad.load();
       });
     },
+    async showPrivacyOptions() {
+      try {
+        const { AdsConsent, AdsConsentPrivacyOptionsRequirementStatus } = ads();
+        const info = await AdsConsent.requestInfoUpdate();
+        if (info.privacyOptionsRequirementStatus !== AdsConsentPrivacyOptionsRequirementStatus.REQUIRED)
+          return false;
+        await AdsConsent.showPrivacyOptionsForm();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     preloadInterstitial() {
       if (consent === 'unknown' || consent === 'denied_limited' || interstitial) return;
       void ensureInit().then(() => {

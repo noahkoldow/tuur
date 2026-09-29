@@ -40,6 +40,8 @@ import {
   setAreaLock,
   writeAudit,
 } from './admin/service';
+import { deleteAccount as runDeleteAccount, exportMyData as runExportMyData } from './account/service';
+import { getAuth } from 'firebase-admin/auth';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   PartnerError,
@@ -548,3 +550,20 @@ export const adminRegenerateNarration = adminCallable(regenerateNarration);
 export const adminResolveFeedback = adminCallable(resolveFeedback);
 export const adminSaveAiConfig = adminCallable(saveAiConfig);
 export const adminSavePartnerConfig = adminCallable(savePartnerConfig);
+
+// ---------------------------------------------------------------------------------------------------------------
+// GDPR: account deletion and data export (available in the app settings and the partner portal)
+
+const accountDeps = () => ({ db: db(), auth: getAuth(), payments: payments(), now: Date.now });
+
+export const deleteAccount = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  await enforceRateLimit(`delete_account_${request.auth.uid}`, 3, 3600_000);
+  return runDeleteAccount(accountDeps(), request.auth.uid);
+});
+
+export const exportMyData = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  await enforceRateLimit(`export_data_${request.auth.uid}`, 5, 3600_000);
+  return runExportMyData(accountDeps(), request.auth.uid);
+});

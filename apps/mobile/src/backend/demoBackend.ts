@@ -511,6 +511,21 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       emitEnts();
       return { tourId: inv.tourId };
     },
+    async deleteAccount() {
+      ents.length = 0;
+      wallet = { balance: 0, rewardBalance: 0 };
+      invites.clear();
+      emitEnts();
+      setUser(null);
+    },
+    async exportMyData() {
+      return {
+        generatedAt: Date.now(),
+        account: { uid: user.current?.uid ?? 'demo-user' },
+        entitlements: [...ents],
+        wallet,
+      };
+    },
     async getOffers() {
       return [];
     },

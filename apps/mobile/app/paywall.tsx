@@ -135,6 +135,7 @@ export default function Paywall() {
           {kind === 'tour' ? t('paywall.subtitleTour') : t('paywall.subtitleSession')}
         </Text>
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
+        <Text variant="caption">{t('paywall.withdrawal')}</Text>
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
 
         {total > 0 ? (
