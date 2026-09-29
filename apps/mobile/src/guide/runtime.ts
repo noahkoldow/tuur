@@ -18,7 +18,7 @@ import {
 } from '@tuur/shared';
 import type { AudioEngine, AudioItem } from '../audio/types';
 import { realClock, type Clock } from '../audio/simulatedEngine';
-import { BackendError, type Backend } from '../backend/types';
+import { BackendError, type AccessInfo, type Backend } from '../backend/types';
 import type { LocationSource } from '../location/types';
 
 export type Notice =
@@ -28,6 +28,7 @@ export type Notice =
   | 'unavailable'
   | 'generation_paused'
   | 'rate_limited'
+  | 'locked'
   | 'offline';
 
 export interface GuideUi {
@@ -68,6 +69,8 @@ export interface RuntimeDeps {
   audio: AudioEngine;
   lang: string;
   interest?: Interest;
+  /** What the listener is doing; the server decides access with it (tour id or dynamic mode). */
+  access?: AccessInfo;
   clock?: Clock;
   prefs?: Partial<GuidePrefs>;
   /** Extra hook after each engine command (tests/analytics). */
@@ -319,6 +322,7 @@ export class GuideRuntime {
         poiId,
         lang: this.deps.lang,
         lengthTier: tier,
+        ...(this.deps.access ? { access: this.deps.access } : {}),
         ...(this.deps.interest ? { primaryInterest: this.deps.interest } : {}),
       })
       .then((n) => {
@@ -328,13 +332,15 @@ export class GuideRuntime {
       .catch((e: unknown) => {
         const code = e instanceof BackendError ? e.code : 'unknown';
         this.setNotice(
-          code === 'paused'
-            ? 'generation_paused'
-            : code === 'rate_limited'
-              ? 'rate_limited'
-              : code === 'network'
-                ? 'offline'
-                : 'unavailable',
+          code === 'locked'
+            ? 'locked'
+            : code === 'paused'
+              ? 'generation_paused'
+              : code === 'rate_limited'
+                ? 'rate_limited'
+                : code === 'network'
+                  ? 'offline'
+                  : 'unavailable',
         );
         return undefined;
       })
@@ -461,6 +467,7 @@ export class GuideRuntime {
         toPoiId,
         lang: this.deps.lang,
         walkMinutes,
+        ...(this.deps.access ? { access: this.deps.access } : {}),
       });
       const url = await this.deps.backend.audioUrl(t.audioPath);
       if (token !== this.playToken || this.disposed) return;

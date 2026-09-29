@@ -155,6 +155,11 @@ describe('offline downloads', () => {
       getTransition: dead,
       audioUrl: dead,
       reportNarration: dead,
+      watchEntitlements: () => () => undefined,
+      spendCredit: dead,
+      createInvite: dead,
+      redeemInvite: dead,
+      createRewardNonce: dead,
     };
     const backend = withOfflineFirst(offlineNet, library, files);
     expect((await backend.getTour(tour.id))?.id).toBe(tour.id);

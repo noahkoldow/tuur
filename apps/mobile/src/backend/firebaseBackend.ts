@@ -39,15 +39,31 @@ import {
   type NarrationResponse,
   type Poi,
   type Tour,
+  EntitlementSchema,
+  type Entitlement,
+  type Wallet,
 } from '@tuur/shared';
 import { config } from '../config';
-import { BackendError, type AreaInfo, type AuthApi, type Backend, type UserInfo } from './types';
+import {
+  BackendError,
+  type AreaInfo,
+  type AuthApi,
+  type Backend,
+  type Unsubscribe,
+  type UserInfo,
+} from './types';
 
 function toBackendError(e: unknown): BackendError {
   if (e instanceof BackendError) return e;
   const code = (e as { code?: string } | null)?.code ?? '';
   const message = (e as Error | null)?.message ?? 'unknown';
   const details = (e as { details?: { reason?: string; retryAfterMs?: number } } | null)?.details;
+  if (code.includes('permission-denied'))
+    return new BackendError('locked', message, undefined, details?.reason);
+  if (code.includes('failed-precondition') && details?.reason === 'insufficient')
+    return new BackendError('insufficient_credit', message, undefined, details.reason);
+  if (code.includes('failed-precondition') || code.includes('already-exists'))
+    return new BackendError('invite_invalid', message, undefined, details?.reason);
   if (code.includes('resource-exhausted'))
     return new BackendError('rate_limited', message, details?.retryAfterMs);
   if (code.includes('unavailable') && details?.reason) return new BackendError('paused', message);
@@ -210,6 +226,44 @@ export function createFirebaseBackend(): Backend {
     getNarration: (req: GetNarrationRequest) =>
       call<GetNarrationRequest, NarrationResponse>('getNarration', req),
     getTransition: (req) => call('getTransition', req),
+    watchEntitlements(cb) {
+      const uid = () => auth.currentUser?.uid;
+      let ents: Entitlement[] = [];
+      let wallet: Wallet = { balance: 0, rewardBalance: 0 };
+      const emit = () => cb({ entitlements: ents, wallet });
+      const unsubs: Unsubscribe[] = [];
+      const attach = (id: string) => {
+        unsubs.push(
+          onSnapshot(collection(db, 'users', id, 'entitlements'), (snap) => {
+            ents = snap.docs.flatMap((d) => {
+              const p = EntitlementSchema.safeParse(d.data());
+              return p.success ? [p.data] : [];
+            });
+            emit();
+          }),
+          onSnapshot(doc(db, 'users', id, 'credits', 'wallet'), (snap) => {
+            wallet = {
+              balance: Number(snap.data()?.['balance'] ?? 0),
+              rewardBalance: Number(snap.data()?.['rewardBalance'] ?? 0),
+            };
+            emit();
+          }),
+        );
+      };
+      const first = uid();
+      if (first) attach(first);
+      const offAuth = onAuthStateChanged(auth, (u) => {
+        if (u && u.uid !== first && unsubs.length === 0) attach(u.uid);
+      });
+      return () => {
+        offAuth();
+        unsubs.forEach((u) => u());
+      };
+    },
+    spendCredit: (req) => call('spendCredit', req),
+    createInvite: (tourId) => call('createInvite', { tourId }),
+    redeemInvite: (token) => call('redeemInvite', { token }),
+    createRewardNonce: () => call('createRewardNonce', {}),
     audioUrl: (path) => getDownloadURL(ref(storage, path)),
     async reportNarration(input) {
       await call('reportNarration', input);

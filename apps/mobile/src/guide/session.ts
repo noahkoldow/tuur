@@ -13,6 +13,7 @@ import { createAudioEngine } from '../audio/createEngine';
 import { getBackend } from '../backend';
 import { RealLocationSource } from '../location/real';
 import { SimulatedLocationSource } from '../location/simulated';
+import type { AccessInfo } from '../backend/types';
 import type { LocationSource } from '../location/types';
 import { ForkController, PoiPool, RoamController } from './modes';
 import { GuideRuntime } from './runtime';
@@ -46,8 +47,9 @@ interface Common {
   location?: LocationSource;
 }
 
-function makeRuntime(c: Common) {
+function makeRuntime(c: Common, access: AccessInfo) {
   return new GuideRuntime({
+    access,
     backend: getBackend(),
     audio: createAudioEngine(),
     lang: c.lang,
@@ -74,7 +76,7 @@ export async function startTourSession(
   o: Common & { tour: Tour; planned?: boolean },
 ): Promise<ActiveSession> {
   await endSession();
-  const runtime = makeRuntime(o);
+  const runtime = makeRuntime(o, o.planned ? { mode: 'planned' } : { tourId: o.tour.id, mode: 'tour' });
   let simulator: SimulatedLocationSource | undefined;
   let source: LocationSource;
   if (o.simulate) {
@@ -112,11 +114,12 @@ export async function startForkSession(
   },
 ): Promise<ActiveSession> {
   await endSession();
-  const runtime = makeRuntime(o);
+  const runtime = makeRuntime(o, { mode: 'fork' });
   const fork = new ForkController({
     runtime,
     backend: getBackend(),
     pool: o.pool,
+    access: { mode: 'fork' },
     lang: o.lang,
     interests: o.interests,
     profile: o.profile,
@@ -151,7 +154,7 @@ export async function startRoamSession(
   o: Common & { start: LatLng; frequency: NarrationFrequency; interests: Interest[] },
 ): Promise<ActiveSession> {
   await endSession();
-  const runtime = makeRuntime(o);
+  const runtime = makeRuntime(o, { mode: 'roam' });
   const pool = new PoiPool(getBackend());
   const roam = new RoamController({
     runtime,

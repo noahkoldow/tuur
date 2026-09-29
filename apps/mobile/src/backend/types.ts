@@ -1,4 +1,6 @@
 import type {
+  Entitlement,
+  Wallet,
   ComposeRouteRequest,
   AreaStatus,
   GenerateToursResult,
@@ -29,6 +31,19 @@ export interface UserInfo {
   email?: string;
 }
 
+export interface EntitlementState {
+  entitlements: Entitlement[];
+  wallet: Wallet;
+}
+
+/** What the listener is doing; the server checks entitlements against it before serving content. */
+export interface AccessInfo {
+  tourId?: string;
+  mode?: 'tour' | 'planned' | 'fork' | 'roam';
+}
+
+export type SpendRequest = { kind: 'tour'; tourId: string } | { kind: 'session'; placeId: string };
+
 export interface AuthApi {
   current(): UserInfo | null;
   onChange(cb: (u: UserInfo | null) => void): Unsubscribe;
@@ -58,7 +73,14 @@ export interface Backend {
   /** Personal route (spec 5.2): re-checks the client plan with routing times and adds the narrative thread. */
   composePlannedRoute(req: ComposeRouteRequest): Promise<{ tour: Tour; dropped: string[] }>;
   /** One-sentence teaser for crossroads cards. */
-  getTeaser(req: { poiId: string; lang: string }): Promise<string>;
+  getTeaser(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<string>;
+  /** Live entitlements and credit wallet (server-written, read-only for the client). */
+  watchEntitlements(cb: (s: EntitlementState) => void): Unsubscribe;
+  spendCredit(req: SpendRequest): Promise<{ used: 'reward' | 'paid'; wallet: Wallet }>;
+  createInvite(tourId: string): Promise<{ token: string; remaining: number; expiresAt: number }>;
+  redeemInvite(token: string): Promise<{ tourId: string }>;
+  /** Nonce for rewarded-ad server-side verification (daily limit enforced on the server). */
+  createRewardNonce(): Promise<{ nonce: string; remainingToday: number }>;
   getNarration(req: GetNarrationRequest): Promise<NarrationResponse>;
   getTransition(req: {
     fromPoiId: string;
@@ -66,6 +88,7 @@ export interface Backend {
     lang: string;
     walkMinutes: number;
     tourTitle?: string;
+    access?: AccessInfo;
   }): Promise<TransitionResponse>;
   /** Resolves a playable/downloadable URL for a Cloud Storage audio path. */
   audioUrl(audioPath: string): Promise<string>;
@@ -79,9 +102,20 @@ export interface Backend {
 export class BackendError extends Error {
   constructor(
     readonly code:
-      'network' | 'paused' | 'rate_limited' | 'unavailable' | 'not_found' | 'unauthenticated' | 'unknown',
+      | 'network'
+      | 'paused'
+      | 'rate_limited'
+      | 'unavailable'
+      | 'not_found'
+      | 'unauthenticated'
+      | 'locked'
+      | 'insufficient_credit'
+      | 'invite_invalid'
+      | 'unknown',
     message: string,
     readonly retryAfterMs?: number,
+    /** Server-provided machine reason (e.g. `insufficient`, `already_redeemed`). */
+    readonly reason?: string,
   ) {
     super(message);
   }

@@ -1,5 +1,12 @@
 import {
   DEFAULT_TEMPLATES,
+  SESSION_DURATION_MS,
+  decideAccess,
+  decideInvite,
+  decideSpend,
+  isSubscriber,
+  type Entitlement,
+  type Wallet,
   REGION_FIXTURES,
   buildPois,
   encodeGeohash,
@@ -29,7 +36,14 @@ import {
   type RawPoi,
   type Tour,
 } from '@tuur/shared';
-import { BackendError, type AreaInfo, type AuthApi, type Backend, type UserInfo } from './types';
+import {
+  BackendError,
+  type EntitlementState,
+  type AreaInfo,
+  type AuthApi,
+  type Backend,
+  type UserInfo,
+} from './types';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -163,13 +177,35 @@ function makeDemoTour(i: DemoTourInput): Tour {
   };
 }
 
-export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
+export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: boolean } = {}): Backend {
   const latency = opts.latencyMs ?? 300;
   const areas = new Map<string, AreaInfo>();
   const areaListeners = new Map<string, Set<(a: AreaInfo | null) => void>>();
   const regions = new Map<string, Region>();
   const tourListeners = new Map<string, Set<(t: Tour[]) => void>>();
   const tours = new Map<string, Tour>();
+  const ents: Entitlement[] = [];
+  let wallet: Wallet = { balance: 0, rewardBalance: 0 };
+  const invites = new Map<string, { tourId: string; expiresAt: number }>();
+  /** Mirrors the server-side check so the demo shows the same locked/unlocked behavior. */
+  const gate = (access: { tourId?: string; mode?: 'tour' | 'planned' | 'fork' | 'roam' } | undefined) => {
+    if (!opts.enforceAccess) return;
+    const mode = access?.mode ?? (access?.tourId ? 'tour' : undefined);
+    const tour = access?.tourId ? tours.get(access.tourId) : undefined;
+    const placeId = tour?.placeId ?? [...regions.values()][0]?.placeId;
+    const d = decideAccess(
+      ents,
+      {
+        ...(mode ? { mode } : {}),
+        ...(access?.tourId ? { tourId: access.tourId, tourFree: tour?.free ?? false } : {}),
+        ...(placeId ? { placeId } : {}),
+      },
+      Date.now(),
+    );
+    if (!d.allowed) throw new BackendError('locked', 'Content is locked', undefined, d.reason);
+  };
+  const entListeners = new Set<(s: EntitlementState) => void>();
+  const emitEnts = () => entListeners.forEach((cb) => cb({ entitlements: [...ents], wallet: { ...wallet } }));
   const poiIndex = new Map<string, Poi>();
   const tileRegion = new Map<string, string>();
 
@@ -351,6 +387,7 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
       return { tour, dropped: fit.dropped };
     },
     async getTeaser(req) {
+      gate(req.access);
       const poi = poiIndex.get(req.poiId);
       const kind = poi?.osmTags['tourism'] ?? poi?.osmTags['historic'] ?? poi?.osmTags['amenity'] ?? 'place';
       return req.lang === 'de'
@@ -359,6 +396,7 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
     },
     async getNarration(req: GetNarrationRequest): Promise<NarrationResponse> {
       await sleep(latency);
+      gate(req.access);
       const poi = poiIndex.get(req.poiId);
       if (!poi) throw new BackendError('not_found', 'POI not found');
       const paras = demoNarrationParagraphs(poi, req.lang, req.lengthTier);
@@ -387,6 +425,7 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
       };
     },
     async getTransition(req) {
+      gate(req.access);
       const to = poiIndex.get(req.toPoiId);
       const text =
         req.lang === 'de'
@@ -404,6 +443,77 @@ export function createDemoBackend(opts: { latencyMs?: number } = {}): Backend {
     },
     async reportNarration() {
       await sleep(latency);
+    },
+    watchEntitlements(cb) {
+      entListeners.add(cb);
+      cb({ entitlements: [...ents], wallet: { ...wallet } });
+      return () => void entListeners.delete(cb);
+    },
+    async spendCredit(req) {
+      await sleep(latency);
+      const now = Date.now();
+      const unlocked =
+        req.kind === 'tour'
+          ? ents.some((e) => e.type === 'tour' && e.tourId === req.tourId)
+          : ents.some((e) => e.type === 'session' && e.placeId === req.placeId && e.expiresAt > now);
+      const d = decideSpend(wallet, req.kind, unlocked, isSubscriber(ents, now));
+      if (!d.ok)
+        throw new BackendError(
+          d.reason === 'insufficient' ? 'insufficient_credit' : 'invite_invalid',
+          d.reason,
+          undefined,
+          d.reason,
+        );
+      wallet = d.wallet;
+      ents.push(
+        req.kind === 'tour'
+          ? {
+              type: 'tour',
+              tourId: req.tourId,
+              source: d.use === 'reward' ? 'reward' : 'credit',
+              grantedAt: now,
+              expiresAt: null,
+            }
+          : {
+              type: 'session',
+              placeId: req.placeId,
+              source: 'credit',
+              grantedAt: now,
+              expiresAt: now + SESSION_DURATION_MS,
+            },
+      );
+      emitEnts();
+      return { used: d.use, wallet: { ...wallet } };
+    },
+    async createInvite(tourId) {
+      await sleep(latency);
+      const existing = [...invites.values()].filter((i) => i.tourId === tourId).length;
+      const d = decideInvite(ents, tourId, existing);
+      if (!d.ok) throw new BackendError('invite_invalid', d.reason, undefined, d.reason);
+      const token = `demo${Math.random().toString(36).slice(2)}${'x'.repeat(16)}`;
+      const expiresAt = Date.now() + 14 * 24 * 3600_000;
+      invites.set(token, { tourId, expiresAt });
+      return { token, remaining: d.remaining, expiresAt };
+    },
+    async redeemInvite(token) {
+      await sleep(latency);
+      const inv = invites.get(token);
+      if (!inv || inv.expiresAt <= Date.now())
+        throw new BackendError('invite_invalid', 'invite invalid', undefined, 'not_found');
+      invites.delete(token);
+      ents.push({
+        type: 'tour',
+        tourId: inv.tourId,
+        source: 'invite',
+        grantedAt: Date.now(),
+        expiresAt: null,
+      });
+      emitEnts();
+      return { tourId: inv.tourId };
+    },
+    async createRewardNonce() {
+      await sleep(latency);
+      return { nonce: `demo-${Math.random().toString(36).slice(2)}`, remainingToday: 5 };
     },
   };
   void geohashCenter;

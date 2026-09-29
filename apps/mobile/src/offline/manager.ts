@@ -178,7 +178,13 @@ export class DownloadManager {
     const { backend, files } = this.d;
     if (item.kind === 'narration') {
       const tier = item.tier as LengthTier;
-      const n = await backend.getNarration({ poiId: item.poiId!, lang, lengthTier: tier, download: true });
+      const n = await backend.getNarration({
+        poiId: item.poiId!,
+        lang,
+        lengthTier: tier,
+        download: true,
+        access: { tourId: tour.id, mode: 'tour' },
+      });
       const audioFile = `downloads/${tour.id}/audio/${hash(n.key)}.mp3`;
       await files.download(await backend.audioUrl(n.audioPath), audioFile);
       const images = [];
@@ -204,6 +210,7 @@ export class DownloadManager {
         toPoiId: item.toPoiId!,
         lang,
         walkMinutes: Math.max(1, Math.round(to.walkMinutesFromPrev)),
+        access: { tourId: tour.id, mode: 'tour' },
       });
       const audioFile = `downloads/${tour.id}/audio/${hash(t.key)}.mp3`;
       await files.download(await backend.audioUrl(t.audioPath), audioFile);

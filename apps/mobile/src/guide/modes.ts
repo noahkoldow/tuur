@@ -15,7 +15,7 @@ import {
   type RoutingProfile,
 } from '@tuur/shared';
 import { realClock, type Clock } from '../audio/simulatedEngine';
-import type { Backend } from '../backend/types';
+import type { AccessInfo, Backend } from '../backend/types';
 import { config } from '../config';
 import type { GuideRuntime } from './runtime';
 
@@ -69,6 +69,7 @@ interface ForkOpts {
   budgetMinutes: number;
   destination?: LatLng;
   clock?: Clock;
+  access?: AccessInfo;
 }
 
 /** Crossroads mode (spec 5.3): at every waypoint offer two distinct next stops; the choice extends the route. */
@@ -129,7 +130,11 @@ export class ForkController {
     await Promise.all(
       options.map(async (opt) => {
         try {
-          opt.teaser = await this.o.backend.getTeaser({ poiId: opt.poi.id, lang: this.o.lang });
+          opt.teaser = await this.o.backend.getTeaser({
+            poiId: opt.poi.id,
+            lang: this.o.lang,
+            ...(this.o.access ? { access: this.o.access } : {}),
+          });
         } catch {
           // a card without teaser is fine
         }
