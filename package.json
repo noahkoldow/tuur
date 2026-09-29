@@ -17,7 +17,8 @@
     "emulators": "firebase emulators:start --only auth,firestore,storage,functions",
     "brand": "node scripts/build-brand-assets.mjs",
     "deploy:functions": "firebase deploy --only functions",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage"
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage",
+    "test:integration": "pnpm --filter @tuur/functions test:integration"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

@@ -1,8 +1,43 @@
 rules_version = '2';
-// Phase 0 baseline: deny everything. Collection rules are added per phase (see docs/PROGRESS.md).
-// Invariant (spec 6.4): users/{uid}/entitlements is never client-writable.
+// Default deny. Server-owned data (areas, places, pois, entitlements, credits, ...) is written only by
+// Cloud Functions via the Admin SDK, which bypasses these rules. Spec 6.4: users/{uid}/entitlements is
+// never client-writable.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+
+    match /areas/{id} { allow read: if signedIn(); }
+    match /places/{id} { allow read: if signedIn(); }
+
+    match /pois/{id} {
+      allow read: if signedIn() && (resource.data.hidden == false || isAdmin());
+    }
+
+    // Only the `public` config doc (feature flags, non-sensitive limits) is client-readable.
+    match /config/{doc} {
+      allow read: if signedIn() && (doc == 'public' || isAdmin());
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly(['language', 'interests', 'narrationFrequency', 'voice', 'createdAt', 'consents'])
+        && (!('language' in request.resource.data) || request.resource.data.language in ['de', 'en'])
+        && (!('interests' in request.resource.data) || (request.resource.data.interests is list && request.resource.data.interests.size() <= 8));
+      allow delete: if false; // deletion runs through the `deleteAccount` function
+
+      match /entitlements/{id} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+      match /credits/{id} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
