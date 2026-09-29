@@ -38,9 +38,9 @@ need('EXPO_PUBLIC_WEB_BASE_URL', 'links to legal pages and invites');
 need('TUUR_USER_AGENT', 'User-Agent with a contact for Nominatim/Overpass/Wikimedia (usage policies)');
 if ((env.OVERPASS_ENDPOINT ?? 'https://overpass-api.de/api/interpreter').includes('overpass-api.de'))
   problems.push('OVERPASS_ENDPOINT points at the public Overpass instance (not for production traffic)');
-if (!env.NOMINATIM_ENDPOINT || env.NOMINATIM_ENDPOINT.includes('nominatim.openstreetmap.org'))
+if (!env.NOMINATIM_URL || env.NOMINATIM_URL.includes('nominatim.openstreetmap.org'))
   problems.push(
-    'NOMINATIM_ENDPOINT must be your own or a paid instance (public Nominatim is not for production traffic)',
+    'NOMINATIM_URL must be your own or a paid instance (public Nominatim is not for production traffic)',
   );
 
 // web
