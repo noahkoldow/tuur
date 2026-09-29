@@ -513,7 +513,8 @@ describe('production wiring enforces entitlements', () => {
       code: 'failed-precondition',
     });
     await wallet('u1', 1);
-    await spendCredit(deps(), 'u1', { kind: 'session', placeId: 'DE_berlin' });
+    // production deps use the real clock, so unlock with the real clock as well
+    await spendCredit({ db, now: Date.now }, 'u1', { kind: 'session', placeId: 'DE_berlin' });
     await expect(composePlannedRoute(plannedRouteDeps(), 'u1', req)).resolves.toBeDefined();
   });
 });
