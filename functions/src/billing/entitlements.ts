@@ -468,15 +468,11 @@ export async function recordWithdrawalConsent(deps: BillingDeps, uid: string, ra
     .safeParse(raw);
   if (!p.success) throw new BillingError('invalid-argument', 'Invalid request');
   const now = deps.now();
-  await deps.db
-    .collection('users')
-    .doc(uid)
-    .collection('consents')
-    .add({
-      kind: 'withdrawal_waiver',
-      productId: p.data.productId,
-      textVersion: p.data.textVersion,
-      ts: now,
-    });
+  await deps.db.collection('users').doc(uid).collection('consents').add({
+    kind: 'withdrawal_waiver',
+    productId: p.data.productId,
+    textVersion: p.data.textVersion,
+    ts: now,
+  });
   return { recordedAt: now };
 }

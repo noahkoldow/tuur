@@ -80,11 +80,12 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 - Accessibility pass on the app (roles, labels, live regions, reduce motion, 44 pt targets, contrast tests); web forms with labels, focus outlines, `aria-current`.
 - Release tooling: `apps/mobile/eas.json`, `scripts/check-release.mjs` (fails on missing operator data, keys, test ids), `docs/RELEASE.md` (legal, Firebase, payments, listings, background-location justification, on-device tests, operations).
 
-## Critic gate: see below
-
 ## Critic gate (must pass before handing over)
 
-Four independent reviews (frontend, backend, legal, design), each >= 4/5, findings fixed, re-reviewed until all pass. Status: not started.
+Four independent reviews (frontend, backend, legal, design), each >= 4/5, findings fixed, re-reviewed until all pass.
+
+- Round 1: frontend 3, backend 2, legal 3, design 3. Blockers: paid audio readable straight from Storage, tour list query rejected by the rules, unenforced consent for the withdrawal waiver, false "exact position never leaves the device" claim. All findings were addressed in round 2 (private signed audio URLs, rules-conformant query with rules tests, consent checkbox with server-side record, corrected texts and retention, GPS/audio teardown, error paths, paywall/home/player redesign, cost guards, webhook ordering).
+- Round 2: see the summary at the end of this file once the re-review has finished.
 
 ## Known issues / notes
 

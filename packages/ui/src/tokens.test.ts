@@ -13,7 +13,12 @@ describe('design tokens', () => {
   });
 
   it('keeps text colors used on white and on the red tint AA-compliant', () => {
-    for (const c of [colors.status.success, colors.status.warning, colors.status.error, colors.brand.redPressed])
+    for (const c of [
+      colors.status.success,
+      colors.status.warning,
+      colors.status.error,
+      colors.brand.redPressed,
+    ])
       expect(contrastRatio(c, colors.surface.base)).toBeGreaterThanOrEqual(4.5);
     // selected chips and partner cards put text on the tint: only the pressed red is dark enough there
     expect(contrastRatio(colors.brand.redPressed, colors.brand.redTint)).toBeGreaterThanOrEqual(4.5);

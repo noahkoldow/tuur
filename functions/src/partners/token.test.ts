@@ -18,7 +18,14 @@ describe('redemption token', () => {
     expect(verifyToken(secret, p, 'p1', 'o2')).toBe(false);
     expect(verifyToken('other', p, 'p1', 'o1')).toBe(false);
     expect(verifyToken(secret, { ...p, expiresAt: p.expiresAt + 1 }, 'p1', 'o1')).toBe(false);
-    expect(verifyToken(secret, { ...p, signature: p.signature.replace(/.$/, 'A') }, 'p1', 'o1')).toBe(false);
+    expect(
+      verifyToken(
+        secret,
+        { ...p, signature: p.signature.slice(0, -1) + (p.signature.endsWith('A') ? 'B' : 'A') },
+        'p1',
+        'o1',
+      ),
+    ).toBe(false);
   });
   it('rejects malformed tokens', () => {
     expect(parseToken('garbage')).toBeUndefined();

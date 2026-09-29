@@ -24,9 +24,7 @@ export function fallbackTourConcept(i: TourConceptInput): TourConcept {
   const last = spokenName(i.stops[i.stops.length - 1]?.name ?? i.placeName);
   return {
     title,
-    teaser: de
-      ? `Von ${first} bis ${last}.`
-      : `From ${first} to ${last}.`,
+    teaser: de ? `Von ${first} bis ${last}.` : `From ${first} to ${last}.`,
     description: de
       ? `Diese Tour führt dich von ${first} bis ${last}. Unterwegs erzählt tuur an jeder Station eine eigene Geschichte.`
       : `This tour leads you from ${first} to ${last}. Along the way tuur tells a story at every stop.`,

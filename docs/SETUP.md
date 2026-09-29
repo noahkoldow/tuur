@@ -37,3 +37,9 @@ Node >= 22, pnpm 10 (`corepack enable`), Java 17+ (Firestore emulator), Xcode / 
 1. Create the first admin: register the account (e.g. through the partner login page), then run `GCLOUD_PROJECT=<project> node scripts/set-admin.mjs you@example.com` with Application Default Credentials. Sign out and in again to refresh the token.
 2. Set `MAPTILER_KEY` for the web app to serve `/map-style.json` (used by the admin map and, through `EXPO_PUBLIC_MAP_STYLE_URL`, by app offline packs). Restrict the key to your domains in the MapTiler console.
 3. Local end-to-end check: start the Auth, Firestore and Functions emulators (after `pnpm --filter @tuur/functions build`; link `functions/deploy/node_modules` to `../node_modules` and put dummy secrets into `functions/deploy/.secret.local`), then `NEXT_PUBLIC_USE_EMULATORS=true pnpm --filter @tuur/web dev`.
+
+## Storage signing (private audio)
+
+Signed URLs are created by the Cloud Functions runtime service account. Grant it the token-creator role on itself once per project:
+`gcloud iam service-accounts add-iam-policy-binding <sa>@<project>.iam.gserviceaccount.com --member=serviceAccount:<sa>@<project>.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator`.
+Deploy `firestore.indexes.json` with `firebase deploy --only firestore:indexes` so the TTL policies (`expireAt`) and composite indexes are created.

@@ -133,3 +133,19 @@ The legal texts live in `packages/shared` and are rendered by app and web. Opera
 ## D33 – Deletion and export are server functions
 
 Account deletion and export run in Cloud Functions with the admin SDK (the client cannot reach most of the data by design). Deletion is idempotent and ordered so a retry after a partial failure completes it; the Auth record is removed last. Anonymous aggregates (usage cost, redemption log without user ids) are kept. Store subscriptions cannot be cancelled by us; the dialog says so.
+
+## D34 – Narration audio is private, served by signed URL
+
+Object names in `narrations/` are guessable, so Storage rules deny all client reads. `getNarration`/`getTransition` run the entitlement check first and return a 6 h signed URL (`audioUrl`); the app maps `audioPath` to that URL (also for offline downloads, which fetch right after the request). Production signing needs the functions service account to hold `roles/iam.serviceAccountTokenCreator` on itself (SETUP.md). Objects carry `aiGenerated` metadata and an ID3 tag marking synthetic audio.
+
+## D35 – Cost guards cover every model call
+
+Language codes are an allowlist (`NARRATION_LANGS`); new-language tour texts are gated like any generation (rate limit, budget, kill switch); ingest checks the kill switch and budget before LLM classification and a global daily tile-claim cap stops tile farming; client-supplied `context` no longer reaches shared (cached) generation; narrations are only pulled after three distinct reporters.
+
+## D36 – Webhook and token integrity
+
+RevenueCat events are ordered by their own `event_timestamp_ms`, sandbox events are ignored in production and ledger entries are keyed by store transaction (a replayed purchase/refund is a no-op). Stripe events are marked handled only after their work succeeded and are ordered by the event's `created`. Redemption tokens and reward nonces are issued inside transactions so parallel requests cannot exceed the limits. Firestore TTL policies are part of `firestore.indexes.json` (`expireAt` fields), and a daily retention sweep enforces the periods named in the privacy policy.
+
+## D37 – Withdrawal waiver is collected, not just displayed
+
+The paywall requires an explicit checkbox before any purchase button is active; `recordPurchaseConsent` stores who/what/when/which text version under `users/{uid}/consents` before the store sheet opens, and the record is part of the data export. The terms contain the model withdrawal notice.
