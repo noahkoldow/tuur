@@ -8,6 +8,7 @@ import {
   parseOverpass,
   parseWikidata,
   parseWikipediaGenerator,
+  syntheticRawPois,
   type Bounds,
   type ImageRef,
   type RawPoi,
@@ -78,30 +79,8 @@ export class HttpPoiSources implements PoiSourceClient {
 /** Deterministic synthetic data for emulator/dev runs without network access; works for any coordinate. */
 export class MockPoiSources implements PoiSourceClient {
   async fetchOsm(b: Bounds): Promise<RawPoi[]> {
-    const hash = encodeGeohash((b.south + b.north) / 2, (b.west + b.east) / 2, 6);
-    const seed = [...hash].reduce((a, c) => a + c.charCodeAt(0), 0);
-    const kinds: Record<string, string>[] = [
-      { tourism: 'attraction', historic: 'monument' },
-      { tourism: 'museum' },
-      { amenity: 'place_of_worship', building: 'church' },
-      { historic: 'castle' },
-      { leisure: 'park' },
-      { tourism: 'viewpoint' },
-    ];
-    return kinds.map((tags, i) => {
-      const name = `Mock ${tags['tourism'] ?? tags['historic'] ?? tags['amenity'] ?? tags['leisure']} ${hash}-${i}`;
-      const lat = b.south + ((b.north - b.south) * (((seed + i * 17) % 90) + 5)) / 100;
-      const lng = b.west + ((b.east - b.west) * (((seed + i * 29) % 90) + 5)) / 100;
-      return {
-        source: 'osm' as const,
-        sourceId: `node/${seed * 100 + i}`,
-        name,
-        names: {},
-        location: { lat, lng },
-        osmTags: { name, ...tags },
-        ...(i < 3 ? { wikidataId: `Q${seed * 10 + i}`, sitelinks: 10 + i * 5 } : {}),
-      };
-    });
+    const tile = encodeGeohash((b.south + b.north) / 2, (b.west + b.east) / 2, 6);
+    return syntheticRawPois(tile);
   }
   async fetchWikidata(): Promise<RawPoi[]> {
     return [];

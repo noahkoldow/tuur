@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   DEFAULT_TEMPLATES,
+  fallbackTourConcept,
   encodePolyline,
   PoiSchema,
   TourConceptSchema,
@@ -18,6 +19,7 @@ import {
   tourSystemPrompt,
   tourUserPrompt,
   type AiConfig,
+  type GenerateToursResult,
   type Poi,
   type PreparedTour,
   type RoutingProfile,
@@ -28,7 +30,7 @@ import {
   type TourTemplate,
   type TravelMatrix,
 } from '@tuur/shared';
-import { fallbackTourConcept, type LlmProvider } from '../providers/llm';
+import type { LlmProvider } from '../providers/llm';
 import { CachedRoutingProvider, type RoutingProvider } from '../providers/routing';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
@@ -239,6 +241,7 @@ async function buildTour(
   const tour: Tour = TourSchema.parse({
     id: tourId(place.id, prep.template.id),
     placeId: place.id,
+    placeName: place.name,
     source: 'auto',
     version: existing ? existing.version + (changed ? 1 : 0) : 1,
     template: prep.template.id,
@@ -282,11 +285,7 @@ async function buildTour(
   return { tour };
 }
 
-export interface GenerateResult {
-  status: 'ready' | 'generating' | 'area_not_ready' | 'no_tours';
-  placeId?: string;
-  tours: { id: string; template: string; durationMinutes: number; free: boolean }[];
-}
+export type GenerateResult = GenerateToursResult;
 
 const summarize = (ts: Tour[]): GenerateResult['tours'] =>
   ts.map((t) => ({ id: t.id, template: t.template, durationMinutes: t.durationMinutes, free: t.free }));

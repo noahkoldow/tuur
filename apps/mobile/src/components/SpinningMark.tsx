@@ -9,7 +9,10 @@ interface Props {
   color?: string;
 }
 
-/** Brand loader: the heart-pin mark turning around its own vertical axis. Static under reduced motion. */
+/**
+ * Brand loader: the heart-pin mark turning around its own vertical axis. Static under "reduce motion"
+ * (accessibility) and announced to screen readers as a progress indicator.
+ */
 export function SpinningMark({ size = 72, label, color = colors.brand.red }: Props) {
   const turn = useRef(new Animated.Value(0)).current;
   const [reduceMotion, setReduceMotion] = useState(false);

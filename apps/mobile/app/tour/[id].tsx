@@ -1,0 +1,205 @@
+import { useEffect, useMemo, useState } from 'react';
+import { ScrollView, View } from 'react-native';
+import { Image } from 'expo-image';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
+import type { Tour } from '@tuur/shared';
+import { useBackend } from '../../src/backend';
+import { AiBadge } from '../../src/components/AiBadge';
+import { Banner } from '../../src/components/Banner';
+import { Button, IconButton, Row } from '../../src/components/Button';
+import { Chip } from '../../src/components/Chip';
+import { Screen } from '../../src/components/Screen';
+import { Text } from '../../src/components/Text';
+import { TuurMap } from '../../src/components/TuurMap';
+import { startSession, tourPath } from '../../src/guide/session';
+import { requestBackground } from '../../src/location/real';
+import { useSettings } from '../../src/state/settings';
+import { colors, radii } from '../../src/theme';
+
+/** Tour preview (spec 5): map with the route, facts, stops with walking times, start. */
+export default function TourDetail() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { t } = useTranslation();
+  const router = useRouter();
+  const backend = useBackend();
+  const { language, interests, simulator } = useSettings();
+  const [tour, setTour] = useState<Tour | null | undefined>(undefined);
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    void backend.getTour(id).then(setTour);
+  }, [backend, id]);
+
+  const path = useMemo(() => (tour ? tourPath(tour) : []), [tour]);
+  if (tour === undefined) return <Screen />;
+  if (tour === null)
+    return (
+      <Screen>
+        <Banner tone="error" text={t('errors.generic')} />
+      </Screen>
+    );
+  const text = tour.texts[language] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      if (!simulator && backend.kind === 'firebase') await requestBackground();
+      await startSession({
+        tour,
+        lang: language,
+        ...(interests[0] ? { interest: interests[0] } : {}),
+        simulate: simulator,
+      });
+      router.replace('/play');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <Screen padded={false}>
+      <View style={{ height: 240 }}>
+        <TuurMap
+          center={tour.stops[0]!.location}
+          route={path}
+          fit={path}
+          stops={tour.stops.map((s, i) => ({
+            id: s.poiId,
+            location: s.location,
+            number: i + 1,
+            state: 'upcoming',
+            partner: s.partner,
+          }))}
+        />
+        <View style={{ position: 'absolute', top: 12, left: 12 }}>
+          <IconButton icon="arrow-left" label={t('common.back')} onPress={() => router.back()} size={44} />
+        </View>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 140 }}>
+        <Text variant="title" accessibilityRole="header">
+          {text?.title ?? tour.template}
+        </Text>
+        <Text variant="bodySecondary">{text?.description}</Text>
+
+        <Row gap={10} style={{ flexWrap: 'wrap' }}>
+          <Fact
+            label={t('tour.duration')}
+            value={t('common.minutes', { count: Math.round(tour.durationMinutes) })}
+          />
+          <Fact
+            label={t('tour.distance')}
+            value={t('common.km', { value: (tour.distanceMeters / 1000).toFixed(1) })}
+          />
+          <Fact label={t('tour.stopsTitle')} value={String(tour.stops.length)} />
+        </Row>
+        {tour.themes.length ? (
+          <View style={{ gap: 8 }}>
+            <Text variant="label">{t('tour.themes')}</Text>
+            <Row gap={8} style={{ flexWrap: 'wrap' }}>
+              {tour.themes.map((th) => (
+                <Chip key={th} label={t(`interests.${th}`)} selected />
+              ))}
+            </Row>
+          </View>
+        ) : null}
+        {tour.hasPartner ? <Banner text={t('tour.sponsored')} icon="award" /> : null}
+
+        <Text variant="heading" accessibilityRole="header">
+          {t('tour.stopsTitle')}
+        </Text>
+        <View style={{ gap: 4 }}>
+          {tour.stops.map((s, i) => (
+            <Row key={s.poiId} gap={12} style={{ paddingVertical: 8 }}>
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: colors.brand.redTint,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text variant="label" color={colors.brand.redPressed}>
+                  {i + 1}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="body">{s.name}</Text>
+                {i > 0 ? (
+                  <Text variant="caption">
+                    {t('tour.walkFromPrev', { minutes: Math.round(s.walkMinutesFromPrev) })}
+                  </Text>
+                ) : null}
+              </View>
+              {s.partner ? (
+                <View
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    borderColor: colors.brand.red,
+                  }}
+                >
+                  <Text variant="caption">{t('common.partner')}</Text>
+                </View>
+              ) : null}
+            </Row>
+          ))}
+        </View>
+        <AiBadge text={t('tour.aiNotice')} />
+        {tour.coverImage ? (
+          <View style={{ borderRadius: radii.md, overflow: 'hidden' }}>
+            <Image
+              source={{ uri: tour.coverImage.url }}
+              style={{ height: 160 }}
+              contentFit="cover"
+              accessibilityIgnoresInvertColors
+            />
+            <Text variant="caption" style={{ padding: 8 }}>
+              {t('player.imageBy', {
+                author: tour.coverImage.author ?? 'Wikimedia Commons',
+                license: tour.coverImage.license,
+              })}
+            </Text>
+          </View>
+        ) : null}
+      </ScrollView>
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          paddingHorizontal: 20,
+          paddingTop: 12,
+          paddingBottom: 24,
+          gap: 10,
+          backgroundColor: colors.surface.base,
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
+        }}
+      >
+        <Button label={t('tour.start')} icon="play" loading={starting} onPress={() => void start()} />
+      </View>
+    </Screen>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: radii.md,
+        backgroundColor: colors.surface.subtle,
+      }}
+    >
+      <Text variant="caption">{label}</Text>
+      <Text variant="heading">{value}</Text>
+    </View>
+  );
+}

@@ -32,6 +32,8 @@ export type TourStop = z.infer<typeof TourStopSchema>;
 export const TourSchema = z.object({
   id: z.string(),
   placeId: z.string(),
+  /** Display name of the place (city/municipality) for headings. */
+  placeName: z.string().optional(),
   source: z.enum(['auto', 'edited']),
   /** Increments on every regeneration; snapshots live in `tourVersions`. */
   version: z.number().int().positive(),
@@ -69,3 +71,10 @@ export const TourSchema = z.object({
   updatedAt: z.number(),
 });
 export type Tour = z.infer<typeof TourSchema>;
+
+/** Response of the `generateAutoTours` callable. */
+export interface GenerateToursResult {
+  status: 'ready' | 'generating' | 'area_not_ready' | 'no_tours';
+  placeId?: string;
+  tours: { id: string; template: string; durationMinutes: number; free: boolean }[];
+}
