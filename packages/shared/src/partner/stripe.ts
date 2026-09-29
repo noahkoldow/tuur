@@ -41,11 +41,15 @@ export function planFromStripeSubscription(s: StripeSubscription, deleted = fals
 }
 
 /** Stripe price ids per tier and currency (configured in the admin area, Firestore `config/partners`). */
-export interface PartnerPricing {
-  prices: Record<'visibility' | 'offers', Record<string, string>>;
-  currencyByCountry: Record<string, string>;
-  defaultCurrency: string;
-}
+export const PartnerPricingSchema = z.object({
+  prices: z.object({
+    visibility: z.record(z.string().regex(/^price_[A-Za-z0-9_]+$/)),
+    offers: z.record(z.string().regex(/^price_[A-Za-z0-9_]+$/)),
+  }),
+  currencyByCountry: z.record(z.string().regex(/^[A-Z]{3}$/)),
+  defaultCurrency: z.string().regex(/^[A-Z]{3}$/),
+});
+export type PartnerPricing = z.infer<typeof PartnerPricingSchema>;
 
 export const DEFAULT_PARTNER_PRICING: PartnerPricing = {
   prices: { visibility: {}, offers: {} },

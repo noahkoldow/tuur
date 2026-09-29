@@ -9,6 +9,14 @@ service cloud.firestore {
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
 
     match /areas/{id} { allow read: if signedIn(); }
+
+    // Admin area (spec 8): admins read moderation and cost data directly; every write goes through admin callables.
+    match /narrations/{id} { allow read: if isAdmin(); }
+    match /feedback/{id} { allow read: if isAdmin(); }
+    match /usageDaily/{id} { allow read: if isAdmin(); }
+    match /usageDailyAreas/{id} { allow read: if isAdmin(); }
+    match /usageLogs/{id} { allow read: if isAdmin(); }
+    match /adminAudit/{id} { allow read: if isAdmin(); }
     match /places/{id} { allow read: if signedIn(); }
 
     match /pois/{id} {

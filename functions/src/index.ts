@@ -13,6 +13,7 @@ import {
   geocoder,
   llm,
   narrationDeps,
+  objectStore,
   PARTNER_SECRETS,
   partnerDeps,
   payments,
@@ -27,6 +28,18 @@ import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
 import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
+import {
+  AdminError,
+  moderatePoi,
+  moderateTour,
+  regenerateNarration,
+  resolveFeedback,
+  retryIngest,
+  saveAiConfig,
+  savePartnerConfig,
+  setAreaLock,
+  writeAudit,
+} from './admin/service';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   PartnerError,
@@ -465,9 +478,11 @@ export const createRedemptionToken = onCall(
 
 /** Admin: approve, suspend or send a partner back to review. */
 export const setPartnerStatus = onCall(partnerCall, async (request) => {
-  requireAdmin(request);
+  const a = requireAdmin(request);
   try {
-    return await runSetPartnerStatus(partnerDeps(), request.data);
+    const p = await runSetPartnerStatus(partnerDeps(), request.data);
+    await writeAudit(db(), Date.now(), a.uid, 'setPartnerStatus', p.id, { status: p.status });
+    return p;
   } catch (e) {
     return toPartner(e);
   }
@@ -496,3 +511,40 @@ export const sweepPartners = onSchedule(
     await sweepPartnerPlans(partnerDeps());
   },
 );
+
+// ---------------------------------------------------------------------------------------------------------------
+// Admin area (spec 8). Reads happen directly in Firestore (rules: admin claim); writes go through these callables,
+// which re-check the claim on the server and leave an audit entry.
+
+const adminDeps = () => ({
+  db: db(),
+  now: Date.now,
+  store: objectStore(),
+  enqueueIngest: (geohash: string) =>
+    getFunctions()
+      .taskQueue(`locations/${REGION}/functions/ingestArea`)
+      .enqueue({ geohash }, { dispatchDeadlineSeconds: 540 }),
+});
+
+function adminCallable<T>(
+  run: (deps: ReturnType<typeof adminDeps>, actor: string, data: unknown) => Promise<T>,
+) {
+  return onCall({ enforceAppCheck: false }, async (request) => {
+    const a = requireAdmin(request);
+    try {
+      return (await run(adminDeps(), a.uid, request.data)) ?? { ok: true };
+    } catch (e) {
+      if (e instanceof AdminError) throw new HttpsError(e.code, e.message, e.details);
+      throw e;
+    }
+  });
+}
+
+export const adminRetryIngest = adminCallable(retryIngest);
+export const adminSetAreaLock = adminCallable(setAreaLock);
+export const adminModeratePoi = adminCallable(moderatePoi);
+export const adminModerateTour = adminCallable(moderateTour);
+export const adminRegenerateNarration = adminCallable(regenerateNarration);
+export const adminResolveFeedback = adminCallable(resolveFeedback);
+export const adminSaveAiConfig = adminCallable(saveAiConfig);
+export const adminSavePartnerConfig = adminCallable(savePartnerConfig);

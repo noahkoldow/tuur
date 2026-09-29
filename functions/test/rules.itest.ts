@@ -106,6 +106,35 @@ describe('firestore rules', () => {
     await assertFails(setDoc(doc(alice(), 'partnerStats/alice_2026-01-02'), { partnerId: 'alice' }));
   });
 
+  it('admin data: only admins read moderation/cost/audit collections, nobody writes from the client', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      for (const p of [
+        'narrations/n1',
+        'feedback/f1',
+        'usageDaily/2026-01-01',
+        'usageDailyAreas/x',
+        'usageLogs/l1',
+        'adminAudit/a1',
+      ])
+        await setDoc(doc(db, p), { x: 1 });
+    });
+    for (const p of [
+      'narrations/n1',
+      'feedback/f1',
+      'usageDaily/2026-01-01',
+      'usageDailyAreas/x',
+      'usageLogs/l1',
+      'adminAudit/a1',
+    ]) {
+      await assertSucceeds(getDoc(doc(admin(), p)));
+      await assertFails(getDoc(doc(alice(), p)));
+      await assertFails(setDoc(doc(admin(), p), { x: 2 }));
+    }
+    await assertFails(setDoc(doc(admin(), 'config/ai'), { killSwitch: false }));
+    await assertFails(setDoc(doc(alice(), 'areas/u33dc0'), { locked: true }));
+  });
+
   it('users can only edit their own whitelisted profile fields', async () => {
     await assertSucceeds(setDoc(doc(alice(), 'users/alice'), { language: 'de', interests: ['history'] }));
     await assertFails(setDoc(doc(bob(), 'users/alice'), { language: 'de' }));
