@@ -64,12 +64,17 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 - Tests: 20 partner integration tests (lifecycle, cap, lapse, review reset, terms, tokens: expiry/single use/limits/proximity/forgery, stats anonymity, sponsored narration) + rules tests + shared unit tests.
 - **Not verified:** real Stripe checkout/webhooks, camera scanning on a phone, QR readability on real devices.
 
-## Phases 11-12: NOT STARTED
+## Phase 11 – Admin: DONE
 
-Next: Phase 11 (admin), Phase 12 (legal texts, GDPR flows, release checklist).
-Reminders:
+- Web `/admin` (custom claim `admin`, re-checked in every callable; bootstrap with `node scripts/set-admin.mjs <email>`): dashboard (cost today/7 days by kind, budget, kill switch, area status counts, open reports, pending partners, audit log), world map of tiles by status with cost, retry ingest, lock/unlock; tours (lock, pin, edit texts -> `edited`), POIs by tile (hide, weight, extra facts -> narrations regenerate), narration list + regenerate, feedback queue, partner approval/suspension with boost/price configuration (hard cap 30), AI config (models, prompt version, grounding, kill switch, budgets, rate limits, prices).
+- Reads are direct Firestore queries under admin-only rules; writes are audited callables (`adminAudit`).
+- `/map-style.json` serves the tuur map style for offline packs and the admin map.
+- Verified end to end on the Firebase emulators (Auth + Firestore + Functions) with Playwright: admin login and all pages, partner approval, Stripe mock checkout + webhook, offer creation, QR token creation (proximity), scanner redemption and single-use rejection. 11 admin integration tests + rules tests.
+- **Not verified:** map with real tiles (provider unreachable in the sandbox), real admin accounts.
 
-- Legal pages (`/legal/*` on web, referenced from app, paywall and portal) are still to be written in Phase 12.
+## Phase 12: NOT STARTED
+
+Next: legal texts (`/legal/*`), GDPR flows (account deletion, export, consent), accessibility pass, Crashlytics/Sentry, `eas.json`, `docs/RELEASE.md`.
 
 ## Critic gate (must pass before handing over)
 

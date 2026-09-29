@@ -31,3 +31,9 @@ Node >= 22, pnpm 10 (`corepack enable`), Java 17+ (Firestore emulator), Xcode / 
 2. **Secrets**: `firebase functions:secrets:set STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET REDEMPTION_TOKEN_SECRET` (the last one is any random string of 32+ characters). Set `TUUR_PAYMENTS_PROVIDER=stripe` and `TUUR_WEB_BASE_URL` for production; locally the mock provider needs no keys (put a dummy `REDEMPTION_TOKEN_SECRET` into `functions/.secret.local` for the emulator).
 3. **Web env**: `NEXT_PUBLIC_FIREBASE_*` (api key, auth domain, project id, app id), `NEXT_PUBLIC_USE_EMULATORS=true` for local development. Enable Email/Password sign-in in Firebase Auth.
 4. **Firestore**: deploy `firestore.rules` and `firestore.indexes.json` (composite index for `partnerStats`).
+
+## Admin setup (Phase 11)
+
+1. Create the first admin: register the account (e.g. through the partner login page), then run `GCLOUD_PROJECT=<project> node scripts/set-admin.mjs you@example.com` with Application Default Credentials. Sign out and in again to refresh the token.
+2. Set `MAPTILER_KEY` for the web app to serve `/map-style.json` (used by the admin map and, through `EXPO_PUBLIC_MAP_STYLE_URL`, by app offline packs). Restrict the key to your domains in the MapTiler console.
+3. Local end-to-end check: start the Auth, Firestore and Functions emulators (after `pnpm --filter @tuur/functions build`; link `functions/deploy/node_modules` to `../node_modules` and put dummy secrets into `functions/deploy/.secret.local`), then `NEXT_PUBLIC_USE_EMULATORS=true pnpm --filter @tuur/web dev`.

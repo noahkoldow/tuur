@@ -18,6 +18,7 @@ export default tseslint.config(
       '**/*.generated.ts',
       'assets/**',
       'apps/web/public/brand/**',
+      'apps/web/public/maplibre/**',
       'apps/mobile/metro.config.js',
     ],
   },

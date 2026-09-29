@@ -121,3 +121,7 @@ Changing name, description, category or POI link of an approved partner sets it 
 ## D30 – QR redemption is signed, single-use and anonymous
 
 Token = `tuur1.<jti>.<exp>.<HMAC>` (secret in Firebase secrets), bound to partner and offer; single use, ownership and expiry are enforced by the token document in a transaction. The listener's position is used for the proximity check only. The redemption log and statistics contain partner/offer/day but no user id; per-user impression/visit counts are deduplicated through hashed rate-limit keys that expire. Partner callables do not enforce App Check (web has no attestation) and rely on auth (non-anonymous), rate limits and server-side checks instead.
+
+## D31 – Admin: claim-gated callables, direct reads, audit trail
+
+Admin identity is the Firebase custom claim `admin` (set only with `scripts/set-admin.mjs`). The claim is checked in Firestore rules for reads and again inside every callable for writes; each write appends an entry to `adminAudit` (actor, action, target). Config writes are validated (AI config merged and re-parsed, partner boost capped at 30 points, Stripe price ids format-checked) so a typo cannot disable generation or lift the boost cap. Editing POI facts sends the POI's narrations back for regeneration; edited tours are never overwritten by tour regeneration.

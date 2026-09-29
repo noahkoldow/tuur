@@ -10,3 +10,4 @@ docs/PRODUCT_SPEC.md
 **/*.generated.ts
 apps/web/public/brand
 deploy
+apps/web/public/maplibre
