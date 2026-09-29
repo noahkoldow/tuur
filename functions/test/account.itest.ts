@@ -58,17 +58,14 @@ async function seedUserData(uid: string) {
     .collection('rewardNonces')
     .doc('n1')
     .set({ uid, used: false, expiresAt: clock + 1 });
-  await db
-    .collection('feedback')
-    .doc(`${uid}__k`)
-    .set({
-      uid,
-      narrationKey: 'k',
-      reason: 'wrong_fact',
-      text: 'stimmt nicht',
-      status: 'open',
-      createdAt: clock,
-    });
+  await db.collection('feedback').doc(`${uid}__k`).set({
+    uid,
+    narrationKey: 'k',
+    reason: 'wrong_fact',
+    text: 'stimmt nicht',
+    status: 'open',
+    createdAt: clock,
+  });
   await db.collection('rateLimits').doc(`narr_user_${uid}`).set({ count: 3 });
   await db.collection('rateLimits').doc(`narr_user_${uid}2`).set({ count: 1 }); // another user whose id starts the same way must survive... see below
   await db.collection('rateLimits').doc('narr_user_other').set({ count: 9 });
