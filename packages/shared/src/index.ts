@@ -39,3 +39,6 @@ export * from './guide/roam';
 export * from './offline/plan';
 export * from './billing/entitlements';
 export * from './billing/ads';
+export * from './partner/schemas';
+export * from './partner/rules';
+export * from './partner/stripe';

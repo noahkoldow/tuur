@@ -20,9 +20,16 @@ import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from '.
 import type { NarrationDeps, ObjectStore } from './narration/service';
 import { BillingError, authorizeContent } from './billing/entitlements';
 import { NarrationError } from './narration/service';
+import { MockPayments, StripePayments, type PaymentsProvider } from './partners/payments';
+import type { PartnerDeps } from './partners/service';
 
 export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 export const ORS_API_KEY = defineSecret('ORS_API_KEY');
+export const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
+export const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
+export const REDEMPTION_TOKEN_SECRET = defineSecret('REDEMPTION_TOKEN_SECRET');
+const PAYMENTS_PROVIDER = defineString('TUUR_PAYMENTS_PROVIDER', { default: 'mock' });
+const WEB_BASE_URL = defineString('TUUR_WEB_BASE_URL', { default: 'https://tuur.app' });
 const ROUTING_PROVIDER = defineString('TUUR_ROUTING_PROVIDER', { default: 'mock' });
 const LLM_PROVIDER = defineString('TUUR_LLM_PROVIDER', { default: 'mock' });
 const TTS_PROVIDER = defineString('TUUR_TTS_PROVIDER', { default: 'mock' });
@@ -131,5 +138,29 @@ export function plannedRouteDeps(): TourDeps {
         throw e;
       }
     },
+  };
+}
+
+export function payments(): PaymentsProvider {
+  return PAYMENTS_PROVIDER.value() === 'stripe'
+    ? new StripePayments(STRIPE_SECRET_KEY.value(), STRIPE_WEBHOOK_SECRET.value())
+    : new MockPayments();
+}
+
+/** Secrets bound to every partner function that signs/verifies tokens or talks to Stripe. */
+export const PARTNER_SECRETS = [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, REDEMPTION_TOKEN_SECRET];
+
+export function partnerDeps(ensureTile?: PartnerDeps['ensureTile']): PartnerDeps {
+  return {
+    db: db(),
+    now: Date.now,
+    tokenSecret: () => {
+      const v = REDEMPTION_TOKEN_SECRET.value();
+      if (!v || v.length < 16) throw new Error('REDEMPTION_TOKEN_SECRET is not configured');
+      return v;
+    },
+    payments,
+    webBaseUrl: WEB_BASE_URL.value(),
+    ...(ensureTile ? { ensureTile } : {}),
   };
 }

@@ -13,6 +13,9 @@ import {
   geocoder,
   llm,
   narrationDeps,
+  PARTNER_SECRETS,
+  partnerDeps,
+  payments,
   plannedRouteDeps,
   poiSources,
   routing,
@@ -24,6 +27,23 @@ import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
 import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
+import {
+  PartnerError,
+  createBillingPortalSession as runBillingPortal,
+  createCheckoutSession as runCheckout,
+  createRedemptionToken as runCreateToken,
+  deleteOffer as runDeleteOffer,
+  getOffers as runGetOffers,
+  partnerStats as runPartnerStats,
+  processPaymentEvent,
+  recordPartnerEvent as runRecordEvent,
+  redeemToken as runRedeemToken,
+  saveOffer as runSaveOffer,
+  savePartnerProfile as runSavePartner,
+  setPartnerStatus as runSetPartnerStatus,
+  sweepPartnerPlans,
+} from './partners/service';
 import {
   BillingError,
   createInvite as runCreateInvite,
@@ -304,3 +324,175 @@ export const invitePreview = onRequest({ cors: true }, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.status(200).json(await previewInvite({ db: db(), now: Date.now }, token));
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// B2B partners (spec 7)
+
+function toPartner(e: unknown): never {
+  if (e instanceof PartnerError) throw new HttpsError(e.code, e.message, e.details);
+  throw e;
+}
+
+/** Partner portal callers must have a real account (email/password or federated), never an anonymous one. */
+function requirePartnerAuth(request: { auth?: { uid: string; token: Record<string, unknown> } | undefined }) {
+  const a = request.auth;
+  if (!a) throw new HttpsError('unauthenticated', 'Sign in first');
+  const provider = (a.token['firebase'] as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+  if (provider === 'anonymous') throw new HttpsError('permission-denied', 'Create an account first');
+  return a;
+}
+
+function requireAdmin(request: { auth?: { uid: string; token: Record<string, unknown> } | undefined }) {
+  const a = request.auth;
+  if (!a) throw new HttpsError('unauthenticated', 'Sign in first');
+  if (a.token['admin'] !== true) throw new HttpsError('permission-denied', 'Admin only');
+  return a;
+}
+
+const partnerCall = { enforceAppCheck: false, secrets: PARTNER_SECRETS } as const;
+
+const ensureTileQueued = async (tile: string) => {
+  const queue = getFunctions().taskQueue(`locations/${REGION}/functions/ingestArea`);
+  await ensureAreas(
+    {
+      db: db(),
+      now: Date.now,
+      enqueueIngest: (geohash) => queue.enqueue({ geohash }, { dispatchDeadlineSeconds: 540 }),
+    },
+    tile,
+    true,
+  );
+};
+
+export const savePartnerProfile = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runSavePartner(partnerDeps(ensureTileQueued), a.uid, request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+export const saveOffer = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runSaveOffer(partnerDeps(), a.uid, request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+export const deleteOffer = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    await runDeleteOffer(partnerDeps(), a.uid, request.data);
+    return { ok: true };
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+export const partnerStats = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runPartnerStats(partnerDeps(), a.uid, request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+export const createCheckoutSession = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runCheckout(partnerDeps(), a.uid, a.token['email'] as string | undefined, request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+export const createBillingPortalSession = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runBillingPortal(partnerDeps(), a.uid);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+/** Partner scanner: verifies and consumes a redemption token for the calling partner. */
+export const redeemToken = onCall(partnerCall, async (request) => {
+  const a = requirePartnerAuth(request);
+  try {
+    return await runRedeemToken(partnerDeps(), a.uid, request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+/** App: offers of partner stops (only live partners, only inside the validity window). */
+export const getOffers = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runGetOffers(partnerDeps(), request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+/** App: anonymous, deduplicated impression/visit counters for partner stops. */
+export const recordPartnerEvent = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    await runRecordEvent(partnerDeps(), request.auth.uid, request.data);
+    return { ok: true };
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+/** App: signed single-use QR token, only near the partner (position is used for the check and never stored). */
+export const createRedemptionToken = onCall(
+  { enforceAppCheck, secrets: PARTNER_SECRETS },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runCreateToken(partnerDeps(), request.auth.uid, request.data);
+    } catch (e) {
+      return toPartner(e);
+    }
+  },
+);
+
+/** Admin: approve, suspend or send a partner back to review. */
+export const setPartnerStatus = onCall(partnerCall, async (request) => {
+  requireAdmin(request);
+  try {
+    return await runSetPartnerStatus(partnerDeps(), request.data);
+  } catch (e) {
+    return toPartner(e);
+  }
+});
+
+/** Stripe webhook: signature-verified, idempotent by event id. */
+export const stripeWebhook = onRequest({ secrets: PARTNER_SECRETS, cors: false }, async (req, res) => {
+  if (req.method !== 'POST') return void res.status(405).send('method not allowed');
+  try {
+    const ev = payments().parseWebhook(req.rawBody, req.get('stripe-signature'));
+    const out = await processPaymentEvent(partnerDeps(), ev);
+    res.status(200).json({ status: out });
+  } catch (e) {
+    if (e instanceof PartnerError) return void res.status(400).send(e.message);
+    // signature failures are 400 (Stripe must not retry them forever); everything else is 500 and retried
+    const msg = (e as Error).message ?? '';
+    if (/signature|payload/i.test(msg)) return void res.status(400).send('bad request');
+    res.status(500).send('error');
+  }
+});
+
+/** Daily: partners whose plan lapsed lose boost and label even if the webhook never arrived. */
+export const sweepPartners = onSchedule(
+  { schedule: 'every day 04:00', timeZone: 'Europe/Berlin' },
+  async () => {
+    await sweepPartnerPlans(partnerDeps());
+  },
+);

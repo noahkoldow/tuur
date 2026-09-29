@@ -8,6 +8,8 @@ import {
   evaluateFactCheck,
   layoutParagraphs,
   narrationKey,
+  isPartnerLive,
+  partnerIntro,
   silencePcm,
   PARAGRAPH_GAP_MS,
   sourceRichness,
@@ -28,6 +30,7 @@ import type { AudioEncoder, TtsProvider } from '../providers/tts';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 import { logUsage, spentToday } from '../util/usage';
+import { loadPartner } from '../partners/service';
 
 export interface ObjectStore {
   put(path: string, data: Buffer, mimeType: string): Promise<void>;
@@ -69,6 +72,25 @@ export class NarrationError extends Error {
   }
 }
 
+/** Partner content that may be spoken for a POI (only while the partner is live), plus its revision for the cache key. */
+interface PartnerContext {
+  rev: number;
+  facts: string[];
+}
+
+async function partnerContext(db: Firestore, poi: Poi, now: number): Promise<PartnerContext | undefined> {
+  if (!poi.partnerId) return undefined;
+  const p = await loadPartner(db, poi.partnerId);
+  if (!p || !isPartnerLive(p, now)) return undefined;
+  return {
+    rev: p.contentRev,
+    facts: [
+      `${p.name} (${p.category}): ${p.description}`,
+      ...(p.openingHours ? [`Opening hours: ${p.openingHours}`] : []),
+    ],
+  };
+}
+
 const LOCK_TTL_MS = 3 * 60_000;
 const MAX_FAILURES_PER_DAY = 3;
 
@@ -86,6 +108,7 @@ function toResponse(
     keyFacts: doc.keyFacts,
     audioPath: doc.audioPath,
     audioDurationMs: doc.audioDurationMs,
+    ...(doc.sponsored ? { sponsored: true } : {}),
     images: poi.imageRefs.map((i) => ({
       url: i.url,
       ...(i.thumbUrl ? { thumbUrl: i.thumbUrl } : {}),
@@ -120,9 +143,10 @@ export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unk
   const poi = await loadPoi(deps.db, req.poiId);
   await deps.authorize?.(uid, poi, req.access);
 
+  const partner = await partnerContext(deps.db, poi, deps.now());
   const key = narrationKey(
     { ...req, primaryInterest: req.primaryInterest ?? poi.primaryInterest },
-    cfg.promptVersion,
+    partner ? `${cfg.promptVersion}-p${partner.rev}` : cfg.promptVersion,
   );
   const ref = deps.db.collection('narrations').doc(key);
 
@@ -218,7 +242,7 @@ export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unk
       if (doc.status === 'ok' && (!grounded || (doc.groundedExpiresAt ?? 0) > deps.now()))
         return toResponse(doc, poi, true);
     }
-    return await generate(deps, cfg, poi, req, key, cacheRef, grounded);
+    return await generate(deps, cfg, poi, req, key, cacheRef, grounded, partner);
   } catch (e) {
     if (
       e instanceof NarrationError &&
@@ -241,14 +265,16 @@ async function generate(
   key: string,
   cacheRef: FirebaseFirestore.DocumentReference,
   grounded: boolean,
+  partner?: PartnerContext,
 ) {
   const langs = [req.lang, ...sourceLangsFor('XX')].filter((l, i, a) => a.indexOf(l) === i);
   // Local-language sources first (richest), narration in the user's language.
   const placeLangs = await areaLangs(deps.db, poi);
-  const bundle: SourceBundle = await deps.sources.gather(
+  const gathered: SourceBundle = await deps.sources.gather(
     poi,
     [...placeLangs, ...langs].filter((l, i, a) => a.indexOf(l) === i),
   );
+  const bundle: SourceBundle = partner ? { ...gathered, partnerFacts: partner.facts } : gathered;
 
   const tierDecision = effectiveTier(req.lengthTier, sourceRichness(bundle));
   if (!tierDecision.ok)
@@ -325,7 +351,11 @@ async function generate(
   const audioBase = grounded
     ? `narrations-grounded/${cacheRef.parent.parent?.id ?? 'u'}/${key}`
     : `narrations/${key}`;
-  const audio = await renderAudio(deps, cfg, output.paragraphs, req.lang, audioBase, { tile: poi.tile, key });
+  // Partner content is announced before it is spoken (UWG, spec 7.3); the label is added here, never left to the model.
+  const spoken = partner
+    ? [`${partnerIntro(req.lang)} ${output.paragraphs[0]!}`, ...output.paragraphs.slice(1)]
+    : output.paragraphs;
+  const audio = await renderAudio(deps, cfg, spoken, req.lang, audioBase, { tile: poi.tile, key });
   const { layout, enc, audioPath } = audio;
 
   const doc: NarrationDoc = NarrationDocSchema.parse({
@@ -335,6 +365,7 @@ async function generate(
     lengthTier: req.lengthTier,
     primaryInterest: interest ?? 'balanced',
     promptVersion: cfg.promptVersion,
+    sponsored: Boolean(partner),
     title: output.title,
     text: layout.map((l) => l.text).join('\n\n'),
     paragraphs: layout,

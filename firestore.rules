@@ -48,6 +48,22 @@ service cloud.firestore {
       }
     }
 
+    // Partner portal (spec 7): the owner reads the own profile and offers, admins read everything; all writes go
+    // through Cloud Functions (profile changes need review, offers need an active plan).
+    match /partners/{id} {
+      allow read: if isSelf(id) || isAdmin();
+    }
+    match /offers/{id} {
+      allow read: if signedIn() && (resource.data.partnerId == request.auth.uid || isAdmin());
+    }
+    // A listener sees the own QR tokens (to show the confirmation once the partner scanned it).
+    match /redemptionTokens/{id} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+    match /partnerStats/{id} {
+      allow read: if signedIn() && (resource.data.partnerId == request.auth.uid || isAdmin());
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

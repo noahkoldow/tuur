@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import {
+  scoreWithPartner,
   DEFAULT_QUALITY,
   PoiSchema,
   buildPois,
@@ -129,7 +130,12 @@ export async function ingestArea(
         adminWeight: Number(prev['adminWeight'] ?? 1),
         adminFacts: (prev['adminFacts'] as string[] | undefined) ?? [],
         ...(prev['partnerId'] ? { partnerId: String(prev['partnerId']) } : {}),
-        score: Math.round(Math.min(100, p.baseScore * Number(prev['adminWeight'] ?? 1))),
+        partnerBoost: Number(prev['partnerBoost'] ?? 0),
+        score: scoreWithPartner(
+          p.baseScore,
+          Number(prev['adminWeight'] ?? 1),
+          Number(prev['partnerBoost'] ?? 0),
+        ),
       };
     });
 
@@ -146,7 +152,9 @@ export async function ingestArea(
     }
     // Remove POIs that disappeared from the sources (unless moderated/partner-linked).
     const keep = new Set(pois.map((p) => p.id));
-    const stale = existing.docs.filter((d) => !keep.has(d.id) && !d.get('partnerId'));
+    const stale = existing.docs.filter(
+      (d) => !keep.has(d.id) && !d.get('partnerId') && !d.id.startsWith('partner_'),
+    );
     for (let i = 0; i < stale.length; i += batchSize) {
       const batch = db.batch();
       for (const d of stale.slice(i, i + batchSize)) batch.delete(d.ref);

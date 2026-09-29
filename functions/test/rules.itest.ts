@@ -75,6 +75,37 @@ describe('firestore rules', () => {
     await assertFails(setDoc(doc(alice(), 'users/alice/sessions/s1'), { expiresAt: 1 }));
   });
 
+  it('partner data: owner/admin read only, no client writes, tokens only readable by their listener', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'partners/alice'), { ownerUid: 'alice', status: 'approved' });
+      await setDoc(doc(db, 'offers/o1'), { partnerId: 'alice', title: 't' });
+      await setDoc(doc(db, 'redemptionTokens/t1'), {
+        uid: 'bob',
+        partnerId: 'alice',
+        token: 'x',
+        used: false,
+      });
+      await setDoc(doc(db, 'partnerStats/alice_2026-01-01'), { partnerId: 'alice', impressions: 3 });
+      await setDoc(doc(db, 'redemptions/r1'), { partnerId: 'alice' });
+    });
+    await assertSucceeds(getDoc(doc(alice(), 'partners/alice')));
+    await assertFails(getDoc(doc(bob(), 'partners/alice')));
+    await assertSucceeds(getDoc(doc(admin(), 'partners/alice')));
+    await assertFails(setDoc(doc(alice(), 'partners/alice'), { status: 'approved', plan: { active: true } }));
+    await assertFails(updateDoc(doc(alice(), 'partners/alice'), { status: 'approved' }));
+    await assertSucceeds(getDoc(doc(alice(), 'offers/o1')));
+    await assertFails(getDoc(doc(bob(), 'offers/o1')));
+    await assertFails(setDoc(doc(alice(), 'offers/o2'), { partnerId: 'alice' }));
+    await assertSucceeds(getDoc(doc(bob(), 'redemptionTokens/t1')));
+    await assertFails(getDoc(doc(alice(), 'redemptionTokens/t1')));
+    await assertFails(updateDoc(doc(bob(), 'redemptionTokens/t1'), { used: true }));
+    await assertSucceeds(getDoc(doc(alice(), 'partnerStats/alice_2026-01-01')));
+    await assertFails(getDoc(doc(bob(), 'partnerStats/alice_2026-01-01')));
+    await assertFails(getDoc(doc(alice(), 'redemptions/r1')));
+    await assertFails(setDoc(doc(alice(), 'partnerStats/alice_2026-01-02'), { partnerId: 'alice' }));
+  });
+
   it('users can only edit their own whitelisted profile fields', async () => {
     await assertSucceeds(setDoc(doc(alice(), 'users/alice'), { language: 'de', interests: ['history'] }));
     await assertFails(setDoc(doc(bob(), 'users/alice'), { language: 'de' }));

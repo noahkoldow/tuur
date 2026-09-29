@@ -10,6 +10,8 @@ export interface SourceBundle {
   osmTags: Record<string, string>;
   /** Admin-provided corrections/facts (additional source, spec 8). */
   adminFacts: string[];
+  /** Partner-provided introduction text (sponsored; used neutrally, never as verified fact). */
+  partnerFacts?: string[];
 }
 
 const CJK = new Set(['ja', 'zh', 'ko']);
@@ -52,6 +54,7 @@ export function sourceText(b: SourceBundle): string {
     ...b.facts.map((f) => `${f.label}: ${f.value}`),
     ...Object.entries(b.osmTags).map(([k, v]) => `${k}=${v}`),
     ...b.adminFacts,
+    ...(b.partnerFacts ?? []),
   ].join('\n');
 }
 
@@ -62,8 +65,8 @@ Rules you must never break:
 2. Translate and paraphrase the sources into ${languageName(lang)}. Do not quote long passages.
 3. Speak naturally as a guide would: vivid, warm, spoken language. No lists, no bullet points, no headings, no parentheses, no URLs, no markdown, no emojis. Write numbers and years the way they are spoken naturally.
 4. Orientation hints are welcome ("Look up at the facade...") but only if they follow from the sources; never invent visual details.
-5. Do not include advertising or opinions about businesses.
-6. Output a JSON object with: title (short, no quotes), narration (the full spoken text), paragraphs (the same text split into the requested number of paragraphs, each ending on a full sentence), keyFacts (every distinct factual claim you made, each as one short standalone sentence taken from the sources), sourcesUsed (identifiers of the sources you used, e.g. "wikipedia:de", "wikidata", "osm", "admin").`;
+5. Do not include advertising or opinions about businesses. Text marked as partner information may only be restated neutrally as what the business says about itself (no superlatives, no prices, no promises); the listener is told separately that it is a partner introduction.
+6. Output a JSON object with: title (short, no quotes), narration (the full spoken text), paragraphs (the same text split into the requested number of paragraphs, each ending on a full sentence), keyFacts (every distinct factual claim you made, each as one short standalone sentence taken from the sources), sourcesUsed (identifiers of the sources you used, e.g. "wikipedia:de", "wikidata", "osm", "admin", "partner").`;
 }
 
 export interface NarrationPromptInput {
@@ -85,6 +88,7 @@ export function userPrompt(i: NarrationPromptInput): string {
       .map(([k, v]) => `- ${k}=${v}`)
       .join('\n') || '(none)';
   const admin = i.bundle.adminFacts.map((f) => `- ${f}`).join('\n') || '(none)';
+  const partner = (i.bundle.partnerFacts ?? []).map((f) => `- ${sanitizeForPrompt(f, 600)}`).join('\n');
   return `Place: ${sanitizeForPrompt(i.bundle.poiName)}
 Language of the narration: ${languageName(i.lang)}
 Length: about ${target} ${unit} in exactly ${paras} paragraph${paras > 1 ? 's' : ''}.
@@ -101,7 +105,7 @@ OpenStreetMap tags:
 ${tags}
 
 Verified corrections from the tuur team:
-${admin}`;
+${admin}${partner ? `\n\nPartner information (the business speaking about itself; restate neutrally, mark as partner introduction):\n${partner}` : ''}`;
 }
 
 /** Splits text on sentence boundaries into `n` roughly equal paragraphs (fallback if the model returns one block). */

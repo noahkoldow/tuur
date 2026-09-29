@@ -95,6 +95,7 @@ export function buildPois(raw: RawPoi[], opt: BuildOptions): BuildResult {
       hidden: false,
       adminWeight: 1,
       adminFacts: [],
+      partnerBoost: 0,
       accessible: isPubliclyAccessible(m.osmTags),
       imageRefs: image ? [image] : [],
       sources: {

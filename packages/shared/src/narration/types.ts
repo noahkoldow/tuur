@@ -62,6 +62,8 @@ export const NarrationDocSchema = z.object({
   /** Set only for grounded output; grounded narrations are not shared/cached (see D16). */
   grounded: z.boolean().default(false),
   groundedExpiresAt: z.number().optional(),
+  /** Partner introduction (announced as such in the audio and labeled in the app, spec 7.3). */
+  sponsored: z.boolean().default(false),
   status: z.enum(NARRATION_STATUSES).default('ok'),
   /** Flag for the compliance notice "AI generated"; always true for generated text. */
   aiGenerated: z.literal(true).default(true),
@@ -89,6 +91,8 @@ export interface NarrationResponse {
   }[];
   cached: boolean;
   aiGenerated: true;
+  /** True for partner introductions; the app shows the partner label next to it. */
+  sponsored?: boolean;
   /** Present for grounded output: Google requires the search entry point to be shown next to the content. */
   grounding?: { queries: number; searchEntryPointHtml?: string; sources: { uri: string; title?: string }[] };
 }

@@ -63,6 +63,8 @@ export const PoiSchema = z.object({
   /** Extra facts from admins, treated as an additional source (spec 8). */
   adminFacts: z.array(z.string()).default([]),
   partnerId: z.string().optional(),
+  /** Current capped partner boost in score points (0 when the partner plan is inactive). */
+  partnerBoost: z.number().min(0).max(100).default(0),
   accessible: z.boolean().default(true),
   imageRefs: z.array(ImageRefSchema).default([]),
   sources: PoiSourcesSchema,
