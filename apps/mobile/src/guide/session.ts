@@ -30,6 +30,7 @@ export interface ActiveSession {
   fork?: ForkController;
   roam?: RoamController;
   startedAt: number;
+  foregroundOnly?: boolean;
 }
 
 let active: ActiveSession | undefined;
@@ -45,6 +46,8 @@ interface Common {
   interest?: Interest;
   simulate?: boolean;
   location?: LocationSource;
+  /** Background location was not granted: the player shows a hint. */
+  foregroundOnly?: boolean;
 }
 
 function makeRuntime(c: Common, access: AccessInfo) {
@@ -94,6 +97,7 @@ export async function startTourSession(
     tour: o.tour,
     ...(simulator ? { simulator } : {}),
     startedAt: Date.now(),
+    ...(o.foregroundOnly ? { foregroundOnly: true } : {}),
   });
   await runtime.start(
     o.tour.stops.map((s) => ({ id: s.poiId, name: s.name, location: s.location })),
@@ -141,6 +145,7 @@ export async function startForkSession(
     fork,
     ...(simulator ? { simulator } : {}),
     startedAt: Date.now(),
+    ...(o.foregroundOnly ? { foregroundOnly: true } : {}),
   });
   fork.attach();
   await runtime.start([{ id: o.first.id, name: o.first.name, location: o.first.location }], source, {
@@ -175,6 +180,7 @@ export async function startRoamSession(
     roam,
     ...(simulator ? { simulator } : {}),
     startedAt: Date.now(),
+    ...(o.foregroundOnly ? { foregroundOnly: true } : {}),
   });
   roam.attach();
   await runtime.start([], source, { open: true });

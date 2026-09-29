@@ -99,7 +99,11 @@ export const en: Widen<typeof de> = {
     themes: 'Themes',
     sponsored: 'Includes partner stops',
   },
+  map: { position: 'Your location' },
   player: {
+    notification: 'tuur is guiding your way.',
+    foregroundOnly:
+      'Without the “always” location permission the guide only follows you while the screen is on.',
     play: 'Play',
     pause: 'Pause',
     next: 'Next stop',
@@ -190,6 +194,8 @@ export const en: Widen<typeof de> = {
     generic: 'Something went wrong.',
     network: 'No connection. Please check your network.',
     paused: 'Generating new content is paused right now.',
+    locationDenied: 'tuur cannot narrate without location access. Allow location in your device settings.',
+    startFailed: 'The tour could not be started. Please try again.',
     locked: 'This content is locked. Unlock it to keep listening.',
     rateLimited: 'Too many requests. Please try again shortly.',
   },

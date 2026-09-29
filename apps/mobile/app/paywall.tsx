@@ -60,8 +60,15 @@ export default function Paywall() {
   }, [unlocked, router]);
 
   useEffect(() => {
-    if (waitingReward && ent.wallet.rewardBalance > 0) setWaitingReward(false);
-  }, [waitingReward, ent.wallet.rewardBalance]);
+    if (!waitingReward) return;
+    if (ent.wallet.rewardBalance > 0) return setWaitingReward(false);
+    // the server credits the reward after verification; do not spin forever if it never arrives
+    const timer = setTimeout(() => {
+      setWaitingReward(false);
+      setMessage({ text: t('paywall.failed'), tone: 'warning' });
+    }, 90_000);
+    return () => clearTimeout(timer);
+  }, [waitingReward, ent.wallet.rewardBalance, t]);
 
   const run = async (id: string, fn: () => Promise<void>) => {
     setBusy(id);

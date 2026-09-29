@@ -124,3 +124,49 @@ describe('GuideRuntime end to end (demo backend + simulated GPS + simulated audi
     await runtime.dispose();
   });
 });
+
+describe('GuideRuntime teardown', () => {
+  it('releases GPS and the audio engine when the session is disposed while it is still starting', async () => {
+    const { backend } = await readyBackend();
+    const clock = new FakeClock();
+    let unsubscribed = 0;
+    let subscribed = 0;
+    const slowSource = {
+      async subscribe() {
+        subscribed++;
+        await new Promise((r) => setTimeout(r, 30)); // permission prompt / service start takes a moment
+        return () => void unsubscribed++;
+      },
+    };
+    const audio = new SimulatedAudioEngine(clock);
+    let destroyed = 0;
+    const origDestroy = audio.destroy.bind(audio);
+    audio.destroy = async () => {
+      destroyed++;
+      return origDestroy();
+    };
+    const runtime = new GuideRuntime({ backend, audio, lang: 'de', clock });
+    const starting = runtime.start([], slowSource as never);
+    await new Promise((r) => setTimeout(r, 10)); // audio is initialised, the GPS subscription is still pending
+    const disposing = runtime.dispose(); // the user leaves now
+    await Promise.all([starting, disposing]);
+    expect(subscribed).toBe(1);
+    expect(unsubscribed).toBe(1);
+    expect(destroyed).toBe(1);
+    // late fixes after dispose are ignored
+    runtime.onFix({ lat: 52.5, lng: 13.4, ts: 1 });
+    expect(runtime.getSnapshot().user).toBeUndefined();
+  });
+
+  it('a second dispose is a no-op and never leaves handlers behind', async () => {
+    const { backend } = await readyBackend();
+    const audio = new SimulatedAudioEngine(new FakeClock());
+    let destroyed = 0;
+    audio.destroy = async () => void destroyed++;
+    const runtime = new GuideRuntime({ backend, audio, lang: 'de' });
+    await runtime.start([], undefined);
+    await runtime.dispose();
+    await runtime.dispose();
+    expect(destroyed).toBe(1);
+  });
+});

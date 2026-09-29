@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Image, Platform, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { BackendError } from '../../src/backend';
 import { INTERESTS, SUPPORTED_UI_LANGUAGES, type Interest, type UiLanguage } from '@tuur/shared';
 import { useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
@@ -44,7 +45,7 @@ export default function Onboarding() {
       await f();
       next();
     } catch (e) {
-      setError((e as Error).message || t('errors.generic'));
+      setError(e instanceof BackendError && e.code === 'network' ? t('errors.network') : t('errors.generic'));
     } finally {
       setBusy(false);
     }

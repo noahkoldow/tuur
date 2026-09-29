@@ -12,6 +12,7 @@ import { AiBadge } from '../../src/components/AiBadge';
 import { Banner } from '../../src/components/Banner';
 import { Button, IconButton, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
+import { SpinningMark } from '../../src/components/SpinningMark';
 import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
@@ -35,16 +36,36 @@ export default function TourDetail() {
   const ent = useEntitlementStore();
   const [shareMsg, setShareMsg] = useState<string | undefined>();
 
+  const [reload, setReload] = useState(0);
+  const [startError, setStartError] = useState<false | 'denied' | 'failed'>(false);
+
   useEffect(() => {
-    void backend.getTour(id).then(setTour);
-  }, [backend, id]);
+    let cancelled = false;
+    setTour(undefined);
+    backend
+      .getTour(id)
+      .then((r) => !cancelled && setTour(r))
+      .catch(() => !cancelled && setTour(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, id, reload]);
 
   const path = useMemo(() => (tour ? tourPath(tour) : []), [tour]);
-  if (tour === undefined) return <Screen />;
+  if (tour === undefined)
+    return (
+      <Screen>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <SpinningMark size={64} label={t('common.loading')} />
+        </View>
+      </Screen>
+    );
   if (tour === null)
     return (
       <Screen>
         <Banner tone="error" text={t('errors.generic')} />
+        <Button variant="secondary" label={t('common.retry')} onPress={() => setReload((n) => n + 1)} />
+        <Button variant="ghost" label={t('common.back')} onPress={() => router.back()} />
       </Screen>
     );
   const text = tour.texts[language] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
@@ -73,15 +94,24 @@ export default function TourDetail() {
   const start = async () => {
     if (!unlocked) return openPaywall();
     setStarting(true);
+    setStartError(false);
     try {
-      if (!simulator && backend.kind === 'firebase') await requestBackground();
+      let foregroundOnly = false;
+      if (!simulator && backend.kind === 'firebase') {
+        const perm = await requestBackground();
+        if (perm === 'denied') return setStartError('denied');
+        foregroundOnly = perm === 'foreground';
+      }
       await startTourSession({
         tour,
         lang: language,
         ...(interests[0] ? { interest: interests[0] } : {}),
         simulate: simulator,
+        ...(foregroundOnly ? { foregroundOnly } : {}),
       });
       router.replace('/play');
+    } catch {
+      setStartError('failed');
     } finally {
       setStarting(false);
     }
@@ -223,6 +253,12 @@ export default function TourDetail() {
           />
         ) : null}
         {shareMsg ? <Banner tone="warning" text={shareMsg} /> : null}
+        {startError ? (
+          <Banner
+            tone="error"
+            text={startError === 'denied' ? t('errors.locationDenied') : t('errors.startFailed')}
+          />
+        ) : null}
         {dl.complete ? (
           <Banner icon="check-circle" text={t('downloads.downloaded')} />
         ) : dl.phase === 'running' ? (

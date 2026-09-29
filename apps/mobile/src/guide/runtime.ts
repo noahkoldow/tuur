@@ -106,6 +106,7 @@ export class GuideRuntime {
   private playToken = 0;
   private unsubLocation: (() => void) | undefined;
   private disposed = false;
+  private starting: Promise<void> | undefined;
   /** Guards against re-entrancy when commands dispatch events synchronously. */
   private commandListeners = new Set<(c: GuideCommand) => void>();
   private fixListeners = new Set<(f: Fix) => void>();
@@ -226,14 +227,28 @@ export class GuideRuntime {
     source?: LocationSource,
     opts: { startIndex?: number; open?: boolean } = {},
   ) {
+    // dispose() waits for a start that is still in flight, so a session ended during startup never leaks GPS or audio
+    this.starting = this.doStart(stops, source, opts);
+    await this.starting;
+  }
+
+  private async doStart(
+    stops: GuideStop[],
+    source: LocationSource | undefined,
+    opts: { startIndex?: number; open?: boolean },
+  ) {
     await this.deps.audio.init();
+    if (this.disposed) return;
     this.dispatch({
       type: 'setRoute',
       stops,
       startIndex: opts.startIndex ?? 0,
       ...(opts.open ? { open: true } : {}),
     });
-    if (source) this.unsubLocation = await source.subscribe((fix) => this.onFix(fix));
+    if (!source) return;
+    const unsub = await source.subscribe((fix) => this.onFix(fix));
+    if (this.disposed) unsub();
+    else this.unsubLocation = unsub;
   }
 
   setRoute(stops: GuideStop[], startIndex = 0, open?: boolean) {
@@ -269,6 +284,7 @@ export class GuideRuntime {
   }
 
   onFix(fix: Fix) {
+    if (this.disposed) return;
     this.ui = {
       ...this.ui,
       user: { lat: fix.lat, lng: fix.lng, ...(fix.heading !== undefined ? { heading: fix.heading } : {}) },
@@ -278,9 +294,14 @@ export class GuideRuntime {
   }
 
   async dispose() {
+    if (this.disposed) return;
     this.disposed = true;
+    await this.starting?.catch(() => undefined);
     this.unsubLocation?.();
+    this.unsubLocation = undefined;
     await this.deps.audio.stop().catch(() => undefined);
+    // remove the engine's player listeners and remote-control (lock screen / headset) handlers
+    await this.deps.audio.destroy().catch(() => undefined);
   }
 
   // ---- user actions ----

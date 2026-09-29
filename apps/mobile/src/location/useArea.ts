@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { encodeGeohash, type GenerateToursResult, type Tour } from '@tuur/shared';
-import { useBackend, type AreaInfo } from '../backend';
+import { BackendError, useBackend, type AreaInfo } from '../backend';
 import { config } from '../config';
 import { useSettings } from '../state/settings';
+import { deriveAreaPhase, type AreaPhase } from './areaPhase';
 
-export type AreaPhase = 'no-location' | 'exploring' | 'generating' | 'ready' | 'low_content' | 'failed';
+export type { AreaPhase };
 
 export interface AreaState {
   phase: AreaPhase;
@@ -13,6 +14,8 @@ export interface AreaState {
   area?: AreaInfo | null;
   tours: Tour[];
   error?: string;
+  /** Machine-readable reason for the failed phase (shown localized, never the raw message). */
+  errorCode?: 'network' | 'generic';
   reload: () => void;
 }
 
@@ -34,6 +37,8 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
   const [tours, setTours] = useState<Tour[]>([]);
   const [tourCall, setTourCall] = useState<GenerateToursResult['status'] | 'idle' | 'error'>('idle');
   const [error, setError] = useState<string | undefined>();
+  const [errorCode, setErrorCode] = useState<'network' | 'generic' | undefined>();
+  const [ensureFailed, setEnsureFailed] = useState(false);
   const [nonce, setNonce] = useState(0);
   const requestedTile = useRef<string | undefined>(undefined);
 
@@ -43,6 +48,8 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
     setTours([]);
     setTourCall('idle');
     setError(undefined);
+    setErrorCode(undefined);
+    setEnsureFailed(false);
     let cancelled = false;
     const unsub = backend.watchArea(tile, (a) => !cancelled && setArea(a));
     if (requestedTile.current !== `${tile}:${nonce}`) {
@@ -50,7 +57,12 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
       void backend.auth
         .ensureSignedIn()
         .then(() => backend.ensureArea(tile))
-        .catch((e: Error) => !cancelled && setError(e.message));
+        .catch((e: Error) => {
+          if (cancelled) return;
+          setError(e.message);
+          setErrorCode(e instanceof BackendError && e.code === 'network' ? 'network' : 'generic');
+          setEnsureFailed(true);
+        });
     }
     return () => {
       cancelled = true;
@@ -73,6 +85,7 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
         if (!cancelled) {
           setTourCall('error');
           setError(e.message);
+          setErrorCode(e instanceof BackendError && e.code === 'network' ? 'network' : 'generic');
         }
       });
     return () => {
@@ -81,13 +94,7 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
     };
   }, [backend, tile, ready, placeId, lang, nonce]);
 
-  let phase: AreaPhase;
-  if (!position) phase = 'no-location';
-  else if (area?.status === 'failed' || tourCall === 'error') phase = 'failed';
-  else if (!area || area.status === 'empty' || area.status === 'ingesting') phase = 'exploring';
-  else if (tourCall === 'generating' || tourCall === 'idle') phase = tours.length ? 'ready' : 'generating';
-  else if (area.status === 'low_content' && tours.length === 0) phase = 'low_content';
-  else phase = 'ready';
+  const phase = deriveAreaPhase({ position, area, tourCall, toursCount: tours.length, ensureFailed });
 
   return {
     phase,
@@ -96,6 +103,7 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
     area,
     tours,
     ...(error ? { error } : {}),
+    ...(errorCode ? { errorCode } : {}),
     reload: () => setNonce((n) => n + 1),
   };
 }

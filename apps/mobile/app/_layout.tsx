@@ -12,6 +12,7 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { BackendProvider } from '../src/backend';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { useEntitlementSync } from '../src/billing/entitlements';
 import { getOfflineLibrary } from '../src/offline';
 import { setCrashReporting } from '../src/telemetry';
@@ -21,7 +22,7 @@ import { colors } from '../src/theme';
 void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_400Regular,
     PlusJakartaSans_500Medium,
     PlusJakartaSans_700Bold,
@@ -29,7 +30,8 @@ export default function RootLayout() {
   });
   useEntitlementSync();
   const hydrated = useSettings((s) => s.hydrated);
-  const ready = fontsLoaded && hydrated;
+  // a font error must not hang the splash screen forever: the system font is an acceptable fallback
+  const ready = (fontsLoaded || Boolean(fontError)) && hydrated;
   const analyticsConsent = useSettings((s) => s.analyticsConsent);
 
   useEffect(() => {
@@ -47,17 +49,19 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <SafeAreaProvider>
-      <BackendProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.surface.base },
-            animation: 'fade',
-          }}
-        />
-      </BackendProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <BackendProvider>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.surface.base },
+              animation: 'fade',
+            }}
+          />
+        </BackendProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

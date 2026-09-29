@@ -103,7 +103,7 @@ export function TuurMap({
           <ViewAnnotation id="me" lngLat={[user.lng, user.lat]} anchor="center">
             <View
               accessible
-              accessibilityLabel="Position"
+              accessibilityLabel={t('map.position')}
               style={{
                 width: 22,
                 height: 22,

@@ -56,7 +56,7 @@ export class RealLocationSource implements LocationSource {
           activityType: Location.ActivityType.Fitness,
           foregroundService: {
             notificationTitle: i18n.t('app.name'),
-            notificationBody: i18n.t('player.walkingTo', { name: '…' }),
+            notificationBody: i18n.t('player.notification'),
             notificationColor: '#ED0516',
           },
         });
@@ -70,6 +70,7 @@ export class RealLocationSource implements LocationSource {
               lng: l.coords.longitude,
               ts: l.timestamp,
               ...(l.coords.accuracy != null ? { accuracy: l.coords.accuracy } : {}),
+              ...(l.coords.heading != null && l.coords.heading >= 0 ? { heading: l.coords.heading } : {}),
               ...(l.coords.speed != null && l.coords.speed >= 0 ? { speed: l.coords.speed } : {}),
             }),
         );

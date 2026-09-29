@@ -95,7 +95,11 @@ export const de = {
     themes: 'Themen',
     sponsored: 'Enthält Partnerstationen',
   },
+  map: { position: 'Dein Standort' },
   player: {
+    notification: 'tuur begleitet deinen Weg.',
+    foregroundOnly:
+      'Ohne Standortfreigabe „Immer“ läuft die Erzählung nur bei eingeschaltetem Bildschirm mit.',
     play: 'Abspielen',
     pause: 'Pause',
     next: 'Nächste Station',
@@ -188,6 +192,9 @@ export const de = {
     generic: 'Etwas ist schiefgelaufen.',
     network: 'Keine Verbindung. Bitte prüfe dein Netz.',
     paused: 'Die Erzeugung neuer Inhalte ist gerade pausiert.',
+    locationDenied:
+      'Ohne Standortfreigabe kann tuur nicht erzählen. Erlaube den Standort in den Einstellungen deines Geräts.',
+    startFailed: 'Die Tour konnte nicht gestartet werden. Bitte versuche es erneut.',
     locked: 'Dieser Inhalt ist gesperrt. Schalte ihn frei, um weiterzuhören.',
     rateLimited: 'Zu viele Anfragen. Bitte gleich nochmal versuchen.',
   },

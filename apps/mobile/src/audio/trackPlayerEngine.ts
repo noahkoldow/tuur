@@ -140,6 +140,8 @@ export class TrackPlayerEngine implements AudioEngine {
     this.subs.forEach((s) => s.remove());
     this.subs = [];
     this.unsubRemote?.();
+    this.unsubRemote = undefined;
+    this.listener = undefined;
     this.current = undefined;
     await TrackPlayer.reset();
   }

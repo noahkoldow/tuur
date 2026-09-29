@@ -202,6 +202,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
         header={header}
       >
         <View style={{ gap: 14 }}>
+          {session.foregroundOnly ? <Banner icon="smartphone" text={t('player.foregroundOnly')} /> : null}
           {noticeText ? (
             <Banner
               tone={ui.notice === 'vehicle_paused' ? 'warning' : 'info'}

@@ -33,6 +33,7 @@ export default function Fork() {
   const { pool, ready } = usePoiPool(position, 1);
   const [options, setOptions] = useState<ForkChoice[]>([]);
   const [busy, setBusy] = useState(false);
+  const [startError, setStartError] = useState<false | 'denied' | 'failed'>(false);
 
   useEffect(() => {
     if (!ready || !position || !gate.unlocked) return;
@@ -60,6 +61,7 @@ export default function Fork() {
   const start = async (c: ForkChoice) => {
     if (!position) return;
     setBusy(true);
+    setStartError(false);
     try {
       await startForkSession({
         lang: language,
@@ -73,6 +75,8 @@ export default function Fork() {
         ...(interests[0] ? { interest: interests[0] } : {}),
       });
       router.replace('/play');
+    } catch {
+      setStartError('failed');
     } finally {
       setBusy(false);
     }
@@ -100,6 +104,7 @@ export default function Fork() {
             />
           ))}
         </Row>
+        {startError ? <Banner tone="error" text={t('errors.startFailed')} /> : null}
         {!ready ? (
           <View style={{ alignItems: 'center', gap: 10, paddingVertical: 24 }}>
             <SpinningMark size={64} label={t('plan.waitArea')} />

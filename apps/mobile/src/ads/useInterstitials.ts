@@ -13,9 +13,12 @@ const DAY = 24 * 3600_000;
  */
 export function useInterstitials(runtime: GuideRuntime, ui: GuideUi) {
   const ent = useEntitlementStore((s) => s.entitlements);
+  const loaded = useEntitlementStore((s) => s.loaded);
+  const inFlight = useRef(false);
   const stopsSince = useRef(0);
   const shown = useRef<{ at: number[]; last?: number }>({ at: [] });
   const sub = subscribed({ entitlements: ent });
+  const targetId = ui.target?.id;
 
   useEffect(
     () =>
@@ -26,13 +29,14 @@ export function useInterstitials(runtime: GuideRuntime, ui: GuideUi) {
   );
 
   useEffect(() => {
-    if (sub) return;
+    // wait until the entitlements are known, so subscribers never see the consent form or an ad request
+    if (!loaded || sub) return;
     const ads = getAds();
     void ads.gatherConsent().then(() => ads.preloadInterstitial());
-  }, [sub]);
+  }, [sub, loaded]);
 
   useEffect(() => {
-    if (AppState.currentState !== 'active') return;
+    if (!loaded || inFlight.current || AppState.currentState !== 'active') return;
     const now = Date.now();
     shown.current.at = shown.current.at.filter((t) => now - t < DAY);
     const ads = getAds();
@@ -44,15 +48,23 @@ export function useInterstitials(runtime: GuideRuntime, ui: GuideUi) {
       subscriber: sub,
       consent: ads.consent(),
       audioPlaying: ui.playing,
-      betweenWaypoints: ui.phase === 'approaching' && Boolean(ui.target),
+      betweenWaypoints: ui.phase === 'approaching' && targetId !== undefined,
     });
     if (!d.show) return;
-    void ads.showInterstitial().then((ok) => {
-      if (!ok) return;
-      shown.current.at.push(now);
-      shown.current.last = now;
-      stopsSince.current = 0;
-      ads.preloadInterstitial();
-    });
-  }, [ui.phase, ui.playing, ui.target, sub]);
+    inFlight.current = true;
+    ads
+      .showInterstitial()
+      .then((ok) => {
+        if (!ok) return;
+        shown.current.at.push(now);
+        shown.current.last = now;
+        stopsSince.current = 0;
+        ads.preloadInterstitial();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        inFlight.current = false;
+      });
+    // depend on primitives: `ui.target` is a new object on every GPS fix
+  }, [ui.phase, ui.playing, targetId, sub, loaded]);
 }

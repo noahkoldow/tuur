@@ -30,7 +30,7 @@ import {
   getFunctions,
   httpsCallable,
 } from '@react-native-firebase/functions';
-import { connectStorageEmulator, getDownloadURL, getStorage, ref } from '@react-native-firebase/storage';
+import { connectStorageEmulator, getStorage } from '@react-native-firebase/storage';
 import {
   AreaSchema,
   PoiSchema,
@@ -253,31 +253,34 @@ export function createFirebaseBackend(): Backend {
       const unsubs: Unsubscribe[] = [];
       const attach = (id: string) => {
         unsubs.push(
-          onSnapshot(collection(db, 'users', id, 'entitlements'), (snap) => {
-            ents = snap.docs.flatMap((d) => {
-              const p = EntitlementSchema.safeParse(d.data());
-              return p.success ? [p.data] : [];
-            });
-            emit();
-          }),
-          onSnapshot(doc(db, 'users', id, 'credits', 'wallet'), (snap) => {
-            wallet = {
-              balance: Number(snap.data()?.['balance'] ?? 0),
-              rewardBalance: Number(snap.data()?.['rewardBalance'] ?? 0),
-            };
-            emit();
-          }),
+          onSnapshot(
+            collection(db, 'users', id, 'entitlements'),
+            (snap) => {
+              ents = snap.docs.flatMap((d) => {
+                const p = EntitlementSchema.safeParse(d.data());
+                return p.success ? [p.data] : [];
+              });
+              emit();
+            },
+            () => emit(),
+          ),
+          onSnapshot(
+            doc(db, 'users', id, 'credits', 'wallet'),
+            (snap) => {
+              wallet = {
+                balance: Number(snap.data()?.['balance'] ?? 0),
+                rewardBalance: Number(snap.data()?.['rewardBalance'] ?? 0),
+              };
+              emit();
+            },
+            () => emit(),
+          ),
         );
       };
-      const first = uid();
-      if (first) attach(first);
-      const offAuth = onAuthStateChanged(auth, (u) => {
-        if (u && u.uid !== first && unsubs.length === 0) attach(u.uid);
-      });
-      return () => {
-        offAuth();
-        unsubs.forEach((u) => u());
-      };
+      // The caller (useEntitlementSync) re-subscribes whenever the signed-in user changes.
+      const current = uid();
+      if (current) attach(current);
+      return () => unsubs.forEach((u) => u());
     },
     async deleteAccount() {
       await call('deleteAccount', {});
@@ -293,7 +296,11 @@ export function createFirebaseBackend(): Backend {
     },
     createRedemptionToken: (req) => call('createRedemptionToken', req),
     watchRedemption: (tokenId, cb) =>
-      onSnapshot(doc(db, 'redemptionTokens', tokenId), (snap) => cb(snap.data()?.['used'] === true)),
+      onSnapshot(
+        doc(db, 'redemptionTokens', tokenId),
+        (snap) => cb(snap.data()?.['used'] === true),
+        () => undefined,
+      ),
     spendCredit: (req) => call('spendCredit', req),
     createInvite: (tourId) => call('createInvite', { tourId }),
     redeemInvite: (token) => call('redeemInvite', { token }),

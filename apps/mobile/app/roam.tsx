@@ -23,21 +23,31 @@ export default function Roam() {
   const { position } = usePosition();
   const gate = useSessionGate('roam', position);
   const [busy, setBusy] = useState(false);
+  const [startError, setStartError] = useState<false | 'denied' | 'failed'>(false);
 
   const start = async () => {
     if (!position || !gate.require()) return;
     setBusy(true);
+    setStartError(false);
     try {
-      if (!simulator && backend.kind === 'firebase') await requestBackground();
+      let foregroundOnly = false;
+      if (!simulator && backend.kind === 'firebase') {
+        const perm = await requestBackground();
+        if (perm === 'denied') return setStartError('denied');
+        foregroundOnly = perm === 'foreground';
+      }
       await startRoamSession({
         lang: language,
         start: position,
         frequency,
         interests,
         simulate: simulator,
+        ...(foregroundOnly ? { foregroundOnly } : {}),
         ...(interests[0] ? { interest: interests[0] } : {}),
       });
       router.replace('/play');
+    } catch {
+      setStartError('failed');
     } finally {
       setBusy(false);
     }
@@ -66,6 +76,12 @@ export default function Roam() {
           ))}
         </Row>
         <Banner text={t('roam.hint')} icon="compass" />
+        {startError ? (
+          <Banner
+            tone="error"
+            text={startError === 'denied' ? t('errors.locationDenied') : t('errors.startFailed')}
+          />
+        ) : null}
       </View>
       <View style={{ paddingBottom: 16 }}>
         <Button

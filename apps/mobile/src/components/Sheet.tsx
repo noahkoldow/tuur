@@ -111,7 +111,8 @@ export function Sheet({
         {header}
       </View>
       <ScrollView
-        scrollEnabled={current === snaps.length - 1}
+        // always scrollable: content below the header must stay reachable for screen-reader and switch users
+        scrollEnabled
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >

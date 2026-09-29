@@ -188,7 +188,10 @@ export default function Home() {
 
           {area.phase === 'failed' ? (
             <View style={{ gap: 10 }}>
-              <Banner tone="error" text={area.error ?? t('errors.generic')} />
+              <Banner
+                tone="error"
+                text={area.errorCode === 'network' ? t('errors.network') : t('errors.generic')}
+              />
               <Button variant="secondary" label={t('common.retry')} onPress={area.reload} />
             </View>
           ) : null}
