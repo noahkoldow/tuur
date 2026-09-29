@@ -1,0 +1,75 @@
+:root {
+  --red: #ed0516;
+  --red-pressed: #c70412;
+  --red-tint: #fde8ea;
+  --ink: #111111;
+  --ink-2: #5c5c5c;
+  --surface: #ffffff;
+  --subtle: #f6f6f6;
+  --border: #e6e6e6;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+}
+body {
+  font-family: var(--font-jakarta), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.tuur-spin-stage {
+  display: grid;
+  place-items: center;
+  perspective: 600px;
+}
+.tuur-spin {
+  animation: tuur-turn 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  transform-style: preserve-3d;
+}
+@keyframes tuur-turn {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tuur-spin {
+    animation: none;
+  }
+}
+
+.hero {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 24px;
+  padding: 24px;
+  text-align: center;
+}
+.hero p {
+  max-width: 34ch;
+  color: var(--ink-2);
+  font-size: 1.125rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.pill {
+  display: inline-block;
+  padding: 12px 20px;
+  border-radius: 16px;
+  background: var(--red-pressed);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
