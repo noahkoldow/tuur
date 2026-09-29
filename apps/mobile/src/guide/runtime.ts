@@ -51,6 +51,7 @@ export interface GuideUi {
     images: NarrationResponse['images'];
     key: string;
     aiGenerated: true;
+    sponsored?: boolean;
     grounding?: NarrationResponse['grounding'];
   };
   positionMs: number;
@@ -447,6 +448,7 @@ export class GuideRuntime {
         images: n.images,
         key: n.key,
         aiGenerated: true,
+        ...(n.sponsored ? { sponsored: true } : {}),
         ...(n.grounding ? { grounding: n.grounding } : {}),
       },
     };

@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Alert, FlatList, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Redirect, useRouter } from 'expo-router';
@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
+import type { PublicOffer } from '@tuur/shared';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
@@ -47,6 +48,27 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const [showText, setShowText] = useState(false);
   const [sheet, setSheet] = useState(1);
   const [reported, setReported] = useState(false);
+  const [offers, setOffers] = useState<PublicOffer[]>([]);
+  const sponsored = Boolean(ui.narration?.sponsored);
+  const partnerPoiId = ui.narration?.kind === 'stop' ? ui.narration.poiId : undefined;
+  // Partner stop: count the visit, show the offers (server only returns valid ones) and count the impression.
+  useEffect(() => {
+    setOffers([]);
+    if (!sponsored || !partnerPoiId) return;
+    let cancelled = false;
+    void backend.recordPartnerEvent(partnerPoiId, 'visit');
+    void backend
+      .getOffers([partnerPoiId])
+      .then((o) => {
+        if (cancelled) return;
+        setOffers(o);
+        if (o.length) void backend.recordPartnerEvent(partnerPoiId, 'impression');
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, sponsored, partnerPoiId, ui.narration?.key]);
   const path = useMemo(() => (tour ? tourPath(tour) : ui.stops.map((s) => s.location)), [tour, ui.stops]);
   const text = tour ? (tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0]) : undefined;
   const n = ui.narration;
@@ -216,6 +238,39 @@ function PlayInner({ session }: { session: ActiveSession }) {
           {session.mode === 'roam' && !n ? <Banner icon="compass" text={t('roam.hint')} /> : null}
           {ui.offerMore ? (
             <Button label={t('player.more')} icon="plus-circle" onPress={runtime.more} />
+          ) : null}
+
+          {sponsored ? (
+            <View
+              style={{
+                gap: 8,
+                padding: 12,
+                borderRadius: radii.md,
+                borderWidth: 1,
+                borderColor: colors.brand.red,
+                backgroundColor: colors.brand.redTint,
+              }}
+            >
+              <Text variant="label" color={colors.brand.redPressed}>
+                {`${t('partner.adLabel')} · ${t('partner.label')}`}
+              </Text>
+              <Text variant="caption">{t('partner.introNote')}</Text>
+              {offers.map((o) => (
+                <View key={o.id} style={{ gap: 4 }}>
+                  <Text variant="heading">{o.title}</Text>
+                  <Text variant="bodySecondary">{o.description}</Text>
+                  {o.terms ? <Text variant="caption">{`${t('partner.terms')}: ${o.terms}`}</Text> : null}
+                  <Text variant="caption">
+                    {t('partner.validUntil', { date: new Date(o.validUntil).toLocaleDateString(lang) })}
+                  </Text>
+                  <Button
+                    label={t('partner.redeem')}
+                    icon="tag"
+                    onPress={() => router.push({ pathname: '/redeem', params: { offerId: o.id } })}
+                  />
+                </View>
+              ))}
+            </View>
           ) : null}
 
           {n && n.images.length ? (

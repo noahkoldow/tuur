@@ -160,6 +160,10 @@ describe('offline downloads', () => {
       createInvite: dead,
       redeemInvite: dead,
       createRewardNonce: dead,
+      getOffers: dead,
+      recordPartnerEvent: dead,
+      createRedemptionToken: dead,
+      watchRedemption: () => () => undefined,
     };
     const backend = withOfflineFirst(offlineNet, library, files);
     expect((await backend.getTour(tour.id))?.id).toBe(tour.id);

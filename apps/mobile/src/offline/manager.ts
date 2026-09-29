@@ -199,6 +199,7 @@ export class DownloadManager {
         paragraphs: n.paragraphs,
         keyFacts: n.keyFacts,
         audioDurationMs: n.audioDurationMs,
+        sponsored: Boolean(n.sponsored),
         audioFile,
         images,
       };

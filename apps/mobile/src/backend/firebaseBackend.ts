@@ -60,6 +60,13 @@ function toBackendError(e: unknown): BackendError {
   const details = (e as { details?: { reason?: string; retryAfterMs?: number } } | null)?.details;
   if (code.includes('permission-denied'))
     return new BackendError('locked', message, undefined, details?.reason);
+  if (
+    code.includes('failed-precondition') &&
+    details?.reason &&
+    details.reason !== 'insufficient' &&
+    /^(too_far|partner_inactive|offer_|daily_limit|already_redeemed_today)/.test(details.reason)
+  )
+    return new BackendError('redeem_denied', message, undefined, details.reason);
   if (code.includes('failed-precondition') && details?.reason === 'insufficient')
     return new BackendError('insufficient_credit', message, undefined, details.reason);
   if (code.includes('failed-precondition') || code.includes('already-exists'))
@@ -260,6 +267,13 @@ export function createFirebaseBackend(): Backend {
         unsubs.forEach((u) => u());
       };
     },
+    getOffers: (poiIds) => call('getOffers', { poiIds }),
+    async recordPartnerEvent(poiId, type) {
+      await call('recordPartnerEvent', { poiId, type }).catch(() => undefined);
+    },
+    createRedemptionToken: (req) => call('createRedemptionToken', req),
+    watchRedemption: (tokenId, cb) =>
+      onSnapshot(doc(db, 'redemptionTokens', tokenId), (snap) => cb(snap.data()?.['used'] === true)),
     spendCredit: (req) => call('spendCredit', req),
     createInvite: (tourId) => call('createInvite', { tourId }),
     redeemInvite: (token) => call('redeemInvite', { token }),

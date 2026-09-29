@@ -511,6 +511,17 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       emitEnts();
       return { tourId: inv.tourId };
     },
+    async getOffers() {
+      return [];
+    },
+    async recordPartnerEvent() {
+      await sleep(0);
+    },
+    async createRedemptionToken() {
+      await sleep(latency);
+      throw new BackendError('redeem_denied', 'no offers in demo', undefined, 'offer_inactive');
+    },
+    watchRedemption: () => () => undefined,
     demo: {
       grantCredits(n) {
         wallet = { ...wallet, balance: wallet.balance + n };

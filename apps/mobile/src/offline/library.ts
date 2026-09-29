@@ -101,6 +101,7 @@ export class OfflineLibrary {
         })),
         cached: true,
         aiGenerated: true,
+        ...(n.sponsored ? { sponsored: true } : {}),
       };
     }
     return undefined;

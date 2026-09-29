@@ -90,6 +90,8 @@ export const OfflineNarrationSchema = z.object({
   paragraphs: z.array(z.object({ text: z.string(), startMs: z.number(), durationMs: z.number() })),
   keyFacts: z.array(z.string()).default([]),
   audioDurationMs: z.number(),
+  /** Partner introduction: the label stays visible offline. */
+  sponsored: z.boolean().default(false),
   /** Local file path of the audio. */
   audioFile: z.string(),
   images: z.array(

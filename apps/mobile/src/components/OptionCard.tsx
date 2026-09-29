@@ -23,7 +23,7 @@ export function OptionCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${poi.name}. ${t('fork.walk', { minutes: Math.round(walkMinutes) })}. ${teaser ?? ''}`}
+      accessibilityLabel={`${poi.partnerId ? `${t('partner.label')}: ` : ''}${poi.name}. ${t('fork.walk', { minutes: Math.round(walkMinutes) })}. ${teaser ?? ''}`}
       accessibilityHint={t('fork.go')}
       onPress={onPress}
       style={({ pressed }) => ({
@@ -60,6 +60,12 @@ export function OptionCard({
           {poi.name}
         </Text>
         <Text variant="caption">{t('fork.walk', { minutes: Math.round(walkMinutes) })}</Text>
+        {poi.partnerId ? (
+          <Text
+            variant="caption"
+            color={colors.brand.redPressed}
+          >{`${t('partner.adLabel')} · ${t('partner.label')}`}</Text>
+        ) : null}
         {teaser ? (
           <Text variant="caption" numberOfLines={4} color={colors.ink.primary}>
             {teaser}

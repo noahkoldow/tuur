@@ -1,5 +1,6 @@
 import type {
   Entitlement,
+  PublicOffer,
   Wallet,
   ComposeRouteRequest,
   AreaStatus,
@@ -51,6 +52,14 @@ export interface DemoControls {
   grantSubscription(): void;
 }
 
+export interface RedemptionToken {
+  token: string;
+  tokenId: string;
+  expiresAt: number;
+  offerTitle: string;
+  partnerName: string;
+}
+
 export interface AuthApi {
   current(): UserInfo | null;
   onChange(cb: (u: UserInfo | null) => void): Unsubscribe;
@@ -88,6 +97,17 @@ export interface Backend {
   redeemInvite(token: string): Promise<{ tourId: string }>;
   /** Nonce for rewarded-ad server-side verification (daily limit enforced on the server). */
   createRewardNonce(): Promise<{ nonce: string; remainingToday: number }>;
+  /** Active offers of partner stops (server filters by validity and partner plan). */
+  getOffers(poiIds: string[]): Promise<PublicOffer[]>;
+  /** Anonymous, deduplicated partner statistics (impression = offers shown, visit = arrival). */
+  recordPartnerEvent(poiId: string, type: 'impression' | 'visit'): Promise<void>;
+  /** Signed single-use QR token; the position is only used for the proximity check and never stored. */
+  createRedemptionToken(req: {
+    offerId: string;
+    position: { lat: number; lng: number };
+  }): Promise<RedemptionToken>;
+  /** Fires once the partner has scanned the token. */
+  watchRedemption(tokenId: string, cb: (used: boolean) => void): Unsubscribe;
   demo?: DemoControls;
   getNarration(req: GetNarrationRequest): Promise<NarrationResponse>;
   getTransition(req: {
@@ -119,6 +139,7 @@ export class BackendError extends Error {
       | 'locked'
       | 'insufficient_credit'
       | 'invite_invalid'
+      | 'redeem_denied'
       | 'unknown',
     message: string,
     readonly retryAfterMs?: number,
