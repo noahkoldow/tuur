@@ -37,6 +37,11 @@ service cloud.firestore {
         allow read: if isSelf(uid);
         allow write: if false;
       }
+      // Planned routes are created by `composePlannedRoute`; the owner may read them.
+      match /sessions/{id} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
       match /credits/{id} {
         allow read: if isSelf(uid);
         allow write: if false;

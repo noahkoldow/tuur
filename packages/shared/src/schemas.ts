@@ -105,5 +105,7 @@ export const EnsureAreaRequestSchema = z.object({
   /** Client computes the tile so the server never sees the exact position (spec 10). */
   geohash: z.string().regex(/^[0-9bcdefghjkmnpqrstuvwxyz]{4,8}$/),
   withNeighbors: z.boolean().default(true),
+  /** Optional: warm all cells within this many rings (0-2); overrides `withNeighbors`. */
+  rings: z.number().int().min(0).max(2).optional(),
 });
 export type EnsureAreaRequest = z.infer<typeof EnsureAreaRequestSchema>;

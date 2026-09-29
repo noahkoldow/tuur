@@ -33,3 +33,6 @@ export * from './guide/engine';
 export * from './guide/simulate';
 export * from './demo/tourText';
 export * from './demo/synthetic';
+export * from './routing/planRoute';
+export * from './guide/fork';
+export * from './guide/roam';

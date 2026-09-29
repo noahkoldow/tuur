@@ -8,8 +8,10 @@ import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
 import { GEMINI_API_KEY, ORS_API_KEY, db, geocoder, llm, narrationDeps, poiSources, routing } from './config';
 import { generateAutoTours as runGenerateTours, TourError } from './tours/service';
+import { composePlannedRoute as runComposeRoute } from './tours/planned';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
+import { getTeaser as runGetTeaser } from './narration/teaser';
 import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
 
@@ -54,6 +56,7 @@ export const ensureArea = onCall({ enforceAppCheck }, async (request) => {
     },
     parsed.data.geohash,
     parsed.data.withNeighbors,
+    parsed.data.rings,
   );
   return res;
 });
@@ -164,3 +167,25 @@ export const generateAutoTours = onCall(
     }
   },
 );
+
+export const composePlannedRoute = onCall(
+  { enforceAppCheck, secrets: [GEMINI_API_KEY, ORS_API_KEY], timeoutSeconds: 120, memory: '512MiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runComposeRoute({ db: db(), llm: llm(), routing: routing(), now: Date.now }, request.auth.uid, request.data);
+    } catch (e) {
+      if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
+      throw e;
+    }
+  },
+);
+
+export const getTeaser = onCall({ enforceAppCheck, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runGetTeaser(narrationDeps(), request.auth.uid, request.data);
+  } catch (e) {
+    return toHttpsError(e);
+  }
+});

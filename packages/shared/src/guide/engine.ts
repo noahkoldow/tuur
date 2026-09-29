@@ -91,11 +91,15 @@ export interface GuideState {
   moreOffer?: { poiId: string; tier: LengthTier; ts: number };
   moreOffered: Record<string, true>;
   finished: boolean;
+  /** Open-ended routes (crossroads, roam) wait for the next stop instead of finishing at the end. */
+  open: boolean;
+  awaitingRoute: boolean;
+  waypointSent: Record<string, true>;
   lastTs: number;
 }
 
 export type GuideEvent =
-  | { type: 'setRoute'; stops: GuideStop[]; startIndex?: number }
+  | { type: 'setRoute'; stops: GuideStop[]; startIndex?: number; open?: boolean }
   | { type: 'location'; fix: Fix }
   | { type: 'ready'; poiId: string; tier: LengthTier; info: NarrationInfo }
   | { type: 'progress'; positionMs: number; ts: number }
@@ -125,6 +129,8 @@ export type GuideCommand =
   | { type: 'transition'; fromPoiId: string; toPoiId: string; walkMinutes: number }
   | { type: 'visited'; poiId: string }
   | { type: 'notice'; code: 'vehicle_paused' | 'vehicle_resumed' | 'finished' }
+  | { type: 'waypoint'; poiId: string }
+  | { type: 'needNext' }
   | { type: 'finish' };
 
 export interface StepResult {
@@ -151,6 +157,9 @@ export function initialGuideState(stops: GuideStop[] = [], startIndex = 0): Guid
     vehiclePaused: false,
     moreOffered: {},
     finished: false,
+    open: false,
+    awaitingRoute: false,
+    waypointSent: {},
     lastTs: 0,
   };
 }
@@ -196,7 +205,7 @@ export function guideStep(
 
   switch (event.type) {
     case 'setRoute': {
-      s = { ...s, route: event.stops, index: event.startIndex ?? 0, finished: event.stops.length === 0 };
+      s = { ...s, route: event.stops, index: event.startIndex ?? 0, finished: event.stops.length === 0 && !(event.open ?? s.open), open: event.open ?? s.open, awaitingRoute: false };
       break;
     }
     case 'location': {
@@ -388,6 +397,11 @@ function advance(s: GuideState, cmds: GuideCommand[], announceTransition: boolea
   }
   clearOffer(s, cmds);
   s.index += 1;
+  if (s.index >= s.route.length && s.open) {
+    s.awaitingRoute = true;
+    cmds.push({ type: 'needNext' });
+    return true;
+  }
   if (s.index >= s.route.length) {
     s.finished = true;
     cmds.push({ type: 'notice', code: 'finished' }, { type: 'finish' });
@@ -531,6 +545,12 @@ function handleTarget(
     }
   }
   if (!blocked) flushQueue(s, cmds, ts);
+
+  // Open routes (crossroads, roam): tell the controller the listener has heard this stop and may choose where to go.
+  if (s.open && narrationDone && !s.playback && s.reached[target.id] && !s.waypointSent[target.id]) {
+    s.waypointSent = { ...s.waypointSent, [target.id]: true };
+    cmds.push({ type: 'waypoint', poiId: target.id });
+  }
 
   // 4) Standing at a stop after the narration: offer "tell me more", then move on.
   if (narrationDone && !s.playback && atStop && !blocked && mode === 'stationary') {

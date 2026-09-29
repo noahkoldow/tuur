@@ -46,7 +46,8 @@ class CountingLlm implements LlmProvider {
     this.calls.facts++;
     return this.inner.checkFacts(r);
   }
-  generateTourConcept: LlmProvider['generateTourConcept'] = (r) => this.inner.generateTourConcept(r);
+  generateTourConcept: LlmProvider["generateTourConcept"] = (r) => this.inner.generateTourConcept(r);
+  teaser: LlmProvider["teaser"] = (r) => this.inner.teaser(r);
   async transition(r: Parameters<LlmProvider['transition']>[0]) {
     this.calls.transition++;
     return this.inner.transition(r);
@@ -264,5 +265,28 @@ describe('getTransition', () => {
     expect(b.cached).toBe(true);
     expect(llm.calls.transition).toBe(1);
     expect(a.text.length).toBeGreaterThan(10);
+  });
+});
+
+import { getTeaser } from '../src/narration/teaser';
+describe('getTeaser', () => {
+  it('creates a short verified teaser once and serves it from the cache afterwards', async () => {
+    const { deps } = mk();
+    const a = await getTeaser(deps, 'u1', { poiId: 'wd_Q82425', lang: 'de' });
+    const b = await getTeaser(deps, 'u2', { poiId: 'wd_Q82425', lang: 'de' });
+    expect(a.cached).toBe(false);
+    expect(b.cached).toBe(true);
+    expect(a.text.length).toBeGreaterThan(10);
+    expect(a.text.split(/\s+/).length).toBeLessThanOrEqual(40);
+  });
+  it('rejects teasers with invented numbers or markup', async () => {
+    class Bad extends MockLlmProvider {
+      override async teaser() {
+        return { text: 'Gebaut im Jahr 1888 und **golden**.', usage: {} };
+      }
+    }
+    const { deps } = mk({ llm: new Bad() });
+    await expect(getTeaser(deps, 'u1', { poiId: 'wd_Q82425', lang: 'de' })).rejects.toMatchObject({ code: 'failed-precondition' });
+    await expect(getTeaser(deps, 'u1', { poiId: 'nope', lang: 'de' })).rejects.toMatchObject({ code: 'not-found' });
   });
 });

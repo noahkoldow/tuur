@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  tilesAround,
   angleDiff,
   bearingDegrees,
   destinationPoint,
@@ -63,5 +64,17 @@ describe('geohash', () => {
     expect(bearingDegrees(a, b)).toBeCloseTo(90, 0);
     expect(angleDiff(350, 10)).toBe(20);
     expect(angleDiff(0, 180)).toBe(180);
+  });
+});
+
+describe('tilesAround', () => {
+  it('returns 1, 9 and 25 distinct cells for 0, 1 and 2 rings, center first', () => {
+    const h = encodeGeohash(52.52, 13.405, 6);
+    expect(tilesAround(h, 0)).toEqual([h]);
+    expect(tilesAround(h, 1)).toHaveLength(9);
+    const r2 = tilesAround(h, 2);
+    expect(r2).toHaveLength(25);
+    expect(r2[0]).toBe(h);
+    expect(new Set(r2).size).toBe(25);
   });
 });

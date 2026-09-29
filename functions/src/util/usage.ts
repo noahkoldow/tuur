@@ -1,7 +1,7 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { estimateCostUsd, type AiConfig, type Usage } from '@tuur/shared';
 
-export type UsageKind = 'narration' | 'factcheck' | 'tts' | 'transition' | 'classify' | 'routing';
+export type UsageKind = 'narration' | 'factcheck' | 'tts' | 'transition' | 'classify' | 'routing' | 'teaser';
 
 export const dayKey = (now: number) => new Date(now).toISOString().slice(0, 10);
 

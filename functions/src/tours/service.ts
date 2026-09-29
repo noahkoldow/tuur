@@ -83,7 +83,7 @@ async function loadPlacePois(db: Firestore, placeId: string): Promise<Poi[]> {
 
 const fingerprint = (stops: Poi[]) => stops.map((s) => `${s.id}:${s.score}`).join('|');
 
-const kindOf = (p: Poi) =>
+export const kindOf = (p: Poi) =>
   p.osmTags['tourism'] ??
   p.osmTags['historic'] ??
   p.osmTags['amenity'] ??
@@ -91,7 +91,7 @@ const kindOf = (p: Poi) =>
   p.primaryInterest ??
   'place';
 
-function conceptInput(
+export function conceptInput(
   place: string,
   tour: {
     template: string;
@@ -129,7 +129,7 @@ export function sanitizeConcept(c: TourConcept, input: TourConceptInput): TourCo
   return { ...c, transitions };
 }
 
-async function makeConcept(
+export async function makeConcept(
   deps: TourDeps,
   cfg: AiConfig,
   input: TourConceptInput,

@@ -34,7 +34,7 @@ export const TourSchema = z.object({
   placeId: z.string(),
   /** Display name of the place (city/municipality) for headings. */
   placeName: z.string().optional(),
-  source: z.enum(['auto', 'edited']),
+  source: z.enum(['auto', 'edited', 'planned']),
   /** Increments on every regeneration; snapshots live in `tourVersions`. */
   version: z.number().int().positive(),
   template: z.string(),
@@ -78,3 +78,17 @@ export interface GenerateToursResult {
   placeId?: string;
   tours: { id: string; template: string; durationMinutes: number; free: boolean }[];
 }
+
+export const ComposeRouteRequestSchema = z.object({
+  /** POI ids in the planned order (from the client-side planner). */
+  stops: z.array(z.string().min(1).max(120)).min(1).max(25),
+  /** Used only to route; never stored. Omitted = start at the first stop. */
+  start: LatLngSchema.optional(),
+  end: LatLngSchema.optional(),
+  roundTrip: z.boolean().default(false),
+  budgetMinutes: z.number().min(10).max(480),
+  profile: z.enum(ROUTING_PROFILES),
+  lang: z.string().regex(/^[a-z]{2,3}$/),
+  interests: z.array(z.enum(INTERESTS)).max(8).default([]),
+});
+export type ComposeRouteRequest = z.infer<typeof ComposeRouteRequestSchema>;

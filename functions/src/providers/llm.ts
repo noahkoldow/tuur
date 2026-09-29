@@ -58,6 +58,8 @@ export interface LlmProvider {
     walkMinutes: number;
     tourTitle?: string;
   }): Promise<{ text: string; usage: Usage }>;
+  /** One-sentence teaser for a place from its sources (crossroads cards, spec 5.3). */
+  teaser(req: { model: string; lang: string; name: string; sources: string }): Promise<{ text: string; usage: Usage }>;
   /** Narrative thread for a tour (title, teaser, intro, hand-overs, outro) from route + names (spec 4.3). */
   generateTourConcept(req: {
     model: string;
@@ -255,6 +257,15 @@ export class GeminiLlmProvider implements LlmProvider {
     return { output: TourConceptSchema.parse(parseJson(res.text)), usage: this.usage(res, false) };
   }
 
+  async teaser(req: { model: string; lang: string; name: string; sources: string }) {
+    const res = await this.ai.models.generateContent({
+      model: req.model,
+      contents: `SOURCES:\n${req.sources}\n\nWrite ONE teaser sentence (at most 22 words) in language "${req.lang}" that makes a visitor curious about "${req.name}". Use only facts from the SOURCES, invent nothing, no lists, no markup, no parentheses.`,
+      config: { temperature: 0.4, maxOutputTokens: 120 },
+    });
+    return { text: (res.text ?? '').replace(/\s+/g, ' ').trim(), usage: this.usage(res, true) };
+  }
+
   async transition(req: {
     model: string;
     lang: string;
@@ -327,6 +338,11 @@ export class MockLlmProvider implements LlmProvider {
 
   async generateTourConcept(req: { input: TourConceptInput }) {
     return { output: fallbackTourConcept(req.input), usage: { inputTokens: 200, outputTokens: 200 } };
+  }
+
+  async teaser(req: { name: string; sources: string }): Promise<{ text: string; usage: Usage }> {
+    const first = req.sources.split(/(?<=[.!?])\s+/).find((x) => x.length > 20 && !x.includes('=')) ?? req.name;
+    return { text: first.trim(), usage: { liteInputTokens: 20, liteOutputTokens: 20 } };
   }
 
   async transition(req: { from: string; to: string; walkMinutes: number }) {

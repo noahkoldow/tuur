@@ -188,3 +188,46 @@ describe('generateAutoTours', () => {
     expect(calls[0]).toHaveLength(2);
   });
 });
+
+import { composePlannedRoute } from '../src/tours/planned';
+
+describe('composePlannedRoute', () => {
+  const pick = async (n: number) => (await db.collection('pois').where('tile', '>=', '').get()).docs.map((d) => d.data()).filter((p) => p['interests'].length && p['score'] > 30).slice(0, n).map((p) => p['id'] as string);
+
+  it('re-checks the plan with routing times, keeps the budget and stores a private session', async () => {
+    const { deps } = mk();
+    const ids = await pick(6);
+    const res = await composePlannedRoute(deps, 'u1', { stops: ids, budgetMinutes: 90, profile: 'foot-walking', lang: 'de', interests: [] });
+    expect(res.tour.source).toBe('planned');
+    expect(res.tour.durationMinutes).toBeLessThanOrEqual(90);
+    expect(res.tour.stops.length + res.dropped.length).toBe(ids.length);
+    expect(res.tour.texts['de']?.title).toBeTruthy();
+    const session = await db.collection('users').doc('u1').collection('sessions').doc(res.tour.id.replace('planned_', '')).get();
+    expect(session.exists).toBe(true);
+    expect(JSON.stringify(session.data())).not.toContain('"start"');
+  });
+
+  it('drops the least valuable stops when real travel times exceed the budget', async () => {
+    const slow: RoutingProvider = {
+      source: 'mock',
+      matrix: async (pts, profile) => {
+        const m = await new MockRoutingProvider().matrix(pts, profile);
+        return { meters: m.meters, minutes: m.minutes.map((r) => r.map((v) => v * 4)) };
+      },
+      directions: (pts, profile) => new MockRoutingProvider().directions(pts, profile),
+    };
+    const { deps } = mk({ routing: slow });
+    const ids = await pick(6);
+    const res = await composePlannedRoute(deps, 'u1', { stops: ids, budgetMinutes: 40, profile: 'foot-walking', lang: 'de', interests: [] });
+    expect(res.dropped.length).toBeGreaterThan(0);
+    expect(res.tour.durationMinutes).toBeLessThanOrEqual(40);
+  });
+
+  it('rejects unknown, hidden and duplicate stops and invalid input', async () => {
+    const { deps } = mk();
+    await expect(composePlannedRoute(deps, 'u1', { stops: ['nope'], budgetMinutes: 60, profile: 'foot-walking', lang: 'de' })).rejects.toMatchObject({ code: 'not-found' });
+    const ids = await pick(2);
+    await expect(composePlannedRoute(deps, 'u1', { stops: [ids[0], ids[0]], budgetMinutes: 60, profile: 'foot-walking', lang: 'de' })).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(composePlannedRoute(deps, 'u1', { stops: [], budgetMinutes: 60, profile: 'foot-walking', lang: 'de' })).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+});

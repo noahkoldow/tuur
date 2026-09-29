@@ -1,5 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import { DEFAULT_CLAIM_POLICY, tileWithNeighbors, type ClaimPolicy } from '@tuur/shared';
+import { DEFAULT_CLAIM_POLICY, tileWithNeighbors, tilesAround, type ClaimPolicy } from '@tuur/shared';
 import { claimArea, markAreaFailed } from './store';
 
 export interface EnsureAreaDeps {
@@ -26,8 +26,9 @@ export async function ensureAreas(
   deps: EnsureAreaDeps,
   geohash: string,
   withNeighbors: boolean,
+  rings?: number,
 ): Promise<EnsureAreaResult> {
-  const tiles = withNeighbors ? tileWithNeighbors(geohash) : [geohash];
+  const tiles = rings !== undefined ? tilesAround(geohash, rings) : withNeighbors ? tileWithNeighbors(geohash) : [geohash];
   const started: string[] = [];
   const skipped: string[] = [];
   await Promise.all(

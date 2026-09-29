@@ -93,6 +93,25 @@ export function geohashNeighbors(hash: string): string[] {
   return [...out];
 }
 
+/** All cells within `rings` steps of `hash` (0 = only the cell, 1 = 3x3, 2 = 5x5), deduplicated, center first. */
+export function tilesAround(hash: string, rings: number): string[] {
+  const seen = new Set<string>([hash]);
+  let frontier = [hash];
+  for (let r = 0; r < rings; r++) {
+    const next: string[] = [];
+    for (const h of frontier) {
+      for (const n of geohashNeighbors(h)) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          next.push(n);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return [...seen];
+}
+
 /** Cell plus neighbors: what `ensureArea` warms for a position. */
 export function tileWithNeighbors(hash: string): string[] {
   return [hash, ...geohashNeighbors(hash)];
