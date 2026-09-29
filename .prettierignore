@@ -1,0 +1,11 @@
+node_modules
+.next
+.expo
+.turbo
+lib
+dist
+pnpm-lock.yaml
+assets
+docs/PRODUCT_SPEC.md
+**/*.generated.ts
+apps/web/public/brand

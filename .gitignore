@@ -1,0 +1,16 @@
+node_modules
+.next
+.expo
+.turbo
+lib
+dist
+*.log
+.env
+.env.local
+.emulator-data
+.firebase
+apps/web/public/brand
+apps/mobile/ios
+apps/mobile/android
+*.tsbuildinfo
+next-env.d.ts
