@@ -56,6 +56,8 @@ export const PartnerSchema = PartnerProfileSchema.extend({
   poiProposal: z.object({ name: text(120), location: LatLngSchema }).optional(),
   /** Bumped whenever narration-relevant profile data changes (part of the narration cache key). */
   contentRev: z.number().int().nonnegative().default(0),
+  /** When the partner accepted the partner terms (required at registration). */
+  termsAcceptedAt: z.number().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

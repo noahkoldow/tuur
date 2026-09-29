@@ -47,6 +47,7 @@ const profile = {
   countryCode: 'DE',
   openingHours: 'Mo-Fr 8-18',
   description: 'Traditionelles Café mit hausgemachtem Kuchen und Blick auf die Allee.',
+  acceptTerms: true,
 };
 
 const subEvent = (id: string, over: Record<string, unknown> = {}, type = 'customer.subscription.updated') =>
@@ -200,6 +201,18 @@ describe('partner lifecycle and boost', () => {
     await expect(
       savePartnerProfile(deps(), 'pa3', { ...profile, link: { poiId: poi.id } }),
     ).rejects.toMatchObject({ code: 'already-exists' });
+  });
+
+  it('requires accepting the partner terms at registration and records when', async () => {
+    const { acceptTerms: _a, ...noTerms } = profile;
+    void _a;
+    await expect(savePartnerProfile(deps(), 'pa5', noTerms)).rejects.toMatchObject({
+      details: { reason: 'terms' },
+    });
+    const p = await savePartnerProfile(deps(), 'pa5', profile);
+    expect(p.termsAcceptedAt).toBe(clock);
+    const again = await savePartnerProfile(deps(), 'pa5', noTerms);
+    expect(again.termsAcceptedAt).toBe(clock);
   });
 
   it('cannot approve a partner without a POI', async () => {

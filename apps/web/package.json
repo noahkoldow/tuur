@@ -14,7 +14,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@tuur/shared": "workspace:*",
     "@tuur/ui": "workspace:*",
+    "firebase": "^12.19.0",
+    "jsqr": "^1.4.0",
     "next": "^16.3.0",
     "react": "19.2.3",
     "react-dom": "19.2.3"

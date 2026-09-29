@@ -109,7 +109,10 @@ const LinkSchema = z.union([
   z.object({ newPoi: z.object({ name: z.string().trim().min(1).max(120), location: LatLngSchema }) }),
 ]);
 
-export const SavePartnerSchema = PartnerProfileSchema.extend({ link: LinkSchema.optional() });
+export const SavePartnerSchema = PartnerProfileSchema.extend({
+  link: LinkSchema.optional(),
+  acceptTerms: z.boolean().optional(),
+});
 
 const CATEGORY_INTERESTS: Record<string, Interest[]> = {
   cafe: ['culinary'],
@@ -128,11 +131,13 @@ const CATEGORY_INTERESTS: Record<string, Interest[]> = {
 export async function savePartnerProfile(deps: PartnerDeps, uid: string, raw: unknown): Promise<Partner> {
   const parsed = SavePartnerSchema.safeParse(raw);
   if (!parsed.success) throw new PartnerError('invalid-argument', 'Invalid profile');
-  const { link, ...profile } = parsed.data;
+  const { link, acceptTerms, ...profile } = parsed.data;
   const { db } = deps;
   await limit(db, `partner_save_${uid}`, 30, 3600_000, deps.now());
   const prev = await loadPartner(db, uid);
   const now = deps.now();
+  if (!prev && acceptTerms !== true)
+    throw new PartnerError('failed-precondition', 'The partner terms must be accepted', { reason: 'terms' });
 
   let poiId = prev?.poiId;
   let poiProposal = prev?.poiProposal;
@@ -168,6 +173,11 @@ export async function savePartnerProfile(deps: PartnerDeps, uid: string, raw: un
     ...(poiId ? { poiId } : {}),
     ...(poiProposal ? { poiProposal } : {}),
     contentRev: (prev?.contentRev ?? 0) + (contentChanged ? 1 : 0),
+    ...(prev?.termsAcceptedAt
+      ? { termsAcceptedAt: prev.termsAcceptedAt }
+      : acceptTerms
+        ? { termsAcceptedAt: now }
+        : {}),
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
   });

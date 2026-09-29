@@ -24,3 +24,10 @@ Node >= 22, pnpm 10 (`corepack enable`), Java 17+ (Firestore emulator), Xcode / 
 2. **AdMob**: create app IDs and a rewarded + interstitial unit; set `ADMOB_*_APP_ID` (build time) and `EXPO_PUBLIC_ADMOB_*_UNIT`. Enable server-side verification on the rewarded unit and point it to the `admobSsv` function. Configure the UMP consent message in AdMob (EU/UK). Without env values Google test ads are used.
 3. **Invite links**: replace `REPLACE_TEAMID` in `apps/web/public/.well-known/apple-app-site-association` and the SHA-256 fingerprint in `assetlinks.json`; set `FUNCTIONS_BASE_URL` (and store URLs) for the web app.
 4. Firebase Functions need the Blaze plan for secrets and outbound network.
+
+## Partner program setup (Phase 10)
+
+1. **Stripe**: create products/prices for `visibility` and `offers` per currency (EUR default, CHF/GBP/USD optional). Store the price ids in Firestore `config/partners` as `pricing: { prices: { visibility: { EUR: 'price_…' }, offers: { EUR: 'price_…' } }, currencyByCountry: { CH: 'CHF' }, defaultCurrency: 'EUR' }` (the admin UI edits this in Phase 11). Enable the customer portal and tax collection. Webhook endpoint = `stripeWebhook` function URL with events `checkout.session.completed`, `customer.subscription.created|updated|deleted`.
+2. **Secrets**: `firebase functions:secrets:set STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET REDEMPTION_TOKEN_SECRET` (the last one is any random string of 32+ characters). Set `TUUR_PAYMENTS_PROVIDER=stripe` and `TUUR_WEB_BASE_URL` for production; locally the mock provider needs no keys (put a dummy `REDEMPTION_TOKEN_SECRET` into `functions/.secret.local` for the emulator).
+3. **Web env**: `NEXT_PUBLIC_FIREBASE_*` (api key, auth domain, project id, app id), `NEXT_PUBLIC_USE_EMULATORS=true` for local development. Enable Email/Password sign-in in Firebase Auth.
+4. **Firestore**: deploy `firestore.rules` and `firestore.indexes.json` (composite index for `partnerStats`).

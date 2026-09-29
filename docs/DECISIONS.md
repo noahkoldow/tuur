@@ -109,3 +109,15 @@ Planned route, crossroads and roam cost one credit per place for 24 hours (serve
 ## D27 – Ads only after consent, only between stops
 
 UMP consent runs before any ad request; interstitials follow the pure `decideInterstitial` policy (between waypoints, nothing playing, foreground, daily and gap caps). Default AdMob IDs are Google's test IDs so dev builds cannot serve real ads.
+
+## D28 – Partner boost is derived state, never trusted input
+
+`partnerId`/`partnerBoost` on a POI are written only by `syncPartnerPoi` and only while the partner is approved with an active, unexpired paid plan. The boost is always clamped to `boostCap` (default 15 points) in `scoreWithPartner`, so admin-configured values cannot exceed it; routing additionally limits partner share and detour per tour. Ingest keeps the boost when a tile is refreshed and never deletes `partner_*` POIs.
+
+## D29 – Partner content is reviewed before it is spoken
+
+Changing name, description, category or POI link of an approved partner sets it back to `pending` (label and boost vanish until re-approval). The narration adds the fixed announcement "Eine Vorstellung unseres Partners." in code, not via the model; partner text is only a labeled source ("business speaking about itself") and narrations of partner POIs carry `sponsored` (UI label "Anzeige · Partner"). The cache key includes the partner content revision.
+
+## D30 – QR redemption is signed, single-use and anonymous
+
+Token = `tuur1.<jti>.<exp>.<HMAC>` (secret in Firebase secrets), bound to partner and offer; single use, ownership and expiry are enforced by the token document in a transaction. The listener's position is used for the proximity check only. The redemption log and statistics contain partner/offer/day but no user id; per-user impression/visit counts are deduplicated through hashed rate-limit keys that expire. Partner callables do not enforce App Check (web has no attestation) and rely on auth (non-anonymous), rate limits and server-side checks instead.

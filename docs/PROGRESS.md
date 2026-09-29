@@ -55,13 +55,21 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 - Web: invite landing page, `apple-app-site-association` and `assetlinks.json` templates (placeholders for team id / signing fingerprint).
 - **Not verified:** real RevenueCat purchases, AdMob ads/UMP, SSV callbacks, deep links on devices.
 
-## Phases 10-12: NOT STARTED
+## Phase 10 – B2B partner program: DONE (needs Stripe/real accounts to verify)
 
-Next: Phase 10 (partner portal, offers, QR redemption), Phase 11 (admin), Phase 12 (GDPR, release).
+- Shared: partner/offer schemas, pure rules (`partnerBoostPoints` capped, `decideCreateToken` with proximity/limits, `decideRedeemToken`), Stripe subscription mapping and per-country currency pricing.
+- Functions: profile + POI link/proposal (admin approval; content changes send the profile back to review), capped boost + `Partner` label applied to the POI only while the plan is live (daily sweep retires lapsed plans), offers, HMAC-signed single-use QR tokens (10 min, proximity check, position never stored), `redeemToken`, anonymized redemption log and aggregated statistics, Stripe checkout/portal/webhook (idempotent, mock provider), partner narrations announced as "Partnervorstellung" and flagged `sponsored`.
+- Web: `/partner` portal (login, dashboard, profile with address search + nearby POI link, offers, plan/billing, statistics, PWA scanner with BarcodeDetector/jsQR + manual entry), de/en.
+- App: partner label on cards/player, offers on partner stops, QR screen in tuur design with countdown and confirmation.
+- Tests: 20 partner integration tests (lifecycle, cap, lapse, review reset, terms, tokens: expiry/single use/limits/proximity/forgery, stats anonymity, sponsored narration) + rules tests + shared unit tests.
+- **Not verified:** real Stripe checkout/webhooks, camera scanning on a phone, QR readability on real devices.
+
+## Phases 11-12: NOT STARTED
+
+Next: Phase 11 (admin), Phase 12 (legal texts, GDPR flows, release checklist).
 Reminders:
 
-- Render `grounding.searchEntryPointHtml` next to grounded text if grounding is ever enabled (done in the player); AI notice and Commons attribution are shown.
-- Firestore rules for partners/offers etc. are added with their phase.
+- Legal pages (`/legal/*` on web, referenced from app, paywall and portal) are still to be written in Phase 12.
 
 ## Critic gate (must pass before handing over)
 
