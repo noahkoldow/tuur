@@ -72,9 +72,15 @@ Monorepo, tooling, CI, Firebase config, tokens, brand assets (auto-traced from p
 - Verified end to end on the Firebase emulators (Auth + Firestore + Functions) with Playwright: admin login and all pages, partner approval, Stripe mock checkout + webhook, offer creation, QR token creation (proximity), scanner redemption and single-use rejection. 11 admin integration tests + rules tests.
 - **Not verified:** map with real tiles (provider unreachable in the sandbox), real admin accounts.
 
-## Phase 12: NOT STARTED
+## Phase 12 – Polish and release: DONE (release itself needs real accounts)
 
-Next: legal texts (`/legal/*`), GDPR flows (account deletion, export, consent), accessibility pass, Crashlytics/Sentry, `eas.json`, `docs/RELEASE.md`.
+- Legal: imprint, privacy policy, terms, partner terms in de/en in `packages/shared/src/legal` (one source for app and web), operator data from env with visible markers when missing; website landing page; `/legal/[doc]`.
+- GDPR: `deleteAccount` (user data, invites, QR tokens, nonces, rate-limit counters, partner profile/offers/stats, POI unlink, Stripe cancel, feedback anonymized, auth record) and `exportMyData`; in-app buttons (settings) and partner portal page; tests on the emulators.
+- Consent: crash reports (Crashlytics) off by default with native auto-collection disabled and an in-app switch; ad choices via UMP privacy options; withdrawal-of-right notice at the paywall; AI labeling everywhere (badge in tour and player, settings note).
+- Accessibility pass on the app (roles, labels, live regions, reduce motion, 44 pt targets, contrast tests); web forms with labels, focus outlines, `aria-current`.
+- Release tooling: `apps/mobile/eas.json`, `scripts/check-release.mjs` (fails on missing operator data, keys, test ids), `docs/RELEASE.md` (legal, Firebase, payments, listings, background-location justification, on-device tests, operations).
+
+## Critic gate: see below
 
 ## Critic gate (must pass before handing over)
 

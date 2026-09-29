@@ -13,7 +13,7 @@ import {
 import { clearFirestore, testDb } from './helpers';
 
 const db = testDb();
-let clock = 1_800_000_000_000;
+const clock = 1_800_000_000_000;
 const payments = new MockPayments();
 const deps = (): AccountDeps => ({ db, auth: getAuth(), payments, now: () => clock });
 const pdeps = (): PartnerDeps => ({

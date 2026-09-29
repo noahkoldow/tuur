@@ -125,3 +125,11 @@ Token = `tuur1.<jti>.<exp>.<HMAC>` (secret in Firebase secrets), bound to partne
 ## D31 – Admin: claim-gated callables, direct reads, audit trail
 
 Admin identity is the Firebase custom claim `admin` (set only with `scripts/set-admin.mjs`). The claim is checked in Firestore rules for reads and again inside every callable for writes; each write appends an entry to `adminAudit` (actor, action, target). Config writes are validated (AI config merged and re-parsed, partner boost capped at 30 points, Stripe price ids format-checked) so a typo cannot disable generation or lift the boost cap. Editing POI facts sends the POI's narrations back for regeneration; edited tours are never overwritten by tour regeneration.
+
+## D32 – One legal source, visible gaps
+
+The legal texts live in `packages/shared` and are rendered by app and web. Operator data comes from the environment; a missing value prints `⟦operator data missing⟧` in the text and fails `scripts/check-release.mjs`, so an incomplete imprint can never be shipped by accident. The texts describe the real data flows (grid-cell-only location upload, Gemini without personal data, ORS for planned routes, MapTiler IP exposure) and must be lawyer-reviewed before launch.
+
+## D33 – Deletion and export are server functions
+
+Account deletion and export run in Cloud Functions with the admin SDK (the client cannot reach most of the data by design). Deletion is idempotent and ordered so a retry after a partial failure completes it; the Auth record is removed last. Anonymous aggregates (usage cost, redemption log without user ids) are kept. Store subscriptions cannot be cancelled by us; the dialog says so.
