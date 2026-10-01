@@ -154,8 +154,15 @@ describe('daily tile claim cap', () => {
 describe('reward nonces', () => {
   it('parallel requests cannot exceed the daily limit', async () => {
     await db.collection('config').doc('billing').set({ rewardedPerDay: 3 });
+    for (let i = 0; i < 8; i++)
+      await db
+        .collection('tours')
+        .doc(`free${i}`)
+        .set({ free: true, locked: false, placeId: `city${i}` });
     const results = await Promise.allSettled(
-      Array.from({ length: 8 }, () => createRewardNonce({ db, now: () => clock }, 'u1')),
+      Array.from({ length: 8 }, (_, i) =>
+        createRewardNonce({ db, now: () => clock }, 'u1', { tourId: `free${i}` }, true),
+      ),
     );
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(3);
   });

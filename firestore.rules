@@ -23,6 +23,14 @@ service cloud.firestore {
       allow read: if signedIn() && (resource.data.hidden == false || isAdmin());
     }
 
+    // Live group tours (D47): members read the group (status, size); all writes go through Cloud Functions.
+    match /groups/{id} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+    }
+
+    // Anonymous popularity counts (written by Cloud Functions only); the dedup markers are never readable.
+    match /poiStats/{id} { allow read: if signedIn(); }
+
     // Tours are readable while not locked by an admin (geometry and texts only; content access is checked in getNarration).
     match /tours/{id} {
       allow read: if signedIn() && (resource.data.locked == false || isAdmin());

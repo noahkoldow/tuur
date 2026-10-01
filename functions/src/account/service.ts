@@ -93,6 +93,10 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
 
   // the feedback document id contains the uid and the free text may identify the user: delete the reports outright
   summary['feedback'] = await deleteByQuery(db, db.collection('feedback').where('uid', '==', uid));
+  summary['partnerApplications'] = await deleteByQuery(
+    db,
+    db.collection('partnerApplications').where('uid', '==', uid),
+  );
   summary['revenuecatEvents'] = await deleteByQuery(
     db,
     db.collection('revenuecatEvents').where('uid', '==', uid),
@@ -174,5 +178,6 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
     }),
     partner: partner ?? null,
     offers: partner ? await list(db.collection('offers').where('partnerId', '==', uid)) : [],
+    partnerApplications: await list(db.collection('partnerApplications').where('uid', '==', uid)),
   };
 }

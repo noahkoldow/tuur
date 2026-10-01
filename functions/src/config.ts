@@ -7,9 +7,10 @@ import { GeminiLlmProvider, MockLlmProvider, type LlmProvider } from './provider
 import {
   GeminiTtsProvider,
   MockTtsProvider,
+  OpenAiTtsProvider,
+  RoutedTtsProvider,
   Mp3AudioEncoder,
   type AudioEncoder,
-  type TtsProvider,
 } from './providers/tts';
 import {
   HttpNarrationSources,
@@ -19,12 +20,15 @@ import {
 import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from './providers/routing';
 import type { NarrationDeps, ObjectStore } from './narration/service';
 import { BillingError, authorizeContent } from './billing/entitlements';
+import { hasGroupAccess } from './groups/service';
 import { NarrationError } from './narration/service';
 import { MockPayments, StripePayments, type PaymentsProvider } from './partners/payments';
 import type { PartnerDeps } from './partners/service';
 
 export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 export const ORS_API_KEY = defineSecret('ORS_API_KEY');
+/** Optional: set to `unused` when OpenAI voices are not wanted (personas then use their Gemini fallback). */
+export const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY');
 export const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
 export const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
 export const REDEMPTION_TOKEN_SECRET = defineSecret('REDEMPTION_TOKEN_SECRET');
@@ -49,10 +53,21 @@ export function llm(): LlmProvider {
     ? new GeminiLlmProvider(GEMINI_API_KEY.value())
     : new MockLlmProvider();
 }
-export function tts(): TtsProvider {
-  return TTS_PROVIDER.value() === 'gemini'
-    ? new GeminiTtsProvider(GEMINI_API_KEY.value())
-    : new MockTtsProvider();
+const usableKey = (v: string) => (v && v !== 'unused' && v.length > 10 ? v : undefined);
+
+/** `TUUR_TTS_PROVIDER=live` (or legacy `gemini`) enables every provider that has a key; `mock` is silent audio. */
+export function tts(): RoutedTtsProvider {
+  const mode = TTS_PROVIDER.value();
+  if (mode !== 'live' && mode !== 'gemini') {
+    const mock = new MockTtsProvider();
+    return new RoutedTtsProvider({ gemini: mock, openai: mock });
+  }
+  const gemini = usableKey(GEMINI_API_KEY.value());
+  const openai = mode === 'live' ? usableKey(OPENAI_API_KEY.value()) : undefined;
+  return new RoutedTtsProvider({
+    ...(gemini ? { gemini: new GeminiTtsProvider(gemini) } : {}),
+    ...(openai ? { openai: new OpenAiTtsProvider(openai) } : {}),
+  });
 }
 export function encoder(): AudioEncoder {
   return new Mp3AudioEncoder();
@@ -103,8 +118,17 @@ export function narrationDeps(): NarrationDeps {
     now: Date.now,
     // Entitlements are checked before any content is served or generated. `system-pregen` is the internal warm-up
     // after tour creation (first stops only, cost brake spec 4.3) and never reaches clients.
-    authorize: async (uid, poi, access) => {
+    authorize: async (uid, poi, access, opts) => {
       if (uid === 'system-pregen') return;
+      // Live group guests ride on the host's tour (online only, never for downloads, D47).
+      if (
+        access?.groupId &&
+        (await hasGroupAccess({ db: db(), now: Date.now }, uid, access.groupId, {
+          poiIds: [poi.id],
+          ...(opts?.download ? { download: true } : {}),
+        }))
+      )
+        return;
       try {
         await authorizeContent({ db: db(), now: Date.now }, uid, {
           tourId: access?.tourId,

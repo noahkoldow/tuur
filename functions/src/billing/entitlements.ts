@@ -7,6 +7,7 @@ import {
   REWARDED_DAILY_LIMIT_DEFAULT,
   RevenueCatEventSchema,
   SESSION_DURATION_MS,
+  SUBSCRIPTION_TOUR_STARTS_PER_MONTH,
   decideAccess,
   decideInvite,
   decideRedeem,
@@ -52,6 +53,103 @@ const walletRef = (db: Firestore, uid: string) =>
   db.collection('users').doc(uid).collection('credits').doc('wallet');
 const ledger = (db: Firestore, uid: string) => db.collection('users').doc(uid).collection('creditLedger');
 
+const utcMonthKey = (now: number) => new Date(now).toISOString().slice(0, 7);
+
+export const ClaimTourStartSchema = z.object({
+  tourId: z.string().min(1).max(200),
+  sessionId: z.string().uuid(),
+  mode: z.enum(['tour', 'planned']),
+});
+
+/** Server-side standard-tour start check and monthly subscription quota, serialized in one transaction. */
+export async function claimTourStart(
+  deps: BillingDeps,
+  uid: string,
+  raw: unknown,
+): Promise<{ counted: boolean; remaining: number | null }> {
+  const parsed = ClaimTourStartSchema.safeParse(raw);
+  if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid tour start');
+  const { tourId, sessionId, mode } = parsed.data;
+  const { db } = deps;
+  const now = deps.now();
+  const month = utcMonthKey(now);
+  const usageRef = db.collection('users').doc(uid).collection('tourUsage').doc(month);
+  return db.runTransaction(async (tx) => {
+    const planned = mode === 'planned';
+    const plannedSessionRef = planned
+      ? db
+          .collection('users')
+          .doc(uid)
+          .collection('sessions')
+          .doc(tourId.replace(/^planned_/, ''))
+      : undefined;
+    if (planned && !tourId.startsWith('planned_'))
+      throw new BillingError('invalid-argument', 'Invalid planned route id');
+    const [tourSnap, plannedSessionSnap, all, usageSnap] = await Promise.all([
+      planned ? Promise.resolve(undefined) : tx.get(db.collection('tours').doc(tourId)),
+      plannedSessionRef ? tx.get(plannedSessionRef) : Promise.resolve(undefined),
+      readEntitlements(tx, db, uid),
+      tx.get(usageRef),
+    ]);
+    if (planned) {
+      if (
+        !plannedSessionSnap?.exists ||
+        plannedSessionSnap.get('kind') !== 'planned' ||
+        Number(plannedSessionSnap.get('expiresAt')) <= now
+      )
+        throw new BillingError('not-found', 'Planned route is no longer available');
+    } else if (!tourSnap?.exists || tourSnap.get('locked') === true) {
+      throw new BillingError('not-found', 'Tour not available');
+    }
+    const usage = usageSnap.data() as { starts?: number; sessions?: Record<string, string> } | undefined;
+    const sessions = usage?.sessions ?? {};
+    const existingTourId = sessions[sessionId];
+    if (existingTourId) {
+      if (existingTourId !== tourId) throw new BillingError('already-exists', 'Session already used');
+      return {
+        counted: true,
+        remaining: Math.max(0, SUBSCRIPTION_TOUR_STARTS_PER_MONTH - Number(usage?.starts ?? 0)),
+      };
+    }
+
+    const subscriber = isSubscriber(all, now);
+    const placeId = String((planned ? plannedSessionSnap : tourSnap)?.get('placeId') ?? '');
+    const allowedBySession = all.some(
+      (e) => e.type === 'session' && e.placeId === placeId && e.expiresAt > now,
+    );
+    const tourFree = !planned && tourSnap?.get('free') === true;
+    const tourEntitled =
+      !planned &&
+      all.some(
+        (e) =>
+          e.type === 'tour' &&
+          e.tourId === tourId &&
+          (e.expiresAt === null || e.expiresAt > now) &&
+          (!tourFree || (e.source === 'free' && e.placeId === placeId)),
+      );
+    if (!subscriber && (planned ? !allowedBySession : !tourEntitled))
+      throw new BillingError('permission-denied', 'Tour is locked', {
+        reason: tourFree ? 'ad_required' : 'denied',
+      });
+    if (!subscriber) return { counted: false, remaining: null };
+
+    const starts = Number(usage?.starts ?? 0);
+    if (starts >= SUBSCRIPTION_TOUR_STARTS_PER_MONTH)
+      throw new BillingError('resource-exhausted', 'Monthly tour limit reached', {
+        reason: 'monthly_tour_limit',
+        limit: SUBSCRIPTION_TOUR_STARTS_PER_MONTH,
+        month,
+      });
+    tx.set(usageRef, {
+      month,
+      starts: starts + 1,
+      sessions: { ...sessions, [sessionId]: tourId },
+      updatedAt: now,
+    });
+    return { counted: true, remaining: SUBSCRIPTION_TOUR_STARTS_PER_MONTH - starts - 1 };
+  });
+}
+
 export async function loadEntitlements(db: Firestore, uid: string): Promise<Entitlement[]> {
   const snap = await ents(db, uid).get();
   return snap.docs.flatMap((d) => {
@@ -81,7 +179,11 @@ async function readEntitlements(tx: Transaction, db: Firestore, uid: string): Pr
 
 const readWallet = async (tx: Transaction, db: Firestore, uid: string): Promise<Wallet> => {
   const s = await tx.get(walletRef(db, uid));
-  return { balance: Number(s.get('balance') ?? 0), rewardBalance: Number(s.get('rewardBalance') ?? 0) };
+  return {
+    balance: Number(s.get('balance') ?? 0),
+    rewardBalance: Number(s.get('rewardBalance') ?? 0),
+    seatBalance: Number(s.get('seatBalance') ?? 0),
+  };
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -110,6 +212,14 @@ export async function authorizeContent(
     const area = req.tile ? await db.collection('areas').doc(req.tile).get() : undefined;
     const placeId = area?.get('placeId') as string | undefined;
     if (placeId) ctx.placeId = placeId;
+    if (req.tourId && isSubscriber(all, now)) {
+      const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
+      const sessions = usage.get('sessions') as Record<string, string> | undefined;
+      if (!Object.values(sessions ?? {}).includes(req.tourId))
+        throw new BillingError('permission-denied', 'Start the tour before requesting tour content', {
+          reason: 'tour_start_required',
+        });
+    }
   } else if (req.tourId) {
     const tour = await db.collection('tours').doc(req.tourId).get();
     const stops = (tour.get('stops') as { poiId: string }[] | undefined) ?? [];
@@ -120,10 +230,19 @@ export async function authorizeContent(
       throw new BillingError('permission-denied', 'Stop is not part of this tour');
     ctx.tourId = req.tourId;
     ctx.tourFree = tour.get('free') === true;
+    ctx.placeId = String(tour.get('placeId') ?? '');
     ctx.mode = 'tour';
   }
   const d = decideAccess(all, ctx, now);
   if (!d.allowed) throw new BillingError('permission-denied', 'Content is locked', { reason: d.reason });
+  if (ctx.mode === 'tour' && ctx.tourId && isSubscriber(all, now)) {
+    const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
+    const sessions = usage.get('sessions') as Record<string, string> | undefined;
+    if (!Object.values(sessions ?? {}).includes(ctx.tourId))
+      throw new BillingError('permission-denied', 'Start the tour before requesting tour content', {
+        reason: 'tour_start_required',
+      });
+  }
   return { reason: d.reason };
 }
 
@@ -340,7 +459,9 @@ export async function processRevenueCatEvent(
     const uid = event.app_user_id;
     const eventTs = event.event_timestamp_ms ?? now;
     // all reads first (Firestore transactions), then the writes
-    const hasCredits = ops.some((o) => o.op === 'addCredits' || o.op === 'removeCredits');
+    const isLedgerOp = (o: { op: string }) =>
+      o.op === 'addCredits' || o.op === 'removeCredits' || o.op === 'addSeats' || o.op === 'removeSeats';
+    const hasCredits = ops.some(isLedgerOp);
     let wallet: Wallet | undefined = hasCredits ? await readWallet(tx, db, uid) : undefined;
     const subRef = ents(db, uid).doc('subscription');
     const cur = ops.some((o) => o.op === 'setSubscription') ? await tx.get(subRef) : undefined;
@@ -349,7 +470,12 @@ export async function processRevenueCatEvent(
       `${op.op}_${op.ref}`.replace(/[^A-Za-z0-9_-]/g, '_');
     const seenLedger = new Set<string>();
     for (const op of ops)
-      if (op.op === 'addCredits' || op.op === 'removeCredits')
+      if (
+        op.op === 'addCredits' ||
+        op.op === 'removeCredits' ||
+        op.op === 'addSeats' ||
+        op.op === 'removeSeats'
+      )
         if ((await tx.get(ledger(db, uid).doc(ledgerId(op)))).exists) seenLedger.add(ledgerId(op));
     for (const op of ops) {
       if (op.op === 'setSubscription') {
@@ -368,6 +494,11 @@ export async function processRevenueCatEvent(
           ref: op.ref,
           ts: now,
         });
+      } else if (op.op === 'addSeats' || op.op === 'removeSeats') {
+        if (seenLedger.has(ledgerId(op))) continue;
+        const delta = op.op === 'addSeats' ? op.amount : -op.amount;
+        wallet = { ...wallet!, seatBalance: Math.max(0, (wallet!.seatBalance ?? 0) + delta) };
+        tx.set(ledger(db, uid).doc(ledgerId(op)), { delta, kind: 'seat_purchase', ref: op.ref, ts: now });
       }
     }
     if (wallet && hasCredits) tx.set(walletRef(db, uid), wallet);
@@ -389,16 +520,23 @@ const NONCE_TTL_MS = 30 * 60_000;
 export async function createRewardNonce(
   deps: BillingDeps,
   uid: string,
-): Promise<{ nonce: string; remainingToday: number }> {
+  raw: unknown,
+  phoneNumberVerified: boolean,
+): Promise<{ nonce: string; remainingToday: number; purpose: 'free_tour' }> {
+  if (!phoneNumberVerified)
+    throw new BillingError('failed-precondition', 'Verify a phone number before claiming a free city tour', {
+      reason: 'phone_verification_required',
+    });
   const { db } = deps;
+  const parsed = z.object({ tourId: z.string().min(1).max(200) }).safeParse(raw);
+  if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid rewarded request');
+  const tourId = parsed.data.tourId;
   const { rewardedPerDay } = await loadBillingConfig(db);
   const now = deps.now();
   const nonce = randomBytes(18).toString('base64url');
-  // counting pending nonces and issuing a new one is one transaction, so parallel calls cannot exceed the daily limit
   const remainingToday = await db.runTransaction(async (tx) => {
-    const counter = await tx.get(
-      db.collection('users').doc(uid).collection('rewardCounters').doc(dayKey(now)),
-    );
+    const counterRef = db.collection('users').doc(uid).collection('rewardCounters').doc(dayKey(now));
+    const counter = await tx.get(counterRef);
     const pending = await tx.get(
       db
         .collection('rewardNonces')
@@ -409,22 +547,47 @@ export async function createRewardNonce(
     const d = decideReward(Number(counter.get('granted') ?? 0) + pending.size, rewardedPerDay);
     if (!d.ok)
       throw new BillingError('resource-exhausted', 'Daily rewarded limit reached', { reason: d.reason });
+    const tourRef = db.collection('tours').doc(tourId);
+    const tour = await tx.get(tourRef);
+    const all = await readEntitlements(tx, db, uid);
+    if (!tour.exists || tour.get('locked') === true || tour.get('free') !== true)
+      throw new BillingError('failed-precondition', 'Free tour is not available', { reason: 'not_free' });
+    if (isSubscriber(all, now))
+      throw new BillingError('failed-precondition', 'Subscribers do not need an ad unlock', {
+        reason: 'subscriber',
+      });
+    const placeId = String(tour.get('placeId') ?? '');
+    if (!placeId) throw new BillingError('failed-precondition', 'Tour has no city');
+    if (all.some((e) => e.type === 'tour' && e.source === 'free' && e.placeId === placeId))
+      throw new BillingError('already-exists', 'Free tour already used in this city', {
+        reason: 'free_city_used',
+      });
+    const freeClaimRef = db.collection('users').doc(uid).collection('freeTourClaims').doc(placeId);
+    const freeClaim = await tx.get(freeClaimRef);
+    if (freeClaim.exists && Number(freeClaim.get('expiresAt') ?? Number.POSITIVE_INFINITY) > now)
+      throw new BillingError('already-exists', 'Free tour already claimed in this city', {
+        reason: 'free_city_used',
+      });
     tx.set(db.collection('rewardNonces').doc(nonce), {
       uid,
       used: false,
+      purpose: 'free_tour',
+      tourId,
+      placeId,
       createdAt: now,
       expiresAt: now + NONCE_TTL_MS,
       expireAt: new Date(now + 24 * 3600_000),
     });
+    tx.set(freeClaimRef, { state: 'pending', nonce, tourId, expiresAt: now + NONCE_TTL_MS });
     return d.remaining;
   });
-  return { nonce, remainingToday };
+  return { nonce, remainingToday, purpose: 'free_tour' };
 }
 
 /** Called after a verified SSV callback: grants one reward credit if nonce and daily limit allow. */
 export async function grantRewardFromSsv(
   deps: BillingDeps,
-  params: { userId: string; nonce: string; transactionId: string },
+  params: { userId: string; nonce: string; transactionId: string; phoneNumberVerified?: boolean },
 ): Promise<{ granted: boolean; reason?: string }> {
   const { db } = deps;
   const { rewardedPerDay } = await loadBillingConfig(db);
@@ -439,6 +602,8 @@ export async function grantRewardFromSsv(
     if (!nonce.exists || nonce.get('uid') !== params.userId)
       return { granted: false, reason: 'unknown_nonce' };
     if (nonce.get('used') === true) return { granted: false, reason: 'nonce_used' };
+    if (nonce.get('purpose') !== 'free_tour') return { granted: false, reason: 'invalid_purpose' };
+    if (!params.phoneNumberVerified) return { granted: false, reason: 'phone_verification_required' };
     if (Number(nonce.get('expiresAt')) <= now) return { granted: false, reason: 'nonce_expired' };
     const counterRef = db
       .collection('users')
@@ -448,13 +613,35 @@ export async function grantRewardFromSsv(
     const counter = await tx.get(counterRef);
     const granted = Number(counter.get('granted') ?? 0);
     if (!decideReward(granted, rewardedPerDay).ok) return { granted: false, reason: 'daily_limit' };
-    const wallet = await readWallet(tx, db, params.userId);
-    tx.set(walletRef(db, params.userId), { ...wallet, rewardBalance: wallet.rewardBalance + 1 });
+    const tourId = String(nonce.get('tourId') ?? '');
+    const placeId = String(nonce.get('placeId') ?? '');
+    if (!tourId || !placeId) return { granted: false, reason: 'invalid_free_tour' };
+    const tourRef = db.collection('tours').doc(tourId);
+    const claimRef = db.collection('users').doc(params.userId).collection('freeTourClaims').doc(placeId);
+    const [tour, claim, all] = await Promise.all([
+      tx.get(tourRef),
+      tx.get(claimRef),
+      readEntitlements(tx, db, params.userId),
+    ]);
+    if (!tour.exists || tour.get('free') !== true || tour.get('locked') === true)
+      return { granted: false, reason: 'tour_unavailable' };
+    if (claim.get('nonce') !== params.nonce || claim.get('state') !== 'pending')
+      return { granted: false, reason: 'claim_mismatch' };
+    if (all.some((e) => e.type === 'tour' && e.source === 'free' && e.placeId === placeId))
+      return { granted: false, reason: 'free_city_used' };
+    tx.set(ents(db, params.userId).doc(`tour_${tourId}`), {
+      type: 'tour',
+      tourId,
+      placeId,
+      source: 'free',
+      grantedAt: now,
+      expiresAt: null,
+    });
+    tx.set(claimRef, { state: 'granted', nonce: params.nonce, tourId, grantedAt: now });
     tx.set(counterRef, { granted: granted + 1, day: dayKey(now) });
     tx.update(nonceRef, { used: true, usedAt: now });
-    tx.set(txRef, { uid: params.userId, ts: now });
-    tx.set(ledger(db, params.userId).doc(), { delta: 1, kind: 'reward', ref: params.transactionId, ts: now });
-    return { granted: true };
+    tx.set(txRef, { uid: params.userId, purpose: 'free_tour', ts: now });
+    return { granted: true, purpose: 'free_tour' };
   });
 }
 

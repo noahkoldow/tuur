@@ -5,6 +5,7 @@ import {
   PoiSchema,
   budgetDecision,
   type NarrationDoc,
+  resolvePersona,
 } from '@tuur/shared';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
@@ -18,10 +19,15 @@ export const GetTransitionRequestSchema = z.object({
   /** Rounded on the server so equal hops share one cache entry. */
   walkMinutes: z.number().min(1).max(240),
   tourTitle: z.string().max(200).optional(),
+  voice: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{1,30}$/)
+    .optional(),
   access: z
     .object({
       tourId: z.string().max(200).optional(),
       mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+      groupId: z.string().max(60).optional(),
     })
     .optional(),
 });
@@ -45,7 +51,9 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
   );
   await deps.authorize?.(uid, to!, r.access);
   const minutes = Math.max(1, Math.round(r.walkMinutes / 2) * 2);
-  const key = `tr__${from!.id}__${to!.id}__${r.lang}__${minutes}__${cfg.promptVersion}`.replace(
+  const persona = resolvePersona(cfg.voiceCast, cfg.defaultVoiceId, r.voice);
+  const voicePart = persona.id === cfg.defaultVoiceId ? '' : `__${persona.id}`;
+  const key = `tr__${from!.id}__${to!.id}__${r.lang}__${minutes}__${cfg.promptVersion}${voicePart}`.replace(
     /[^A-Za-z0-9_-]/g,
     '_',
   );
@@ -92,7 +100,15 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
   const text = t.text.replace(/\s+/g, ' ').trim();
   if (!text || /[*#_`]|https?:\/\/|\(/.test(text))
     throw new NarrationError('failed-precondition', 'Transition rejected', { reason: 'markup' });
-  const audio = await renderAudio(deps, cfg, [text], r.lang, `narrations/${key}`, { tile: to!.tile, key });
+  const audio = await renderAudio(
+    deps,
+    cfg,
+    [text],
+    r.lang,
+    `narrations/${key}`,
+    { tile: to!.tile, key },
+    persona,
+  );
   const doc = NarrationDocSchema.parse({
     key,
     poiId: to!.id,

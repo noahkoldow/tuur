@@ -8,6 +8,7 @@ import { ensureAreas } from './area/ensureArea';
 import { ingestArea as runIngest } from './area/ingest';
 import {
   GEMINI_API_KEY,
+  OPENAI_API_KEY,
   ORS_API_KEY,
   db,
   geocoder,
@@ -26,6 +27,10 @@ import { composePlannedRoute as runComposeRoute } from './tours/planned';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
+import { recordVisit as runRecordVisit } from './stats/explorers';
+import { GroupError, addGroupSeat, createGroup, joinGroup, leaveGroup } from './groups/service';
+import { submitPartnerApplication as runSubmitApplication } from './partners/application';
+import { RateLimitError } from './util/rateLimit';
 import { loadAiConfig } from './util/aiConfig';
 import { z } from 'zod';
 import {
@@ -63,6 +68,7 @@ import {
 } from './partners/service';
 import {
   BillingError,
+  claimTourStart as runClaimTourStart,
   createInvite as runCreateInvite,
   createRewardNonce as runCreateRewardNonce,
   grantRewardFromSsv,
@@ -149,7 +155,7 @@ function toHttpsError(e: unknown): never {
 
 const genOptions = {
   enforceAppCheck,
-  secrets: [GEMINI_API_KEY],
+  secrets: [GEMINI_API_KEY, OPENAI_API_KEY],
   timeoutSeconds: 300,
   memory: '1GiB' as const,
 };
@@ -200,7 +206,12 @@ const GenerateToursSchema = z.object({
 });
 
 export const generateAutoTours = onCall(
-  { enforceAppCheck, secrets: [GEMINI_API_KEY, ORS_API_KEY], timeoutSeconds: 300, memory: '1GiB' },
+  {
+    enforceAppCheck,
+    secrets: [GEMINI_API_KEY, OPENAI_API_KEY, ORS_API_KEY],
+    timeoutSeconds: 300,
+    memory: '1GiB',
+  },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     const p = GenerateToursSchema.safeParse(request.data);
@@ -231,7 +242,12 @@ export const generateAutoTours = onCall(
 );
 
 export const composePlannedRoute = onCall(
-  { enforceAppCheck, secrets: [GEMINI_API_KEY, ORS_API_KEY], timeoutSeconds: 120, memory: '512MiB' },
+  {
+    enforceAppCheck,
+    secrets: [GEMINI_API_KEY, OPENAI_API_KEY, ORS_API_KEY],
+    timeoutSeconds: 120,
+    memory: '512MiB',
+  },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     try {
@@ -273,6 +289,15 @@ export const spendCredit = onCall({ enforceAppCheck }, async (request) => {
   }
 });
 
+export const claimTourStart = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runClaimTourStart({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
 export const recordPurchaseConsent = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   try {
@@ -302,8 +327,17 @@ export const redeemInvite = onCall({ enforceAppCheck }, async (request) => {
 
 export const createRewardNonce = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  if (typeof request.auth.token['phone_number'] !== 'string')
+    throw new HttpsError('failed-precondition', 'Verify a phone number before claiming a free city tour', {
+      reason: 'phone_verification_required',
+    });
   try {
-    return await runCreateRewardNonce({ db: db(), now: Date.now }, request.auth.uid);
+    return await runCreateRewardNonce(
+      { db: db(), now: Date.now },
+      request.auth.uid,
+      request.data,
+      typeof request.auth.token['phone_number'] === 'string',
+    );
   } catch (e) {
     return toBilling(e);
   }
@@ -344,7 +378,13 @@ export const admobSsv = onRequest({ cors: false }, async (req, res) => {
   const nonce = check.params.get('custom_data');
   const transactionId = check.params.get('transaction_id');
   if (!userId || !nonce || !transactionId) return void res.status(400).send('missing params');
-  const out = await grantRewardFromSsv({ db: db(), now: Date.now }, { userId, nonce, transactionId });
+  const user = await getAuth()
+    .getUser(userId)
+    .catch(() => undefined);
+  const out = await grantRewardFromSsv(
+    { db: db(), now: Date.now },
+    { userId, nonce, transactionId, phoneNumberVerified: Boolean(user?.phoneNumber) },
+  );
   res.status(200).json(out);
 });
 
@@ -466,6 +506,48 @@ export const getOffers = onCall({ enforceAppCheck }, async (request) => {
     return await runGetOffers(partnerDeps(), request.data);
   } catch (e) {
     return toPartner(e);
+  }
+});
+
+/** App: arrival at a stop -> anonymous, per-day deduplicated explorer count for the explore map (`poiStats`). */
+export const recordVisit = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runRecordVisit({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    if (e instanceof z.ZodError) throw new HttpsError('invalid-argument', 'Invalid visit');
+    throw e;
+  }
+});
+
+/** Live group tours (D47): host creates/extends, guests join by link or leave. All checks run server-side. */
+const groupCall = <T>(run: (uid: string, data: unknown) => Promise<T>) =>
+  onCall({ enforceAppCheck }, async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await run(request.auth.uid, request.data);
+    } catch (e) {
+      if (e instanceof GroupError)
+        throw new HttpsError(e.code, e.message, e.reason ? { reason: e.reason } : undefined);
+      if (e instanceof BillingError) throw new HttpsError('permission-denied', e.message, e.details);
+      throw e;
+    }
+  });
+const groupDeps = () => ({ db: db(), now: Date.now });
+export const createTourGroup = groupCall((uid, d) => createGroup(groupDeps(), uid, d));
+export const joinTourGroup = groupCall((uid, d) => joinGroup(groupDeps(), uid, d));
+export const addTourGroupSeat = groupCall((uid, d) => addGroupSeat(groupDeps(), uid, d));
+export const leaveTourGroup = groupCall((uid, d) => leaveGroup(groupDeps(), uid, d));
+
+/** App: business onboarding -> partner application for admin review (pay-per-traction model, D43). */
+export const submitPartnerApplication = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runSubmitApplication({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    if (e instanceof z.ZodError) throw new HttpsError('invalid-argument', 'Invalid application');
+    if (e instanceof RateLimitError) throw new HttpsError('resource-exhausted', 'Too many applications');
+    throw e;
   }
 });
 

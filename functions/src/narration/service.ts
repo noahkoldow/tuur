@@ -23,10 +23,15 @@ import {
   type NarrationResponse,
   type Poi,
   type SourceBundle,
+  parseVoiceSpec,
+  pickVoiceSpec,
+  resolvePersona,
+  type VoicePersona,
 } from '@tuur/shared';
+import { z } from 'zod';
 import type { LlmProvider, GroundingInfo } from '../providers/llm';
 import type { NarrationSourceProvider } from '../providers/narrationSources';
-import type { AudioEncoder, TtsProvider } from '../providers/tts';
+import { RoutedTtsProvider, type AudioEncoder, type TtsProvider } from '../providers/tts';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 import { logUsage, spentToday } from '../util/usage';
@@ -52,7 +57,8 @@ export async function withAudioUrl<T extends { audioPath: string }>(
 export interface NarrationDeps {
   db: Firestore;
   llm: LlmProvider;
-  tts: TtsProvider;
+  /** A routed provider (live) or a single provider used for every voice (tests, mock). */
+  tts: TtsProvider | RoutedTtsProvider;
   encoder: AudioEncoder;
   sources: NarrationSourceProvider;
   store: ObjectStore;
@@ -62,7 +68,13 @@ export interface NarrationDeps {
     uid: string,
     poi: Poi,
     access:
-      { tourId?: string | undefined; mode?: 'tour' | 'planned' | 'fork' | 'roam' | undefined } | undefined,
+      | {
+          tourId?: string | undefined;
+          mode?: 'tour' | 'planned' | 'fork' | 'roam' | undefined;
+          groupId?: string | undefined;
+        }
+      | undefined,
+    opts?: { download?: boolean },
   ) => Promise<void>;
   /** Overrides config loading in tests. */
   config?: () => Promise<AiConfig>;
@@ -159,7 +171,7 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
   const req = parsed.data;
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const poi = await loadPoi(deps.db, req.poiId);
-  await deps.authorize?.(uid, poi, req.access);
+  await deps.authorize?.(uid, poi, req.access, { download: Boolean(req.download) });
 
   const partner = await partnerContext(deps.db, poi, deps.now());
   const key = narrationKey(
@@ -168,10 +180,12 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
   );
   const ref = deps.db.collection('narrations').doc(key);
 
+  const persona = resolvePersona(cfg.voiceCast, cfg.defaultVoiceId, req.voice);
   const hit = await ref.get();
   if (hit.exists) {
     const doc = NarrationDocSchema.parse(hit.data());
-    if (doc.status === 'ok' && !doc.grounded) return toResponse(doc, poi, true);
+    if (doc.status === 'ok' && !doc.grounded)
+      return toResponse(await inVoice(deps, cfg, doc, ref, persona, poi), poi, true);
   }
 
   // Grounded output must not be shared between users (D16): it is generated and stored per user.
@@ -183,7 +197,8 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
     const own = await cacheRef.get();
     if (own.exists) {
       const doc = NarrationDocSchema.parse(own.data());
-      if (doc.groundedExpiresAt && doc.groundedExpiresAt > deps.now()) return toResponse(doc, poi, true);
+      if (doc.groundedExpiresAt && doc.groundedExpiresAt > deps.now())
+        return toResponse(await inVoice(deps, cfg, doc, cacheRef, persona, poi), poi, true);
     }
   }
 
@@ -260,7 +275,7 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
       if (doc.status === 'ok' && (!grounded || (doc.groundedExpiresAt ?? 0) > deps.now()))
         return toResponse(doc, poi, true);
     }
-    return await generate(deps, cfg, poi, req, key, cacheRef, grounded, partner);
+    return await generate(deps, cfg, poi, req, key, cacheRef, grounded, persona, partner);
   } catch (e) {
     if (
       e instanceof NarrationError &&
@@ -283,6 +298,7 @@ async function generate(
   key: string,
   cacheRef: FirebaseFirestore.DocumentReference,
   grounded: boolean,
+  persona: VoicePersona,
   partner?: PartnerContext,
 ) {
   const langs = [req.lang, ...sourceLangsFor('XX')].filter((l, i, a) => a.indexOf(l) === i);
@@ -373,7 +389,7 @@ async function generate(
   const spoken = partner
     ? [`${partnerIntro(req.lang)} ${output.paragraphs[0]!}`, ...output.paragraphs.slice(1)]
     : output.paragraphs;
-  const audio = await renderAudio(deps, cfg, spoken, req.lang, audioBase, { tile: poi.tile, key });
+  const audio = await renderAudio(deps, cfg, spoken, req.lang, audioBase, { tile: poi.tile, key }, persona);
   const { layout, enc, audioPath } = audio;
 
   const doc: NarrationDoc = NarrationDocSchema.parse({
@@ -391,6 +407,7 @@ async function generate(
     sourcesUsed: output.sourcesUsed,
     audioPath,
     audioMimeType: enc.mimeType,
+    voiceId: persona.id,
     audioDurationMs: layout.length
       ? layout[layout.length - 1]!.startMs + layout[layout.length - 1]!.durationMs
       : 0,
@@ -404,6 +421,58 @@ async function generate(
   return toResponse(doc, poi, false, grounding);
 }
 
+const VoiceVariantSchema = z.object({
+  voiceId: z.string(),
+  audioPath: z.string(),
+  audioMimeType: z.string(),
+  paragraphs: NarrationDocSchema.shape.paragraphs,
+  audioDurationMs: z.number().nonnegative(),
+  createdAt: z.number(),
+});
+
+/**
+ * The cached narration in the listener's voice. Text is shared by all voices (generated and fact-checked once);
+ * other voices only render audio, stored in `voices/{personaId}` under the narration (timings differ per voice).
+ */
+export async function inVoice(
+  deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now'>,
+  cfg: AiConfig,
+  doc: NarrationDoc,
+  ref: FirebaseFirestore.DocumentReference,
+  persona: VoicePersona,
+  poi: Poi,
+): Promise<NarrationDoc> {
+  if ((doc.voiceId ?? cfg.defaultVoiceId) === persona.id) return doc;
+  const vref = ref.collection('voices').doc(persona.id);
+  const have = await vref.get();
+  const cached = have.exists ? VoiceVariantSchema.safeParse(have.data()) : undefined;
+  if (cached?.success) return { ...doc, ...cached.data };
+  const budget = budgetDecision(cfg, await spentToday(deps.db, poi.tile, deps.now()));
+  // Over budget: serve the stored voice rather than failing the stop.
+  if (!budget.allowed) return doc;
+  const base = doc.audioPath.replace(/\.[a-z0-9]+$/i, '');
+  const audio = await renderAudio(
+    deps,
+    cfg,
+    doc.paragraphs.map((p) => p.text),
+    doc.lang,
+    `${base}__${persona.id}`,
+    { tile: poi.tile, key: doc.key },
+    persona,
+  );
+  const last = audio.layout[audio.layout.length - 1];
+  const variant = VoiceVariantSchema.parse({
+    voiceId: persona.id,
+    audioPath: audio.audioPath,
+    audioMimeType: audio.enc.mimeType,
+    paragraphs: audio.layout,
+    audioDurationMs: last ? last.startMs + last.durationMs : 0,
+    createdAt: deps.now(),
+  });
+  await vref.set(variant);
+  return { ...doc, ...variant };
+}
+
 /** TTS per paragraph (exact timings), joined with pauses, MP3-encoded and stored. Shared by narrations and transitions. */
 export async function renderAudio(
   deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now'>,
@@ -412,12 +481,22 @@ export async function renderAudio(
   lang: string,
   pathBase: string,
   attribution: { tile: string; key: string },
+  persona: VoicePersona = resolvePersona(cfg.voiceCast, cfg.defaultVoiceId),
 ) {
-  const voice = cfg.voices[lang] ?? cfg.voices['default'] ?? 'Kore';
+  const tts =
+    deps.tts instanceof RoutedTtsProvider
+      ? deps.tts
+      : new RoutedTtsProvider({ gemini: deps.tts, openai: deps.tts });
+  const spec = pickVoiceSpec(persona, tts.available);
+  // No provider for this persona: the legacy per-language Gemini voice keeps narration working.
+  const { provider, name } = spec
+    ? parseVoiceSpec(spec)
+    : { provider: 'gemini' as const, name: cfg.voices[lang] ?? cfg.voices['default'] ?? 'Kore' };
+  const model = cfg.ttsModels[provider] ?? cfg.models.tts;
   const pcms: { text: string; pcm: Uint8Array }[] = [];
   let ttsChars = 0;
   for (const text of paragraphs) {
-    const r = await deps.tts.synthesize({ text, lang, voice, model: cfg.models.tts });
+    const r = await tts.synthesize(provider, { text, lang, voice: name, model, style: persona.style });
     pcms.push({ text, pcm: r.pcm });
     ttsChars += r.chars;
   }
@@ -426,8 +505,8 @@ export async function renderAudio(
     cfg.pricing,
     {
       kind: 'tts',
-      model: cfg.models.tts,
-      usage: { ttsChars },
+      model,
+      usage: { ttsChars, ttsProvider: provider },
       tile: attribution.tile,
       key: attribution.key,
       ok: true,

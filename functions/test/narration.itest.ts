@@ -122,6 +122,21 @@ describe('getNarration', () => {
     expect(llm.calls.narration).toBe(3);
   });
 
+  it('renders another voice as audio only: the text is generated once and reused for every voice', async () => {
+    const { deps, store, llm } = mk();
+    const mara = await getNarration(deps, 'u1', { ...req, voice: 'mara' });
+    const calls = { ...llm.calls };
+    const jonas = await getNarration(deps, 'u2', { ...req, voice: 'jonas' });
+    expect(jonas.key).toBe(mara.key);
+    expect(jonas.text).toBe(mara.text);
+    expect(jonas.audioPath).not.toBe(mara.audioPath);
+    expect(store.files.has(jonas.audioPath)).toBe(true);
+    expect(llm.calls).toEqual(calls);
+    // second request for the same voice is a plain cache hit; unknown voices fall back to the default
+    expect((await getNarration(deps, 'u3', { ...req, voice: 'jonas' })).audioPath).toBe(jonas.audioPath);
+    expect((await getNarration(deps, 'u3', { ...req, voice: 'nobody' })).audioPath).toBe(mara.audioPath);
+  });
+
   it('lays out paragraph timings on a monotonic timeline that matches the audio duration', async () => {
     const { deps } = mk();
     const r = await getNarration(deps, 'u1', { ...req, lengthTier: 'long' });

@@ -1,16 +1,32 @@
 import { GoogleGenAI, Modality } from '@google/genai';
 import { estimateSpeechMs, silencePcm } from '@tuur/shared';
 import { Mp3Encoder } from '@breezystack/lamejs';
-import { TTS_SAMPLE_RATE } from '@tuur/shared';
+import { TTS_SAMPLE_RATE, type TtsProviderId } from '@tuur/shared';
+
+export interface TtsRequest {
+  text: string;
+  lang: string;
+  /** Provider voice name (without the `provider:` prefix). */
+  voice: string;
+  model: string;
+  /** Delivery direction of the guide persona (see packages/shared narration/voices.ts). */
+  style?: string;
+}
 
 export interface TtsProvider {
   /** Returns 16-bit mono PCM at 24 kHz. */
-  synthesize(req: {
-    text: string;
-    lang: string;
-    voice: string;
-    model: string;
-  }): Promise<{ pcm: Uint8Array; chars: number }>;
+  synthesize(req: TtsRequest): Promise<{ pcm: Uint8Array; chars: number }>;
+}
+
+/** Routes `provider:name` voices to the configured back ends (a missing key means the provider is unavailable). */
+export class RoutedTtsProvider {
+  constructor(private readonly providers: Partial<Record<TtsProviderId, TtsProvider>>) {}
+  available = (p: TtsProviderId) => Boolean(this.providers[p]);
+  synthesize(provider: TtsProviderId, req: TtsRequest) {
+    const p = this.providers[provider];
+    if (!p) throw new Error(`TTS provider ${provider} is not configured`);
+    return p.synthesize(req);
+  }
 }
 
 export interface AudioEncoder {
@@ -23,18 +39,13 @@ export class GeminiTtsProvider implements TtsProvider {
   constructor(apiKey: string) {
     this.ai = new GoogleGenAI({ apiKey });
   }
-  async synthesize(req: { text: string; lang: string; voice: string; model: string }) {
+  async synthesize(req: TtsRequest) {
+    // Gemini TTS takes delivery directions as natural language in front of the transcript.
+    const direction =
+      req.style ?? 'Say in a warm, engaging, natural tour-guide voice, at a relaxed walking-tour pace';
     const res = await this.ai.models.generateContent({
       model: req.model,
-      contents: [
-        {
-          parts: [
-            {
-              text: `Say in a warm, engaging, natural tour-guide voice, at a relaxed walking-tour pace: ${req.text}`,
-            },
-          ],
-        },
-      ],
+      contents: [{ parts: [{ text: `${direction}\n\nRead aloud exactly this text:\n${req.text}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: req.voice } } },
@@ -43,6 +54,33 @@ export class GeminiTtsProvider implements TtsProvider {
     const b64 = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
     if (!b64) throw new Error('TTS returned no audio');
     return { pcm: new Uint8Array(Buffer.from(b64, 'base64')), chars: req.text.length };
+  }
+}
+
+/**
+ * OpenAI speech (the voices of the ChatGPT voice mode; `marin`/`cedar` recommended). Raw 24 kHz 16-bit mono PCM,
+ * the same format as Gemini, so paragraph timings and MP3 encoding stay unchanged. OpenAI's usage policy requires
+ * telling listeners the voice is AI-generated: the player shows the AI label and the file carries the ID3 marker.
+ */
+export class OpenAiTtsProvider implements TtsProvider {
+  constructor(
+    private readonly apiKey: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {}
+  async synthesize(req: TtsRequest) {
+    const res = await this.fetcher('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: req.model,
+        voice: req.voice,
+        input: req.text,
+        ...(req.style ? { instructions: req.style } : {}),
+        response_format: 'pcm',
+      }),
+    });
+    if (!res.ok) throw new Error(`OpenAI TTS failed (${res.status})`);
+    return { pcm: new Uint8Array(await res.arrayBuffer()), chars: req.text.length };
   }
 }
 
@@ -59,7 +97,7 @@ export class MockTtsProvider implements TtsProvider {
  * synthetic audio, EU AI Act Art. 50(2)). Players skip the tag; the Storage object carries the same marker as metadata.
  */
 export function aiGeneratedId3Tag(
-  note = 'true; generator=tuur; voice=synthetic (Google text-to-speech)',
+  note = 'true; generator=tuur; voice=synthetic (AI text-to-speech)',
 ): Buffer {
   const body = Buffer.concat([
     Buffer.from([0x00]),

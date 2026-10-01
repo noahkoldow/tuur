@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_AI_CONFIG, REGION_FIXTURES, buildPois, type Poi } from '@tuur/shared';
 import {
   BillingError,
+  claimTourStart,
   authorizeContent,
   createInvite,
   createRewardNonce,
@@ -133,6 +134,72 @@ describe('spendCredit', () => {
     ]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect((await walletOf('u1'))!['balance']).toBe(0);
+  });
+});
+
+describe('claimTourStart', () => {
+  const sessionId = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+  const addSubscriber = async () =>
+    db
+      .collection('users')
+      .doc('u1')
+      .collection('entitlements')
+      .doc('subscription')
+      .set({
+        type: 'subscription',
+        active: true,
+        productId: 'tuur_sub_monthly',
+        expiresAt: clock + 30 * 86400_000,
+        willRenew: true,
+        updatedAt: clock,
+      });
+
+  it('allows ten starts per UTC month, rejects the eleventh, and makes retries idempotent', async () => {
+    await seedTour();
+    await addSubscriber();
+    for (let i = 1; i <= 10; i++) {
+      const result = await claimTourStart(deps(), 'u1', {
+        tourId: 'tour1',
+        sessionId: sessionId(i),
+        mode: 'tour',
+      });
+      expect(result).toEqual({ counted: true, remaining: 10 - i });
+    }
+    expect(
+      await claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(10), mode: 'tour' }),
+    ).toEqual({ counted: true, remaining: 0 });
+    await expect(
+      claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(11), mode: 'tour' }),
+    ).rejects.toMatchObject({ code: 'resource-exhausted', details: { reason: 'monthly_tour_limit' } });
+  });
+
+  it('serializes concurrent starts so the subscription limit cannot be raced', async () => {
+    await seedTour();
+    await addSubscriber();
+    const results = await Promise.allSettled(
+      Array.from({ length: 12 }, (_, i) =>
+        claimTourStart(deps(), 'u1', {
+          tourId: 'tour1',
+          sessionId: sessionId(i + 1),
+          mode: 'tour',
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(10);
+    const usage = await db
+      .collection('users')
+      .doc('u1')
+      .collection('tourUsage')
+      .doc(new Date(clock).toISOString().slice(0, 7))
+      .get();
+    expect(usage.get('starts')).toBe(10);
+  });
+
+  it('requires a server-granted free-tour entitlement for a free tour', async () => {
+    await seedTour({ free: true });
+    await expect(
+      claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(1), mode: 'tour' }),
+    ).rejects.toMatchObject({ code: 'permission-denied', details: { reason: 'ad_required' } });
   });
 });
 
@@ -371,28 +438,47 @@ describe('rewarded ads (server-side verification)', () => {
     expect(verifyAdmobSignature(q, [{ keyId: 123, pem: other }]).ok).toBe(false);
   });
 
-  it('grants one reward credit per nonce and enforces the daily limit', async () => {
+  it('grants one ad-backed free city tour per UID and enforces the daily limit', async () => {
     let tx = 0;
     const grant = async (uid: string, nonce: string) =>
-      grantRewardFromSsv(deps(), { userId: uid, nonce, transactionId: `tx${++tx}` });
+      grantRewardFromSsv(deps(), {
+        userId: uid,
+        nonce,
+        transactionId: `tx${++tx}`,
+        phoneNumberVerified: true,
+      });
     const results: boolean[] = [];
     for (let i = 0; i < 4; i++) {
-      const { nonce } = await createRewardNonce(deps(), 'u1').catch(() => ({ nonce: '' }));
+      const tourId = `free${i + 1}`;
+      await seedTour({ free: true, placeId: `city${i + 1}` }, tourId);
+      const { nonce } = await createRewardNonce(deps(), 'u1', { tourId }, true).catch(() => ({ nonce: '' }));
       results.push(nonce ? (await grant('u1', nonce)).granted : false);
     }
     expect(results).toEqual([true, true, true, false]);
-    expect((await walletOf('u1'))!['rewardBalance']).toBe(3);
+    expect((await db.collection('users').doc('u1').collection('entitlements').get()).size).toBe(3);
+    expect((await walletOf('u1'))!['rewardBalance']).toBe(0);
   });
 
-  it('rejects reused, foreign, expired and unknown nonces and duplicate transactions', async () => {
-    const { nonce } = await createRewardNonce(deps(), 'u1');
+  it('requires phone verification and rejects reused, foreign, expired and unknown city-tour nonces', async () => {
+    await seedTour({ free: true }, 'free1');
+    await expect(createRewardNonce(deps(), 'u1', { tourId: 'free1' }, false)).rejects.toMatchObject({
+      details: { reason: 'phone_verification_required' },
+    });
+    const { nonce } = await createRewardNonce(deps(), 'u1', { tourId: 'free1' }, true);
     expect(await grantRewardFromSsv(deps(), { userId: 'u2', nonce, transactionId: 'a' })).toMatchObject({
       granted: false,
       reason: 'unknown_nonce',
     });
-    expect((await grantRewardFromSsv(deps(), { userId: 'u1', nonce, transactionId: 'b' })).granted).toBe(
-      true,
-    );
+    expect(
+      (
+        await grantRewardFromSsv(deps(), {
+          userId: 'u1',
+          nonce,
+          transactionId: 'b',
+          phoneNumberVerified: true,
+        })
+      ).granted,
+    ).toBe(true);
     expect(await grantRewardFromSsv(deps(), { userId: 'u1', nonce, transactionId: 'c' })).toMatchObject({
       granted: false,
       reason: 'nonce_used',
@@ -404,11 +490,31 @@ describe('rewarded ads (server-side verification)', () => {
     expect(
       await grantRewardFromSsv(deps(), { userId: 'u1', nonce: 'unknown', transactionId: 'd' }),
     ).toMatchObject({ granted: false, reason: 'unknown_nonce' });
-    const { nonce: n2 } = await createRewardNonce(deps(), 'u1');
+    await seedTour({ free: true, placeId: 'another-city' }, 'free2');
+    const { nonce: n2 } = await createRewardNonce(deps(), 'u1', { tourId: 'free2' }, true);
     clock += 31 * 60_000;
-    expect(await grantRewardFromSsv(deps(), { userId: 'u1', nonce: n2, transactionId: 'e' })).toMatchObject({
-      granted: false,
-      reason: 'nonce_expired',
+    expect(
+      await grantRewardFromSsv(deps(), {
+        userId: 'u1',
+        nonce: n2,
+        transactionId: 'e',
+        phoneNumberVerified: true,
+      }),
+    ).toMatchObject({ granted: false, reason: 'nonce_expired' });
+  });
+
+  it('rejects a second free-tour claim in the same city, even for another tour id', async () => {
+    await seedTour({ free: true }, 'free1');
+    await seedTour({ free: true }, 'free2');
+    const { nonce } = await createRewardNonce(deps(), 'u1', { tourId: 'free1' }, true);
+    await grantRewardFromSsv(deps(), {
+      userId: 'u1',
+      nonce,
+      transactionId: 'city1',
+      phoneNumberVerified: true,
+    });
+    await expect(createRewardNonce(deps(), 'u1', { tourId: 'free2' }, true)).rejects.toMatchObject({
+      details: { reason: 'free_city_used' },
     });
   });
 });
