@@ -6,6 +6,12 @@ describe('shared config', () => {
     const parsed = AiConfigSchema.parse(DEFAULT_AI_CONFIG);
     expect(parsed.groundingEnabled).toBe(false);
     expect(parsed.killSwitch).toBe(false);
+    expect(parsed.dailyBudgetUsd).toBe(3);
+  });
+
+  it('rejects a daily AI budget above the owner-approved cap', () => {
+    const overBudget = { ...DEFAULT_AI_CONFIG, dailyBudgetUsd: 3.01 };
+    expect(AiConfigSchema.safeParse(overBudget).success).toBe(false);
   });
 
   it('rejects empty model names', () => {

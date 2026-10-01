@@ -22,6 +22,7 @@ export const TourEntitlementSchema = z.object({
   type: z.literal('tour'),
   tourId: z.string(),
   source: z.enum(TOUR_ENTITLEMENT_SOURCES),
+  placeId: z.string().optional(),
   grantedAt: z.number(),
   /** Standard tours are unlocked permanently (null). */
   expiresAt: z.number().nullable(),
@@ -50,6 +51,7 @@ export type SessionEntitlement = z.infer<typeof SessionEntitlementSchema>;
 
 export const SESSION_DURATION_MS = 24 * 3600_000;
 export const MAX_INVITES_PER_TOUR = 2;
+export const SUBSCRIPTION_TOUR_STARTS_PER_MONTH = 10;
 
 export type SessionMode = 'tour' | 'planned' | 'fork' | 'roam';
 
@@ -85,7 +87,16 @@ export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: numbe
     return { allowed: false, reason: 'denied' };
   }
   if (!ctx.tourId) return { allowed: false, reason: 'no_context' };
-  if (ctx.tourFree) return { allowed: true, reason: 'free' };
+  if (ctx.tourFree) {
+    const freeGrant = ents.some(
+      (e) =>
+        e.type === 'tour' &&
+        e.tourId === ctx.tourId &&
+        e.source === 'free' &&
+        (!ctx.placeId || e.placeId === ctx.placeId),
+    );
+    return freeGrant ? { allowed: true, reason: 'free' } : { allowed: false, reason: 'denied' };
+  }
   if (
     ents.some(
       (e) => e.type === 'tour' && e.tourId === ctx.tourId && (e.expiresAt === null || e.expiresAt > now),
@@ -100,6 +111,8 @@ export interface Wallet {
   balance: number;
   /** Credits earned by watching rewarded ads; only valid for standard tours. */
   rewardBalance: number;
+  /** Bought extra places for live group tours (D47). */
+  seatBalance?: number;
 }
 
 export type SpendKind = 'tour' | 'session';
@@ -194,7 +207,11 @@ export const RevenueCatEventSchema = z.object({
 });
 export type RevenueCatEvent = z.infer<typeof RevenueCatEventSchema>;
 
-export type ProductKind = { kind: 'credit'; credits: number } | { kind: 'subscription' };
+export type ProductKind =
+  | { kind: 'credit'; credits: number }
+  | { kind: 'subscription' }
+  /** Extra places in a live group tour (D47). */
+  | { kind: 'seat'; seats: number };
 export type ProductMap = Record<string, ProductKind>;
 
 export const DEFAULT_PRODUCTS: ProductMap = {
@@ -202,12 +219,15 @@ export const DEFAULT_PRODUCTS: ProductMap = {
   tuur_credit_5: { kind: 'credit', credits: 5 },
   tuur_sub_monthly: { kind: 'subscription' },
   tuur_sub_yearly: { kind: 'subscription' },
+  tuur_group_seat: { kind: 'seat', seats: 1 },
 };
 
 export type RevenueCatOp =
   | { op: 'setSubscription'; entitlement: SubscriptionEntitlement }
   | { op: 'addCredits'; amount: number; ref: string }
   | { op: 'removeCredits'; amount: number; ref: string }
+  | { op: 'addSeats'; amount: number; ref: string }
+  | { op: 'removeSeats'; amount: number; ref: string }
   | { op: 'ignore'; reason: string };
 
 /**
@@ -226,6 +246,13 @@ export function planRevenueCatEvent(e: RevenueCatEvent, products: ProductMap, no
       return [{ op: 'addCredits', amount: product.credits, ref }];
     if (e.type === 'REFUND') return [{ op: 'removeCredits', amount: product.credits, ref }];
     return [{ op: 'ignore', reason: `credit_event:${e.type}` }];
+  }
+  if (product.kind === 'seat') {
+    const ref = e.transaction_id ?? e.id;
+    if (e.type === 'NON_RENEWING_PURCHASE' || e.type === 'INITIAL_PURCHASE')
+      return [{ op: 'addSeats', amount: product.seats, ref }];
+    if (e.type === 'REFUND') return [{ op: 'removeSeats', amount: product.seats, ref }];
+    return [{ op: 'ignore', reason: `seat_event:${e.type}` }];
   }
 
   const expiresAt = e.expiration_at_ms ?? null;

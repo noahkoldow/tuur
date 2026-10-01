@@ -136,7 +136,8 @@ describe('cost & budget', () => {
       { inputTokens: 1_000_000, outputTokens: 1_000_000, ttsChars: 1_000_000 },
       DEFAULT_AI_CONFIG.pricing,
     );
-    expect(c).toBeCloseTo(0.5 + 3 + 10, 5);
+    const p = DEFAULT_AI_CONFIG.pricing;
+    expect(c).toBeCloseTo(p.inputPerMTokUsd + p.outputPerMTokUsd + p.ttsPerMCharsUsd, 5);
     expect(estimateCostUsd({ groundingQueries: 1000 }, DEFAULT_AI_CONFIG.pricing)).toBe(35);
   });
   it('blocks on kill switch, daily and area budgets', () => {

@@ -6,6 +6,8 @@ export interface Usage {
   liteInputTokens?: number;
   liteOutputTokens?: number;
   ttsChars?: number;
+  /** Provider of the TTS characters (price override per provider). */
+  ttsProvider?: string;
   groundingQueries?: number;
   routingCalls?: number;
 }
@@ -17,7 +19,8 @@ export function estimateCostUsd(u: Usage, p: AiConfig['pricing']): number {
     ((u.outputTokens ?? 0) / 1e6) * p.outputPerMTokUsd +
     ((u.liteInputTokens ?? 0) / 1e6) * p.liteInputPerMTokUsd +
     ((u.liteOutputTokens ?? 0) / 1e6) * p.liteOutputPerMTokUsd +
-    ((u.ttsChars ?? 0) / 1e6) * p.ttsPerMCharsUsd +
+    ((u.ttsChars ?? 0) / 1e6) *
+      ((u.ttsProvider ? p.ttsPerMCharsUsdByProvider?.[u.ttsProvider] : undefined) ?? p.ttsPerMCharsUsd) +
     ((u.groundingQueries ?? 0) / 1000) * p.groundingPer1kQueriesUsd +
     ((u.routingCalls ?? 0) / 1000) * p.routingPer1kCallsUsd;
   return Math.round(c * 1e6) / 1e6;

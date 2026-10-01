@@ -110,3 +110,21 @@ export function pickRoamTarget(inp: RoamInput): Poi | undefined {
   }
   return best?.p;
 }
+
+/** How far "direkt los" may send the listener for the first stop of a roam. */
+export const ROAM_START_MAX_M = 1500;
+
+/**
+ * Start options for roam (spec 5.4, owner feedback 2026-09-30): the best nearby POIs ranked by interest-weighted
+ * score per walking distance, so "just go" leads to a worthwhile first stop that is still close. Deterministic.
+ */
+export function rankRoamStarts(pos: LatLng, candidates: Poi[], interests: Interest[], limit = 5): Poi[] {
+  return candidates
+    .filter((p) => p.accessible && !p.hidden)
+    .map((p) => ({ p, d: distanceMeters(pos, p.location) }))
+    .filter((x) => x.d <= ROAM_START_MAX_M)
+    .map((x) => ({ ...x, v: weightedScore(x.p, interests) / (1 + x.d / 300) }))
+    .sort((a, b) => b.v - a.v || a.d - b.d || a.p.id.localeCompare(b.p.id))
+    .slice(0, limit)
+    .map((x) => x.p);
+}

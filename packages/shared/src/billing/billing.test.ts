@@ -45,8 +45,19 @@ describe('decideAccess', () => {
     expect(isSubscriber([sub({ expiresAt: null })], NOW)).toBe(true);
   });
 
-  it('the free tour is open for everyone; other tours need an entitlement', () => {
-    expect(decideAccess([], { tourId: 't', tourFree: true }, NOW)).toEqual({ allowed: true, reason: 'free' });
+  it('a free tour requires its server-granted place entitlement; paid tours need a purchase entitlement', () => {
+    expect(decideAccess([], { tourId: 't', tourFree: true }, NOW).allowed).toBe(false);
+    expect(decideAccess([tourEnt('t', 'free', null)], { tourId: 't', tourFree: true }, NOW)).toEqual({
+      allowed: true,
+      reason: 'free',
+    });
+    expect(
+      decideAccess(
+        [{ ...tourEnt('t', 'free', null), placeId: 'other-city' } as Entitlement],
+        { tourId: 't', tourFree: true, placeId: 'city' },
+        NOW,
+      ).allowed,
+    ).toBe(false);
     expect(decideAccess([], { tourId: 't' }, NOW).allowed).toBe(false);
     expect(decideAccess([tourEnt('t')], { tourId: 't' }, NOW)).toEqual({ allowed: true, reason: 'tour' });
     expect(decideAccess([tourEnt('other')], { tourId: 't' }, NOW).allowed).toBe(false);

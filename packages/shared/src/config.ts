@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_VOICE_CAST, DEFAULT_VOICE_ID, VoicePersonaSchema } from './narration/voices';
 
 /**
  * Runtime AI configuration, stored in Firestore `config/ai`. Model names are never hard-coded at call
@@ -11,13 +12,18 @@ export const AiConfigSchema = z.object({
     lite: z.string().min(1),
     tts: z.string().min(1),
   }),
-  /** Guide voice per language (TTS voice name); `default` is the fallback. */
+  /** Legacy Gemini voice per language; only used when no voice cast entry applies. */
   voices: z.record(z.string()),
+  /** Selectable guide voices (`provider:name` + style); listeners pick one in the settings. */
+  voiceCast: z.array(VoicePersonaSchema).min(1).default(DEFAULT_VOICE_CAST),
+  defaultVoiceId: z.string().default(DEFAULT_VOICE_ID),
+  /** TTS model per provider (Gemini falls back to `models.tts`); never hard-coded at call sites. */
+  ttsModels: z.record(z.string().min(1)).default({ openai: 'gpt-4o-mini-tts' }),
   promptVersion: z.string().min(1),
   /** Google Search grounding (default off, see DECISIONS D16: grounded output is never cached). */
   groundingEnabled: z.boolean(),
-  /** Global daily spend cap in USD; exceeding it blocks new generation (cached content still served). */
-  dailyBudgetUsd: z.number().nonnegative(),
+  /** Hard global AI-generation budget cap in USD; cached content still works after reaching the cap. */
+  dailyBudgetUsd: z.number().nonnegative().max(3),
   /** Per-area (tile) daily cap in USD. */
   areaDailyBudgetUsd: z.number().nonnegative(),
   killSwitch: z.boolean(),
@@ -28,6 +34,8 @@ export const AiConfigSchema = z.object({
     liteInputPerMTokUsd: z.number().nonnegative(),
     liteOutputPerMTokUsd: z.number().nonnegative(),
     ttsPerMCharsUsd: z.number().nonnegative(),
+    /** Per-provider TTS price override (USD per million characters). */
+    ttsPerMCharsUsdByProvider: z.record(z.number().nonnegative()).default({ openai: 17 }),
     groundingPer1kQueriesUsd: z.number().nonnegative(),
     routingPer1kCallsUsd: z.number().nonnegative().default(0),
   }),
@@ -48,17 +56,22 @@ export type AiConfig = z.infer<typeof AiConfigSchema>;
 export const DEFAULT_AI_CONFIG: AiConfig = {
   models: { narration: 'gemini-3.8-flash', lite: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
   voices: { default: 'Kore', de: 'Kore', en: 'Kore' },
+  voiceCast: DEFAULT_VOICE_CAST,
+  defaultVoiceId: DEFAULT_VOICE_ID,
+  ttsModels: { openai: 'gpt-4o-mini-tts' },
   promptVersion: 'v2',
   groundingEnabled: false,
-  dailyBudgetUsd: 20,
+  dailyBudgetUsd: 3,
   areaDailyBudgetUsd: 3,
   killSwitch: false,
   pricing: {
-    inputPerMTokUsd: 0.5,
-    outputPerMTokUsd: 3,
-    liteInputPerMTokUsd: 0.1,
-    liteOutputPerMTokUsd: 0.4,
+    // ai.google.dev/gemini-api/docs/pricing, checked 2026-09-30: Flash 0.75/3.75 and Flash TTS double on 2027-01-01
+    inputPerMTokUsd: 0.75,
+    outputPerMTokUsd: 3.75,
+    liteInputPerMTokUsd: 0.3,
+    liteOutputPerMTokUsd: 2.5,
     ttsPerMCharsUsd: 10,
+    ttsPerMCharsUsdByProvider: { openai: 17 },
     groundingPer1kQueriesUsd: 35,
     routingPer1kCallsUsd: 0.5,
   },

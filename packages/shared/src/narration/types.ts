@@ -12,11 +12,18 @@ export const GetNarrationRequestSchema = z.object({
   lang: NarrationLangSchema,
   lengthTier: z.enum(LENGTH_TIERS),
   primaryInterest: z.enum(INTERESTS).optional(),
+  /** Guide voice persona id chosen in the settings (unknown ids fall back to the default voice). */
+  voice: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{1,30}$/)
+    .optional(),
   /** What the listener is doing; the server checks entitlements against it (never trusts free/bought claims). */
   access: z
     .object({
       tourId: z.string().max(200).optional(),
       mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+      /** Live group the listener joined (D47); the server checks membership, never trusts the claim. */
+      groupId: z.string().max(60).optional(),
     })
     .optional(),
   /** Set by the offline download manager: uses the download rate-limit bucket. */
@@ -65,6 +72,8 @@ export const NarrationDocSchema = z.object({
   audioPath: z.string(),
   audioMimeType: z.string(),
   audioDurationMs: z.number().nonnegative(),
+  /** Voice persona of the stored audio (other voices live in the `voices` subcollection). Missing = default. */
+  voiceId: z.string().optional(),
   /** Set only for grounded output; grounded narrations are not shared/cached (see D16). */
   grounded: z.boolean().default(false),
   groundedExpiresAt: z.number().optional(),
