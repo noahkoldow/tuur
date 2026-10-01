@@ -140,19 +140,24 @@ export default function AiPage() {
       </Card>
       <Card title={t('admin.ai.pricing')}>
         <div className="grid2">
-          {(Object.keys(draft.pricing) as (keyof AiConfig['pricing'])[]).map((k) => (
-            <Field key={k} label={t(`admin.ai.price.${k}`)}>
-              <Input
-                type="number"
-                min={0}
-                step={0.01}
-                value={draft.pricing[k]}
-                onChange={(e) =>
-                  setDraft({ ...draft, pricing: { ...draft.pricing, [k]: num(e.target.value) } })
-                }
-              />
-            </Field>
-          ))}
+          {(Object.keys(draft.pricing) as (keyof AiConfig['pricing'])[]).map((k) => {
+            // per-provider maps (e.g. ttsPerMCharsUsdByProvider) are not editable here and are saved unchanged
+            const v = draft.pricing[k];
+            if (typeof v !== 'number') return null;
+            return (
+              <Field key={k} label={t(`admin.ai.price.${k}`)}>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={v}
+                  onChange={(e) =>
+                    setDraft({ ...draft, pricing: { ...draft.pricing, [k]: num(e.target.value) } })
+                  }
+                />
+              </Field>
+            );
+          })}
         </div>
       </Card>
       {msg ? <Notice tone={msg.tone}>{msg.text}</Notice> : null}

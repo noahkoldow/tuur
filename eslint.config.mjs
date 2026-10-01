@@ -8,7 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/node_modules/**',
-      '**/lib/**',
+      'functions/lib/**',
       '**/deploy/**',
       '**/dist/**',
       '**/.next/**',

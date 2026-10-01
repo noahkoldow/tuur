@@ -2,8 +2,8 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["REPLACE_TEAMID.app.tuur.guide"],
-        "components": [{ "/": "/invite/*" }]
+        "appIDs": ["4GXK973R2W.com.tuurapp"],
+        "components": [{ "/": "/invite/*" }, { "/": "/join/*" }]
       }
     ]
   }
