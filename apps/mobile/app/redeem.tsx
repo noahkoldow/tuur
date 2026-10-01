@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { BackendError, useBackend, type RedemptionToken } from '../src/backend';
 import { Banner } from '../src/components/Banner';
+import { Wordmark } from '../src/components/Brand';
 import { Button } from '../src/components/Button';
 import { CloseButton } from '../src/components/HeaderButton';
 import { Icon } from '../src/components/Icon';
@@ -90,7 +91,7 @@ export default function Redeem() {
           headerRight: () => <CloseButton label={t('paywall.close')} onPress={() => router.back()} />,
         }}
       />
-      <Screen padded>
+      <Screen padded style={{ paddingTop: 0 }}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
           {busy ? (
             <SpinningMark size={72} label={t('common.loading')} />
@@ -113,6 +114,7 @@ export default function Redeem() {
             </>
           ) : token ? (
             <>
+              <Wordmark width={72} />
               <Text variant="title2" accessibilityRole="header" align="center">
                 {t('partner.qrTitle')}
               </Text>

@@ -6,8 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { CITY_BADGES, earnedBadges, type BadgeTier, type CityBadgeDef } from '@tuur/shared';
 import { useBackend } from '../../../src/backend';
 import { SettingsButton } from '../../../src/components/HeaderButton';
+import { Icon } from '../../../src/components/Icon';
 import { ListGroup, ListRow } from '../../../src/components/ListGroup';
 import { Mascot, MascotTip } from '../../../src/components/Mascot';
+import { RunningTour } from '../../../src/components/RunningTour';
 import { ScrollScreen } from '../../../src/components/Screen';
 import { Text } from '../../../src/components/Text';
 import { useHistory, type TourRecord } from '../../../src/state/history';
@@ -52,6 +54,7 @@ export default function Profile() {
         }}
       />
       <ScrollScreen>
+        <RunningTour />
         <View
           style={{
             flexDirection: 'row',
@@ -69,7 +72,18 @@ export default function Profile() {
             </Text>
             <Text variant="footnote">{t('profile.historyLocal')}</Text>
           </View>
-          <Mascot pose="idle" size={64} style={{ marginVertical: -8 }} />
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              backgroundColor: sys.fill,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon name="user" size={24} color={sys.labelSecondary} />
+          </View>
         </View>
 
         <View

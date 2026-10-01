@@ -162,7 +162,7 @@ export default function Roam() {
                   icon="navigation"
                   label={t('roam.startNow')}
                   loading={busy === 'now' || !ready}
-                  disabled={!ready || !position}
+                  disabled={!position}
                   accessibilityHint={t('roam.startNowHint')}
                   onPress={() => void start(best, 'now')}
                 />

@@ -8,6 +8,7 @@ import { getAds } from '../../../src/billing/entitlements';
 import { useBackend } from '../../../src/backend';
 import { AppleSignInButton } from '../../../src/components/AppleSignInButton';
 import { Banner } from '../../../src/components/Banner';
+import { BrandMark } from '../../../src/components/Brand';
 import { Button } from '../../../src/components/Button';
 import { ChoiceRows, ListGroup, ListRow } from '../../../src/components/ListGroup';
 import { ScrollScreen } from '../../../src/components/Screen';
@@ -315,6 +316,9 @@ export default function Settings() {
         </ListGroup>
       ) : null}
 
+      <View style={{ alignItems: 'center', gap: 8 }}>
+        <BrandMark size={28} color={sys.labelTertiary} />
+      </View>
       <Text variant="footnote" align="center">
         {`tuur · ${t('settings.version', { version: Constants.expoConfig?.version ?? '–' })}`}
       </Text>

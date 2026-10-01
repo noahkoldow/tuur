@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ScrollView } from 'react-native';
-import { Alert, Animated, Platform, View } from 'react-native';
+import { Alert, Animated, PixelRatio, Platform, View } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -61,6 +61,9 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const transcriptY = useRef(0);
   const userScrolledAt = useRef(0);
   const [sheet, setSheet] = useState(1);
+  // snap heights follow the text size so the header and controls are never cut off
+  const scale = Math.min(1.5, Math.max(1, PixelRatio.getFontScale()));
+  const snaps = [Math.round(300 * scale), Math.round(560 * scale), 780];
   const [reported, setReported] = useState(false);
   const [offers, setOffers] = useState<PublicOffer[]>([]);
   const sponsored = Boolean(ui.narration?.sponsored);
@@ -304,7 +307,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
         leg={nav.leg}
         user={ui.user}
         {...(ui.user ? {} : { fit: path })}
-        bottomInset={sheet === 0 ? 300 : 560}
+        bottomInset={snaps[Math.min(sheet, 1)]! - 40}
         stops={ui.stops.map((s, i) => ({
           id: s.id,
           location: s.location,
@@ -344,7 +347,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
       </View>
 
       <Sheet
-        snapPoints={[300, 560, 780]}
+        snapPoints={snaps}
         index={sheet}
         onIndexChange={setSheet}
         handleLabel={t('player.transcript')}

@@ -9,6 +9,7 @@ import { captureRef } from 'react-native-view-shot';
 import { CITY_BADGES, decodePolyline, earnedBadges, summarizeWalk, type LatLng } from '@tuur/shared';
 import { palette } from '@tuur/ui';
 import { Button, IconButton, Row } from '../../src/components/Button';
+import { FloatingAction } from '../../src/components/FloatingAction';
 import { Icon } from '../../src/components/Icon';
 import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Mascot } from '../../src/components/Mascot';
@@ -235,19 +236,9 @@ export default function Summary() {
           <ShareCard record={record} line={line} title={title} date={date} facts={facts} />
         </View>
       </ScrollView>
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: 'absolute',
-          left: metrics.margin,
-          right: metrics.margin,
-          bottom: insets.bottom + 12,
-          gap: 4,
-        }}
-      >
+      <FloatingAction>
         <Button label={t('summary.share')} icon="share" loading={sharing} onPress={() => void share()} />
-        <Button variant="ghost" size="regular" label={t('player.backHome')} onPress={() => goHome(router)} />
-      </View>
+      </FloatingAction>
     </View>
   );
 }

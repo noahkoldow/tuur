@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { BackendError, useBackend, type GroupInfo } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
 import { Button } from '../../src/components/Button';
+import { CloseButton } from '../../src/components/HeaderButton';
 import { Mascot } from '../../src/components/Mascot';
 import { Screen } from '../../src/components/Screen';
 import { SpinningMark } from '../../src/components/SpinningMark';
@@ -29,6 +30,7 @@ export default function JoinGroupScreen() {
   const { language, interests, simulator } = useSettings();
   const [state, setState] = useState<State>({ phase: 'working' });
   const [starting, setStarting] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +53,7 @@ export default function JoinGroupScreen() {
     return () => {
       cancelled = true;
     };
-  }, [backend, token]);
+  }, [backend, token, attempt]);
 
   const start = async (group: GroupInfo) => {
     setStarting(true);
@@ -77,7 +79,17 @@ export default function JoinGroupScreen() {
     g.tour.texts[language]?.title ?? Object.values(g.tour.texts)[0]?.title ?? '';
 
   return (
-    <Screen>
+    <Screen style={{ paddingTop: 0 }}>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: '',
+          headerShadowVisible: false,
+          headerRight: () => (
+            <CloseButton label={t('common.close')} onPress={() => router.replace('/home')} />
+          ),
+        }}
+      />
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 18 }}>
         {state.phase === 'working' ? (
           <>
@@ -128,6 +140,16 @@ export default function JoinGroupScreen() {
             icon="play"
             loading={starting}
             onPress={() => void start(state.group)}
+          />
+        ) : null}
+        {state.phase === 'error' && state.reason === 'network' ? (
+          <Button
+            variant="tinted"
+            label={t('common.retry')}
+            onPress={() => {
+              setState({ phase: 'working' });
+              setAttempt((n) => n + 1);
+            }}
           />
         ) : null}
         {state.phase !== 'working' ? (

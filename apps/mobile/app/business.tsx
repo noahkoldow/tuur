@@ -13,6 +13,7 @@ import { BackendError, useBackend } from '../src/backend';
 import { Banner } from '../src/components/Banner';
 import { Button, Row } from '../src/components/Button';
 import { Checkbox } from '../src/components/Checkbox';
+import { FloatingAction } from '../src/components/FloatingAction';
 import { Chip } from '../src/components/Chip';
 import { BackButton } from '../src/components/HeaderButton';
 import { ListGroup, ListRow } from '../src/components/ListGroup';
@@ -102,7 +103,7 @@ export default function Business() {
         <ScrollScreen contentContainerStyle={{ gap: 20, paddingBottom: insets.bottom + 120 }}>
           {step === 'intro' ? (
             <>
-              <Mascot pose="present" size={112} />
+              <Mascot pose="present" size={112} style={{ alignSelf: 'center' }} />
               <Text variant="title1" accessibilityRole="header">
                 {t('business.step1Title')}
               </Text>
@@ -211,16 +212,7 @@ export default function Business() {
           ) : null}
         </ScrollScreen>
 
-        <View
-          pointerEvents="box-none"
-          style={{
-            position: 'absolute',
-            left: metrics.margin,
-            right: metrics.margin,
-            bottom: insets.bottom + 12,
-            gap: 8,
-          }}
-        >
+        <FloatingAction>
           {step === 'intro' || step === 'pricing' ? (
             <Button
               label={t('common.continue')}
@@ -246,7 +238,7 @@ export default function Business() {
               <Button label={t('common.done')} onPress={() => router.back()} />
             </>
           )}
-        </View>
+        </FloatingAction>
       </View>
     </>
   );

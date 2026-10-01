@@ -58,6 +58,7 @@ export default function RootLayout() {
               headerShown: false,
               contentStyle: { backgroundColor: sys.background },
               headerTintColor: sys.accentText as string,
+              headerTitleStyle: { color: sys.label as string },
               // native push with full-width back swipe; sheets slide up and swipe down to dismiss
               animation: 'default',
               fullScreenGestureEnabled: true,
@@ -66,7 +67,11 @@ export default function RootLayout() {
             <Stack.Screen name="index" options={{ animation: 'fade' }} />
             <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
             <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-            <Stack.Screen name="play" options={{ animation: 'slide_from_bottom' }} />
+            {/* minimizes with the chevron, so the gesture is a swipe down, not a back swipe from the edge */}
+            <Stack.Screen
+              name="play"
+              options={{ animation: 'slide_from_bottom', gestureDirection: 'vertical' }}
+            />
             <Stack.Screen
               name="summary/[id]"
               options={{ animation: 'fade_from_bottom', gestureEnabled: false }}

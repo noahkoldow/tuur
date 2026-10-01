@@ -13,6 +13,7 @@ import { AiBadge } from '../../src/components/AiBadge';
 import { Banner } from '../../src/components/Banner';
 import { Button, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
+import { FloatingAction } from '../../src/components/FloatingAction';
 import { SpinningMark } from '../../src/components/SpinningMark';
 import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Screen } from '../../src/components/Screen';
@@ -274,26 +275,14 @@ export default function TourDetail() {
         ) : null}
       </ScrollView>
 
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: 'absolute',
-          left: metrics.margin,
-          right: metrics.margin,
-          bottom: insets.bottom + 12,
-          shadowColor: '#000',
-          shadowOpacity: 0.18,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 4 },
-        }}
-      >
+      <FloatingAction>
         <Button
           label={unlocked ? t('tour.start') : t('paywall.title')}
           icon={unlocked ? 'play' : 'lock'}
           loading={starting}
           onPress={() => void start()}
         />
-      </View>
+      </FloatingAction>
     </View>
   );
 }

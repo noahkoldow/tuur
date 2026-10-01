@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PixelRatio, View, useWindowDimensions } from 'react-native';
+import { Animated, PixelRatio, Platform, View, useWindowDimensions } from 'react-native';
 import { Image as RemoteImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { REGION_FIXTURES, spotScale, tilesAround, type ExploredSpot } from '@tuur/shared';
 import { useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
+import { WordmarkPill } from '../../src/components/Brand';
 import { Button, IconButton } from '../../src/components/Button';
 import { Icon } from '../../src/components/Icon';
 import { INTEREST_ICON } from '../../src/components/icons';
@@ -24,6 +25,8 @@ import { useSettings } from '../../src/state/settings';
 import { metrics, shadow, sys } from '../../src/theme';
 
 const PEEK = 104;
+/** Height of the mini player row that joins the sheet header while a tour runs. */
+const MINI_H = 72;
 
 /**
  * Explore tab (spec 11, D40/D42): the map is the content, everything else floats above it. A nonmodal bottom sheet
@@ -49,8 +52,13 @@ export default function Home() {
   const [selected, setSelected] = useState<ExploredSpot | undefined>();
 
   // the peek height follows the text size so the header is never cut off at large Dynamic Type sizes
-  const peek = Math.round(PEEK * Math.min(2, Math.max(1, PixelRatio.getFontScale()))) + insets.bottom;
-  const medium = Math.max(380, Math.round(screenH * 0.5)) + insets.bottom;
+  // the tab bar sits at the bottom edge: the inset normally includes it, the floor covers setups where it does not
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'ios' ? 83 : 0);
+  const peek =
+    Math.round(PEEK * Math.min(2, Math.max(1, PixelRatio.getFontScale()))) +
+    (session ? MINI_H : 0) +
+    bottomPad;
+  const medium = Math.max(380, Math.round(screenH * 0.5)) + (session ? MINI_H : 0) + bottomPad;
 
   // Explored spots of the surrounding tiles (loaded once the area exists; only tile ids leave the device).
   const tile = area.tile;
@@ -122,6 +130,10 @@ export default function Home() {
         onMapPress={() => (explore ? setSelected(undefined) : goExplore(true))}
       />
 
+      <View style={{ position: 'absolute', top: insets.top + 8, left: metrics.margin }}>
+        <WordmarkPill />
+      </View>
+
       <Sheet
         snapPoints={[peek, medium]}
         index={sheetIndex}
@@ -131,47 +143,50 @@ export default function Home() {
         }}
         handleLabel={explore ? t('home.showModes') : t('home.mapHint')}
         header={
-          <View
-            accessibilityLiveRegion="polite"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 12,
-              paddingHorizontal: metrics.margin,
-              paddingBottom: 12,
-            }}
-          >
-            <Mascot pose={tuuPose} size={48} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text variant="title3" accessibilityRole="header">
-                {t('home.greeting')}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {exploring ? <SpinningMark size={16} label={t('loading.exploring')} /> : null}
-                <Text variant="subheadline" style={{ flexShrink: 1 }}>
-                  {status}
+          <View>
+            {session ? (
+              <View style={{ paddingHorizontal: metrics.margin, paddingBottom: 8 }}>
+                <MiniPlayer
+                  session={session}
+                  title={
+                    session.tour?.texts[lang]?.title ??
+                    (session.mode === 'roam'
+                      ? t('roam.title')
+                      : session.mode === 'fork'
+                        ? t('fork.title')
+                        : t('home.continueTour'))
+                  }
+                  onOpen={() => router.push('/play')}
+                />
+              </View>
+            ) : null}
+            <View
+              accessibilityLiveRegion="polite"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                paddingHorizontal: metrics.margin,
+                paddingBottom: 12,
+              }}
+            >
+              <Mascot pose={tuuPose} size={48} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text variant="title3" accessibilityRole="header">
+                  {t('home.greeting')}
                 </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {exploring ? <SpinningMark size={16} label={t('loading.exploring')} /> : null}
+                  <Text variant="subheadline" style={{ flexShrink: 1 }}>
+                    {status}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
         }
       >
         <View style={{ gap: 20, paddingTop: 4 }}>
-          {session ? (
-            <MiniPlayer
-              session={session}
-              title={
-                session.tour?.texts[lang]?.title ??
-                (session.mode === 'roam'
-                  ? t('roam.title')
-                  : session.mode === 'fork'
-                    ? t('fork.title')
-                    : t('home.continueTour'))
-              }
-              onOpen={() => router.push('/play')}
-            />
-          ) : null}
-
           {area.phase === 'no-location' ? (
             <View style={{ gap: 12 }}>
               <Banner
@@ -207,6 +222,7 @@ export default function Home() {
           </View>
 
           <ListGroup>
+            <ListRow icon="users" label={t('home.spotsTitle')} onPress={() => goExplore(true)} />
             <ListRow
               icon="edit-3"
               label={t('home.plannedTitle')}
@@ -311,7 +327,13 @@ function SpotCard({
           <IconButton icon="x" label={t('paywall.close')} onPress={onClose} size={32} />
         </View>
         <Text variant="footnote">{meta}</Text>
-        <Button label={t('home.spotGo')} icon="navigation" size="regular" onPress={onGo} style={{ marginTop: 4 }} />
+        <Button
+          label={t('home.spotGo')}
+          icon="navigation"
+          size="regular"
+          onPress={onGo}
+          style={{ marginTop: 4 }}
+        />
       </View>
     </Animated.View>
   );

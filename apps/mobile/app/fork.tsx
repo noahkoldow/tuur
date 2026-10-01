@@ -7,7 +7,7 @@ import { useBackend } from '../src/backend';
 import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
 import { Button, Row } from '../src/components/Button';
-import { Chip } from '../src/components/Chip';
+import { Segmented } from '../src/components/Segmented';
 import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
 import { ScrollScreen } from '../src/components/Screen';
@@ -29,7 +29,7 @@ export default function Fork() {
   const router = useRouter();
   const backend = useBackend();
   const { language, interests, simulator } = useSettings();
-  const { position } = usePosition();
+  const { permission, position, request } = usePosition();
   const gate = useSessionGate('fork', position);
   const [minutes, setMinutes] = useState(90);
   const profile: RoutingProfile = 'foot-walking';
@@ -95,7 +95,7 @@ export default function Fork() {
           headerShadowVisible: false,
         }}
       />
-      <ScrollScreen grouped={false}>
+      <ScrollScreen>
         <Text variant="body" color={sys.labelSecondary}>
           {t('fork.intro')}
         </Text>
@@ -103,19 +103,23 @@ export default function Fork() {
           <Text variant="headline" accessibilityRole="header">
             {t('fork.timeTitle')}
           </Text>
-          <Row gap={8} style={{ flexWrap: 'wrap' }}>
-            {TIMES.map((m) => (
-              <Chip
-                key={m}
-                label={formatDurationShort(m, language)}
-                selected={minutes === m}
-                onPress={() => setMinutes(m)}
-              />
-            ))}
-          </Row>
+          <Segmented
+            label={t('fork.timeTitle')}
+            segments={TIMES.map((m) => ({ value: m, label: formatDurationShort(m, language) }))}
+            value={minutes}
+            onChange={setMinutes}
+          />
         </View>
         {startError ? <Banner tone="error" text={t('errors.startFailed')} /> : null}
-        {!ready ? (
+        {!position ? (
+          <View style={{ gap: 12 }}>
+            <Banner
+              icon="map-pin"
+              text={permission === 'denied' ? t('permissions.locationDenied') : t('home.noLocation')}
+            />
+            <Button variant="tinted" label={t('home.enableLocation')} onPress={() => void request()} />
+          </View>
+        ) : !ready ? (
           <View style={{ alignItems: 'center', gap: 10, paddingVertical: 24 }}>
             <Mascot pose="think" size={112} />
             <Row gap={10}>

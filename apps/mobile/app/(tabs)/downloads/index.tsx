@@ -6,6 +6,7 @@ import { formatBytes } from '@tuur/shared';
 import { Button, IconButton } from '../../../src/components/Button';
 import { ListGroup } from '../../../src/components/ListGroup';
 import { Mascot } from '../../../src/components/Mascot';
+import { RunningTour } from '../../../src/components/RunningTour';
 import { ScrollScreen } from '../../../src/components/Screen';
 import { Text } from '../../../src/components/Text';
 import { getDownloadManager, getFileStore, getOfflineLibrary } from '../../../src/offline';
@@ -48,6 +49,7 @@ export default function Downloads() {
   if (items.length === 0)
     return (
       <ScrollScreen contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <RunningTour />
         <Mascot pose="relax" size={128} />
         <Text variant="title3" align="center">
           {t('downloads.empty')}
@@ -60,6 +62,7 @@ export default function Downloads() {
 
   return (
     <ScrollScreen>
+      <RunningTour />
       <ListGroup footer={footer}>
         {items.map((i) => (
           <View key={i.tourId} style={{ padding: metrics.margin, gap: 10 }}>

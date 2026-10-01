@@ -7,6 +7,7 @@ import { BackendError, useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
 import { Button, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
+import { Segmented } from '../../src/components/Segmented';
 import { Mascot } from '../../src/components/Mascot';
 import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
@@ -124,22 +125,17 @@ export default function Onboarding() {
                 style={{ width: 180, height: 64 }}
                 resizeMode="contain"
               />
-              <Text variant="title" align="center">
-                {t('onboarding.welcomeTitle')}
-              </Text>
               <Text variant="body" color={sys.labelSecondary} align="center">
                 {t('onboarding.tuuHello')}
               </Text>
-              <Row gap={8}>
-                {SUPPORTED_UI_LANGUAGES.map((l) => (
-                  <Chip
-                    key={l}
-                    label={LANGUAGE_NAMES[l]}
-                    selected={language === l}
-                    onPress={() => set({ language: l })}
-                  />
-                ))}
-              </Row>
+              <View style={{ alignSelf: 'stretch' }}>
+                <Segmented
+                  label={t('settings.language')}
+                  segments={SUPPORTED_UI_LANGUAGES.map((l) => ({ value: l, label: LANGUAGE_NAMES[l] }))}
+                  value={language}
+                  onChange={(l) => set({ language: l })}
+                />
+              </View>
             </View>
           )}
 

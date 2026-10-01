@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { Wordmark } from '../src/components/Brand';
 import { Checkbox } from '../src/components/Checkbox';
 import { yearlyValue } from '../src/billing/pricing';
 import { useBackend, BackendError } from '../src/backend';
@@ -145,7 +146,6 @@ export default function Paywall() {
         ? 'https://apps.apple.com/account/subscriptions'
         : 'https://play.google.com/store/account/subscriptions',
     );
-  const canBuy = consent;
 
   return (
     <>
@@ -160,6 +160,7 @@ export default function Paywall() {
       />
       <ScrollScreen>
         <View style={{ gap: 8 }}>
+          <Wordmark width={72} />
           <Text variant="title1" accessibilityRole="header">
             {kind === 'tour' ? t('paywall.title') : t('paywall.titleSession')}
           </Text>
@@ -194,7 +195,6 @@ export default function Paywall() {
               key={o.id}
               // one filled primary on the screen: the single credit; everything else is secondary
               variant={o.credits === 5 || total > 0 ? 'secondary' : 'primary'}
-              disabled={!canBuy}
               label={`${o.credits === 5 ? t('paywall.buyCredits5') : t('paywall.buyCredit')} · ${o.priceString}`}
               loading={busy === o.id}
               onPress={() => void buy(o)}
@@ -219,7 +219,6 @@ export default function Paywall() {
                   ) : null}
                   <Button
                     variant="secondary"
-                    disabled={!canBuy}
                     label={t(o.period === 'year' ? 'paywall.subYearly' : 'paywall.subMonthly', {
                       price: o.priceString,
                     })}

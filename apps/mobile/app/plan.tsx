@@ -9,6 +9,9 @@ import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
+import { Segmented } from '../src/components/Segmented';
+import { FloatingAction } from '../src/components/FloatingAction';
+import { ChoiceRows, ListGroup } from '../src/components/ListGroup';
 import { MascotTip } from '../src/components/Mascot';
 import { interestOf } from '../src/components/StopCards';
 import { Text } from '../src/components/Text';
@@ -41,6 +44,7 @@ export default function Plan() {
   const [interests, setInterests] = useState<Interest[]>(savedInterests);
   const [destination, setDestination] = useState<Poi | undefined>();
   const [pickDest, setPickDest] = useState(false);
+  const [interestsOpen, setInterestsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const { pool, ready } = usePoiPool(position, minutes >= 120 ? 2 : 1);
@@ -165,7 +169,7 @@ export default function Plan() {
           borderCurve: 'continuous',
           backgroundColor: sys.background,
         }}
-        contentContainerStyle={{ padding: 20, paddingTop: 24, gap: 24, paddingBottom: insets.bottom + 120 }}
+        contentContainerStyle={{ padding: 20, paddingTop: 24, gap: 24, paddingBottom: insets.bottom + 160 }}
       >
         <View style={{ gap: 4 }}>
           <Text variant="title" accessibilityRole="header">
@@ -176,45 +180,36 @@ export default function Plan() {
           ) : null}
         </View>
         <Section title={t('plan.timeTitle')}>
-          <Row gap={8} style={{ flexWrap: 'wrap' }}>
-            {TIMES.map((m) => (
-              <Chip
-                key={m}
-                label={formatDurationShort(m, language)}
-                selected={minutes === m}
-                onPress={() => setMinutes(m)}
-              />
-            ))}
-          </Row>
+          <Segmented
+            label={t('plan.timeTitle')}
+            segments={TIMES.map((m) => ({ value: m, label: formatDurationShort(m, language) }))}
+            value={minutes}
+            onChange={setMinutes}
+          />
         </Section>
         <Section title={t('plan.modeTitle')}>
-          <Row gap={8}>
-            <Chip
-              label={t('plan.walking')}
-              selected={profile === 'foot-walking'}
-              onPress={() => setProfile('foot-walking')}
-            />
-            <Chip
-              label={t('plan.cycling')}
-              selected={profile === 'cycling-regular'}
-              onPress={() => setProfile('cycling-regular')}
-            />
-          </Row>
+          <Segmented
+            label={t('plan.modeTitle')}
+            segments={[
+              { value: 'foot-walking', label: t('plan.walking') },
+              { value: 'cycling-regular', label: t('plan.cycling') },
+            ]}
+            value={profile}
+            onChange={setProfile}
+          />
         </Section>
-        <Section title={t('settings.interests')}>
-          <Row gap={8} style={{ flexWrap: 'wrap' }}>
-            {INTERESTS.map((i) => (
-              <Chip
-                key={i}
-                label={t(`interests.${i}`)}
-                selected={interests.includes(i)}
-                onPress={() =>
-                  setInterests((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]))
-                }
-              />
-            ))}
-          </Row>
-        </Section>
+        <ListGroup>
+          <ChoiceRows
+            icon="heart"
+            label={t('settings.interests')}
+            multiple
+            choices={INTERESTS.map((i) => ({ id: i, label: t(`interests.${i}`) }))}
+            selected={interests}
+            onChange={(next) => setInterests(next as Interest[])}
+            open={interestsOpen}
+            onToggle={() => setInterestsOpen((o) => !o)}
+          />
+        </ListGroup>
         <Section title={t('plan.destinationTitle')}>
           <Row gap={8} style={{ flexWrap: 'wrap' }}>
             <Chip
@@ -255,21 +250,14 @@ export default function Plan() {
         <Text variant="caption">{t('plan.privacy')}</Text>
       </ScrollView>
 
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: 'absolute',
-          left: metrics.margin,
-          right: metrics.margin,
-          bottom: insets.bottom + 12,
-          shadowColor: '#000',
-          shadowOpacity: 0.18,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 4 },
-        }}
-      >
+      <FloatingAction>
+        {!preview && !busy ? (
+          <Text variant="footnote" align="center" style={{ paddingTop: 6 }}>
+            {t('plan.waitArea')}
+          </Text>
+        ) : null}
         <Button label={cta} icon="play" loading={busy} disabled={!preview} onPress={() => void start()} />
-      </View>
+      </FloatingAction>
     </View>
   );
 }

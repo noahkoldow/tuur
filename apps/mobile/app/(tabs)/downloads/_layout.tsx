@@ -13,6 +13,8 @@ export default function DownloadsLayout() {
         headerLargeTitleShadowVisible: false,
         headerShadowVisible: false,
         headerTintColor: sys.accentText as string,
+        headerTitleStyle: { color: sys.label as string },
+        headerLargeTitleStyle: { color: sys.label as string },
         contentStyle: { backgroundColor: sys.grouped },
       }}
     >

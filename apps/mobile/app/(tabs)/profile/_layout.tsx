@@ -11,6 +11,8 @@ export default function ProfileLayout() {
         headerTransparent: true,
         headerShadowVisible: false,
         headerTintColor: sys.accentText as string,
+        headerTitleStyle: { color: sys.label as string },
+        headerLargeTitleStyle: { color: sys.label as string },
         contentStyle: { backgroundColor: sys.grouped },
       }}
     >

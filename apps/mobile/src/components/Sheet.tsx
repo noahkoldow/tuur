@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import {
+  Animated,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  View,
+  useColorScheme,
+  useWindowDimensions,
+} from 'react-native';
 import { haptics, springs } from '../motion';
 import { radii, sys } from '../theme';
 
@@ -38,6 +46,7 @@ export function Sheet({
   tone = 'grouped',
 }: Props) {
   const background = tone === 'grouped' ? sys.grouped : sys.background;
+  const scheme = useColorScheme();
   const { height: screenH } = useWindowDimensions();
   const snaps = useMemo(() => snapPoints.map((s) => Math.min(s, screenH * 0.92)), [snapPoints, screenH]);
   const max = snaps[snaps.length - 1]!;
@@ -104,9 +113,11 @@ export function Sheet({
           borderTopLeftRadius: 28,
           borderTopRightRadius: 28,
           borderCurve: 'continuous',
+          borderTopWidth: 0.5,
+          borderTopColor: sys.separator,
           transform: [{ translateY: offset }],
           shadowColor: '#000',
-          shadowOpacity: 0.14,
+          shadowOpacity: scheme === 'dark' ? 0.5 : 0.14,
           shadowRadius: 20,
           shadowOffset: { width: 0, height: -4 },
           elevation: 12,
