@@ -1,4 +1,10 @@
-export type ProductId = 'tuur_credit_1' | 'tuur_credit_5' | 'tuur_sub_monthly' | 'tuur_sub_yearly';
+export type ProductId =
+  | 'tuur_credit_1'
+  | 'tuur_credit_5'
+  | 'tuur_sub_monthly'
+  | 'tuur_sub_yearly'
+  /** Extra place in a live group tour (D47), bought from the player, not listed on the paywall. */
+  | 'tuur_group_seat';
 
 /** A purchasable product. Prices always come from the store (localized, incl. tax), never from our code. */
 export interface Offer {

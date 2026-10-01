@@ -49,6 +49,8 @@ export interface GuideUi {
     text: string;
     paragraphs: NarrationResponse['paragraphs'];
     images: NarrationResponse['images'];
+    /** Fact-checked claims of the narration (stop cards "did you know"). */
+    keyFacts?: string[];
     key: string;
     aiGenerated: true;
     sponsored?: boolean;
@@ -69,6 +71,8 @@ export interface RuntimeDeps {
   backend: Backend;
   audio: AudioEngine;
   lang: string;
+  /** Guide voice persona chosen in the settings; the server falls back to its default. */
+  voice?: string;
   interest?: Interest;
   /** What the listener is doing; the server decides access with it (tour id or dynamic mode). */
   access?: AccessInfo;
@@ -87,6 +91,7 @@ const keyOf = (poiId: string, tier: LengthTier) => `${poiId}:${tier}`;
 export class GuideRuntime {
   private state: GuideState = initialGuideState();
   private readonly prefs: GuidePrefs;
+  private access: AccessInfo | undefined;
   private readonly clock: Clock;
   private ui: GuideUi = {
     phase: 'idle',
@@ -114,6 +119,7 @@ export class GuideRuntime {
   private draining = false;
 
   constructor(private readonly deps: RuntimeDeps) {
+    this.access = deps.access;
     this.prefs = { ...DEFAULT_GUIDE_PREFS, ...deps.prefs };
     this.clock = deps.clock ?? realClock;
     deps.audio.setListener({
@@ -278,6 +284,14 @@ export class GuideRuntime {
     this.commandListeners.add(cb);
     return () => void this.commandListeners.delete(cb);
   }
+  /** Access context sent with content requests (a host opening a live group adds the group id). */
+  getAccess(): AccessInfo | undefined {
+    return this.access;
+  }
+  setAccess(access: AccessInfo) {
+    this.access = access;
+  }
+
   addFixListener(cb: (f: Fix) => void) {
     this.fixListeners.add(cb);
     return () => void this.fixListeners.delete(cb);
@@ -344,7 +358,8 @@ export class GuideRuntime {
         poiId,
         lang: this.deps.lang,
         lengthTier: tier,
-        ...(this.deps.access ? { access: this.deps.access } : {}),
+        ...(this.deps.voice ? { voice: this.deps.voice } : {}),
+        ...(this.access ? { access: this.access } : {}),
         ...(this.deps.interest ? { primaryInterest: this.deps.interest } : {}),
       })
       .then((n) => {
@@ -422,6 +437,11 @@ export class GuideRuntime {
         this.setNotice(c.code);
         break;
       case 'visited':
+        // anonymous explorer count; best effort, never allowed to disturb the tour (offline, errors)
+        void Promise.resolve()
+          .then(() => this.deps.backend.recordVisit(c.poiId))
+          .catch(() => undefined);
+        break;
       case 'finish':
         break;
     }
@@ -467,6 +487,7 @@ export class GuideRuntime {
         text: n.text,
         paragraphs: n.paragraphs,
         images: n.images,
+        keyFacts: n.keyFacts,
         key: n.key,
         aiGenerated: true,
         ...(n.sponsored ? { sponsored: true } : {}),
@@ -490,7 +511,8 @@ export class GuideRuntime {
         toPoiId,
         lang: this.deps.lang,
         walkMinutes,
-        ...(this.deps.access ? { access: this.deps.access } : {}),
+        ...(this.deps.voice ? { voice: this.deps.voice } : {}),
+        ...(this.access ? { access: this.access } : {}),
       });
       const url = await this.deps.backend.audioUrl(t.audioPath);
       if (token !== this.playToken || this.disposed) return;

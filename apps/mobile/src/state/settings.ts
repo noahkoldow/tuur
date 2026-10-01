@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { Interest, UiLanguage } from '@tuur/shared';
+import { DEFAULT_VOICE_ID, type Interest, type UiLanguage } from '@tuur/shared';
 import { deviceLanguage, setLanguage } from '../i18n';
 
 export type NarrationFrequency = 'low' | 'normal' | 'high';
@@ -15,6 +15,10 @@ export interface SettingsState {
   /** Consent state (spec 10): analytics is off until explicitly granted; ads consent is handled by Google UMP. */
   analyticsConsent: boolean;
   simulator: boolean;
+  /** Transcript marks the word currently spoken (can be switched off in the settings). */
+  highlightWords: boolean;
+  /** Guide voice persona (see packages/shared narration/voices.ts). */
+  voiceId: string;
   set: (patch: Partial<Omit<SettingsState, 'set' | 'hydrated'>>) => void;
 }
 
@@ -28,6 +32,8 @@ export const useSettings = create<SettingsState>()(
       frequency: 'normal',
       analyticsConsent: false,
       simulator: false,
+      highlightWords: true,
+      voiceId: DEFAULT_VOICE_ID,
       set: (patch) => {
         if (patch.language) void setLanguage(patch.language);
         set(patch);
@@ -43,6 +49,8 @@ export const useSettings = create<SettingsState>()(
         frequency: s.frequency,
         analyticsConsent: s.analyticsConsent,
         simulator: s.simulator,
+        highlightWords: s.highlightWords,
+        voiceId: s.voiceId,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) void setLanguage(state.language);

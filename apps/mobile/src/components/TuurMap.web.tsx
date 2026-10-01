@@ -1,8 +1,10 @@
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
 import { colors } from '@tuur/ui';
-import { HeartPin } from './HeartPin';
-import type { TuurMapProps } from './mapTypes';
+import type { LatLng } from '@tuur/shared';
+import { HeartPin, pinSize } from './HeartPin';
+import { SpotMarker, spotDiameter } from './MapControls';
+import { ROUTE_DONE_COLOR, type TuurMapProps } from './mapTypes';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -13,6 +15,11 @@ export function TuurMap({
   center,
   stops = [],
   route,
+  routeDone,
+  leg,
+  spots = [],
+  onSpotPress,
+  onMapPress,
   fit,
   user,
   bottomInset = 0,
@@ -20,7 +27,15 @@ export function TuurMap({
   testID,
 }: TuurMapProps) {
   const { t } = useTranslation();
-  const pts = [...(fit ?? []), ...stops.map((s) => s.location), ...(route ?? []), ...(user ? [user] : [])];
+  const navigating = Boolean(leg && leg.length > 1);
+  const pts = [
+    ...(fit ?? []),
+    ...stops.map((s) => s.location),
+    ...spots.map((s) => s.location),
+    ...(route ?? []),
+    ...(leg ?? []),
+    ...(user ? [user] : []),
+  ];
   const bounds = (() => {
     const base = pts.length ? pts : [center];
     const lats = base.map((p) => p.lat);
@@ -37,9 +52,43 @@ export function TuurMap({
     x: ((p.lng - bounds.w) / (bounds.e - bounds.w)) * 100,
     y: (1 - (p.lat - bounds.s) / (bounds.n - bounds.s)) * 100,
   });
+  const points = (l: LatLng[]) => l.map((p) => `${project(p).x},${project(p).y}`).join(' ');
+  const stroke = (l: LatLng[] | undefined, color: string, width: number, casing = true) =>
+    l && l.length > 1 ? (
+      <>
+        {casing ? (
+          <Polyline
+            points={points(l)}
+            fill="none"
+            stroke="#FFFFFF"
+            strokeWidth={width * 1.9}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+        <Polyline
+          points={points(l)}
+          fill="none"
+          stroke={color}
+          strokeWidth={width}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </>
+    ) : null;
   return (
-    <View testID={testID} style={{ flex: 1, backgroundColor: colors.surface.subtle, overflow: 'hidden' }}>
-      <View style={{ position: 'absolute', left: 24, right: 24, top: 96, bottom: 24 + bottomInset }}>
+    <Pressable
+      testID={testID}
+      accessible={false}
+      {...(onMapPress ? { onPress: onMapPress } : {})}
+      style={{ flex: 1, backgroundColor: colors.surface.subtle, overflow: 'hidden' }}
+    >
+      <View
+        pointerEvents="box-none"
+        style={{ position: 'absolute', left: 24, right: 24, top: 96, bottom: 24 + bottomInset }}
+      >
         <Svg
           width="100%"
           height="100%"
@@ -47,49 +96,56 @@ export function TuurMap({
           preserveAspectRatio="none"
           style={{ position: 'absolute' }}
         >
-          {route && route.length > 1 ? (
-            <>
-              <Polyline
-                points={route.map((p) => `${project(p).x},${project(p).y}`).join(' ')}
-                fill="none"
-                stroke="#FFFFFF"
-                strokeWidth={2.6}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
-              <Polyline
-                points={route.map((p) => `${project(p).x},${project(p).y}`).join(' ')}
-                fill="none"
-                stroke={colors.brand.red}
-                strokeWidth={1.4}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            </>
-          ) : null}
+          {stroke(routeDone, ROUTE_DONE_COLOR, 1.4, false)}
+          {stroke(route, navigating ? 'rgba(237,5,22,0.45)' : colors.brand.red, 1.4)}
+          {stroke(leg, colors.brand.red, 2.4)}
         </Svg>
-        {stops.map((s) => {
+        {spots.map((s) => {
           const { x, y } = project(s.location);
+          const d = Math.max(44, spotDiameter(s.scale) + 8);
           return (
-            <View
-              key={s.id}
-              onTouchEnd={() => onStopPress?.(s.id)}
+            <Pressable
+              key={`spot-${s.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={s.name}
+              onPress={() => onSpotPress?.(s.id)}
               style={{
                 position: 'absolute',
                 left: `${x}%`,
                 top: `${y}%`,
-                transform: [{ translateX: -22 }, { translateY: -40 }],
+                transform: [{ translateX: -d / 2 }, { translateY: -d / 2 }],
+              }}
+            >
+              <SpotMarker spot={s} />
+            </Pressable>
+          );
+        })}
+        {stops.map((s) => {
+          const { x, y } = project(s.location);
+          const size = pinSize(s.state);
+          return (
+            <Pressable
+              key={s.id}
+              onPress={() => onStopPress?.(s.id)}
+              style={{
+                position: 'absolute',
+                left: `${x}%`,
+                top: `${y}%`,
+                transform: [
+                  { translateX: -Math.max(44, size * 1.2) / 2 },
+                  { translateY: -Math.max(44, size * 1.3) },
+                ],
               }}
             >
               <HeartPin
                 number={s.number}
                 state={s.state}
+                size={size}
+                {...(s.interest ? { interest: s.interest } : {})}
                 partner={Boolean(s.partner)}
                 partnerLabel={t('common.partner')}
               />
-            </View>
+            </Pressable>
           );
         })}
         {user ? (
@@ -114,6 +170,6 @@ export function TuurMap({
           </View>
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }

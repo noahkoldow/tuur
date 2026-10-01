@@ -61,14 +61,14 @@ export default function Paywall() {
 
   useEffect(() => {
     if (!waitingReward) return;
-    if (ent.wallet.rewardBalance > 0) return setWaitingReward(false);
+    if (unlocked) return setWaitingReward(false);
     // the server credits the reward after verification; do not spin forever if it never arrives
     const timer = setTimeout(() => {
       setWaitingReward(false);
       setMessage({ text: t('paywall.failed'), tone: 'warning' });
     }, 90_000);
     return () => clearTimeout(timer);
-  }, [waitingReward, ent.wallet.rewardBalance, t]);
+  }, [waitingReward, unlocked, t]);
 
   const run = async (id: string, fn: () => Promise<void>) => {
     setBusy(id);
@@ -110,7 +110,8 @@ export default function Paywall() {
       const uid = (await backend.auth.ensureSignedIn()).uid;
       let nonce: string;
       try {
-        nonce = (await backend.createRewardNonce()).nonce;
+        if (!tourId) throw new Error('Tour is missing');
+        nonce = (await backend.createRewardNonce({ tourId })).nonce;
       } catch (e) {
         if (e instanceof BackendError && e.code === 'rate_limited') {
           setMessage({ text: t('paywall.adLimit'), tone: 'warning' });

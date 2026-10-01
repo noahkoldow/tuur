@@ -4,6 +4,7 @@ import i18n from '../i18n';
 import { recordError } from '../telemetry';
 import { Banner } from './Banner';
 import { Button } from './Button';
+import { Mascot } from './Mascot';
 import { Text } from './Text';
 
 /** Last line of defence: a render error shows a calm message with a retry instead of a white screen. */
@@ -22,6 +23,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
     if (!this.state.failed) return this.props.children;
     return (
       <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 16, backgroundColor: '#FFFFFF' }}>
+        <Mascot pose="think" size={120} style={{ alignSelf: 'center' }} />
         <Text variant="title" accessibilityRole="header">
           tuur
         </Text>

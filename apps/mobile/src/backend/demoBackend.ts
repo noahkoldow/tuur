@@ -18,6 +18,11 @@ import {
   geohashCenter,
   geohashNeighbors,
   tilesAround,
+  GROUP_BASE_SIZE,
+  GROUP_MAX_SIZE,
+  GROUP_TTL_MS,
+  toExploredSpots,
+  type PoiStats,
   fitToBudget,
   haversineMatrix,
   type ComposeRouteRequest,
@@ -43,8 +48,10 @@ import {
   type AreaInfo,
   type AuthApi,
   type Backend,
+  type GroupInfo,
   type UserInfo,
 } from './types';
+import { previewWalkingPath } from './previewRouting';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -114,6 +121,8 @@ interface DemoTourInput {
   profile?: Tour['profile'];
   lang: string;
   now: number;
+  /** Street geometry (preview routing); straight lines between stops otherwise. */
+  path?: { lat: number; lng: number }[];
 }
 
 /** Builds a Tour document for the demo backend with fact-free fallback texts. */
@@ -155,7 +164,9 @@ function makeDemoTour(i: DemoTourInput): Tour {
     profile: i.profile ?? 'foot-walking',
     themes: themesOf(i.stops),
     stops,
-    path: encodePolyline(i.stops.map((p) => [p.location.lat, p.location.lng] as [number, number])),
+    path: encodePolyline(
+      (i.path ?? i.stops.map((p) => p.location)).map((p) => [p.lat, p.lng] as [number, number]),
+    ),
     durationMinutes: i.totalMinutes,
     walkMinutes: i.walkMinutes,
     distanceMeters: i.distanceMeters,
@@ -188,6 +199,8 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
   const ents: Entitlement[] = [];
   let wallet: Wallet = { balance: 0, rewardBalance: 0 };
   const invites = new Map<string, { tourId: string; expiresAt: number }>();
+  const groupsDemo = new Map<string, GroupInfo>();
+  const groupListeners = new Map<string, Set<(g: GroupInfo | null) => void>>();
   /** Mirrors the server-side check so the demo shows the same locked/unlocked behavior. */
   const gate = (access: { tourId?: string; mode?: 'tour' | 'planned' | 'fork' | 'roam' } | undefined) => {
     if (!opts.enforceAccess) return;
@@ -257,6 +270,11 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       setUser({ uid: 'demo-user', isAnonymous: false, email: 'demo@apple.example' })!,
     signInWithGoogle: async () =>
       setUser({ uid: 'demo-user', isAnonymous: false, email: 'demo@google.example' })!,
+    requestPhoneVerification: async () => 'demo-verification',
+    confirmPhoneVerification: async (_verificationId, _code) => {
+      const current = user.current ?? { uid: 'demo-user', isAnonymous: true };
+      return setUser({ ...current, isAnonymous: false, phoneNumber: '+15555550100' })!;
+    },
     signOut: async () => void setUser(null),
   };
 
@@ -349,6 +367,42 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
       return [...regions.values()].filter((r) => keys.has(r.key)).flatMap((r) => r.pois);
     },
+    async getExploredSpots(tiles) {
+      // Demo: deterministic, made-up popularity so the explore map can be tried; production reads `poiStats`.
+      const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
+      const pois = [...regions.values()].filter((r) => keys.has(r.key)).flatMap((r) => r.pois);
+      const now = Date.now();
+      const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+      const stats: PoiStats[] = pois
+        .filter((p) => hash(p.id) % 4 !== 0)
+        .map((p) => {
+          const h = hash(p.id);
+          const explorers = 2 + (h % 9) + Math.round(p.score / 6);
+          return {
+            poiId: p.id,
+            tile: p.tile,
+            explorers,
+            heat: explorers * (h % 3 === 0 ? 1.6 : 0.4),
+            lastAt: now,
+          };
+        });
+      const info = new Map(
+        pois.map((p) => {
+          const interest = p.primaryInterest ?? p.interests[0];
+          const image = p.imageRefs[0];
+          return [
+            p.id,
+            {
+              name: p.name,
+              location: p.location,
+              ...(interest ? { interest } : {}),
+              ...(image ? { image } : {}),
+            },
+          ] as const;
+        }),
+      );
+      return toExploredSpots(stats, info, now);
+    },
     async composePlannedRoute(req: ComposeRouteRequest) {
       await sleep(latency);
       const pois = req.stops.map((id) => poiIndex.get(id)).filter((p): p is Poi => Boolean(p));
@@ -370,6 +424,11 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         prev = n;
       }
       const region = [...regions.values()].find((r) => r.pois.some((p) => p.id === pois[0]!.id));
+      const streets = await previewWalkingPath([
+        ...(req.start ? [req.start] : []),
+        ...kept.map((p) => p.location),
+        ...(req.roundTrip && req.start ? [req.start] : req.end ? [req.end] : []),
+      ]);
       const tour = makeDemoTour({
         id: `planned_${Date.now().toString(36)}`,
         placeId: region?.placeId ?? 'DEMO_planned',
@@ -386,6 +445,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         profile: req.profile,
         lang: req.lang,
         now: Date.now(),
+        ...(streets ? { path: streets } : {}),
       });
       tours.set(tour.id, tour);
       return { tour, dropped: fit.dropped };
@@ -457,6 +517,20 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       entListeners.add(cb);
       cb({ entitlements: [...ents], wallet: { ...wallet } });
       return () => void entListeners.delete(cb);
+    },
+    async claimTourStart(tourId, _sessionId, mode) {
+      await sleep(latency);
+      const tour = tours.get(tourId);
+      const entitled = ents.some(
+        (e) => e.type === 'subscription' || (e.type === 'tour' && e.tourId === tourId),
+      );
+      const hasSession = tour
+        ? ents.some((e) => e.type === 'session' && e.placeId === tour.placeId && e.expiresAt > Date.now())
+        : false;
+      if (!tour && mode !== 'planned') throw new BackendError('not_found', 'Tour not found');
+      if (opts.enforceAccess && !entitled && !(mode === 'planned' && hasSession) && !tour?.free)
+        throw new BackendError('locked', 'Tour is locked');
+      return { counted: false, remaining: null };
     },
     async spendCredit(req) {
       await sleep(latency);
@@ -550,6 +624,65 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         validUntil: Date.now() + 7 * 86_400_000,
       }));
     },
+    async submitPartnerApplication() {
+      await sleep(latency);
+      return { id: `demo-application-${Date.now()}` };
+    },
+    // Demo groups live in memory; joining a link adds a simulated friend so the flow can be tried on one device.
+    async createGroup(req) {
+      await sleep(latency);
+      const tour = tours.get(req.tourId);
+      if (!tour) throw new BackendError('not_found', 'Tour not found');
+      const id = `demogroup${Date.now().toString(36)}`;
+      const g: GroupInfo = {
+        id,
+        tour,
+        mode: req.mode,
+        hostUid: user.current?.uid ?? 'demo',
+        members: 1,
+        capacity: GROUP_BASE_SIZE,
+        status: 'live',
+        expiresAt: Date.now() + GROUP_TTL_MS,
+      };
+      groupsDemo.set(id, g);
+      return { token: `${id}.${'d'.repeat(43)}`, group: g };
+    },
+    async joinGroup(token) {
+      await sleep(latency);
+      const g = groupsDemo.get(token.split('.')[0] ?? '');
+      if (!g || g.status !== 'live') throw new BackendError('not_found', 'Invite not valid');
+      if (g.members >= g.capacity) throw new BackendError('locked', 'Group is full', undefined, 'full');
+      const next = { ...g, members: g.members + 1 };
+      groupsDemo.set(g.id, next);
+      groupListeners.get(g.id)?.forEach((l) => l(next));
+      return { group: next };
+    },
+    async addGroupSeat(groupId) {
+      await sleep(latency);
+      const g = groupsDemo.get(groupId);
+      if (!g) throw new BackendError('not_found', 'Group not found');
+      const next = { ...g, capacity: Math.min(GROUP_MAX_SIZE, g.capacity + 1) };
+      groupsDemo.set(groupId, next);
+      groupListeners.get(groupId)?.forEach((l) => l(next));
+      return { capacity: next.capacity, seatBalance: 0 };
+    },
+    async leaveGroup(groupId) {
+      const g = groupsDemo.get(groupId);
+      if (!g) return;
+      const next = { ...g, status: 'ended' as const };
+      groupsDemo.set(groupId, next);
+      groupListeners.get(groupId)?.forEach((l) => l(next));
+    },
+    watchGroup(groupId, cb) {
+      const set = groupListeners.get(groupId) ?? new Set();
+      set.add(cb);
+      groupListeners.set(groupId, set);
+      cb(groupsDemo.get(groupId) ?? null);
+      return () => void set.delete(cb);
+    },
+    async recordVisit() {
+      // demo: popularity is synthetic (see getExploredSpots)
+    },
     async recordPartnerEvent() {
       await sleep(0);
     },
@@ -588,9 +721,28 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         emitEnts();
       },
     },
-    async createRewardNonce() {
+    async createRewardNonce(request) {
       await sleep(latency);
-      return { nonce: `demo-${Math.random().toString(36).slice(2)}`, remainingToday: 5 };
+      const tour = tours.get(request.tourId);
+      if (!user.current?.phoneNumber)
+        throw new BackendError('unauthenticated', 'Phone verification required');
+      if (!tour?.free) throw new BackendError('not_found', 'Free tour not available');
+      if (ents.some((e) => e.type === 'tour' && e.source === 'free' && e.placeId === tour.placeId))
+        throw new BackendError('locked', 'Free tour already used in this city');
+      ents.push({
+        type: 'tour',
+        tourId: tour.id,
+        placeId: tour.placeId,
+        source: 'free',
+        grantedAt: Date.now(),
+        expiresAt: null,
+      });
+      emitEnts();
+      return {
+        nonce: `demo-${Math.random().toString(36).slice(2)}`,
+        remainingToday: 0,
+        purpose: 'free_tour',
+      };
     },
   };
   void geohashCenter;

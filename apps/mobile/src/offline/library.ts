@@ -23,6 +23,8 @@ export interface DownloadInfo {
 export class OfflineLibrary {
   private manifests = new Map<string, OfflineManifest>();
   private listeners = new Set<() => void>();
+  /** Stable snapshot for useSyncExternalStore (a fresh array per call would re-render forever). */
+  private snapshot: DownloadInfo[] | undefined;
   constructor(private readonly files: FileStore) {}
 
   subscribe = (cb: () => void) => {
@@ -30,6 +32,7 @@ export class OfflineLibrary {
     return () => void this.listeners.delete(cb);
   };
   private emit() {
+    this.snapshot = undefined;
     this.listeners.forEach((l) => l());
   }
 
@@ -61,14 +64,14 @@ export class OfflineLibrary {
   }
 
   list(): DownloadInfo[] {
-    return [...this.manifests.values()].map((m) => ({
+    return (this.snapshot ??= [...this.manifests.values()].map((m) => ({
       tourId: m.tourId,
       title: m.tour.texts[m.lang]?.title ?? Object.values(m.tour.texts)[0]?.title ?? m.tour.template,
       lang: m.lang,
       bytes: m.bytes,
       complete: m.complete,
       createdAt: m.createdAt,
-    }));
+    })));
   }
 
   tours(placeId?: string): Tour[] {

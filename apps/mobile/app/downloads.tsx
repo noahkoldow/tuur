@@ -3,7 +3,7 @@ import { Alert, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { formatBytes } from '@tuur/shared';
-import { Banner } from '../src/components/Banner';
+import { Mascot } from '../src/components/Mascot';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Screen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
@@ -53,7 +53,17 @@ export default function Downloads() {
             <Text variant="caption">{t('downloads.free', { size: formatBytes(free) })}</Text>
           ) : null}
         </Row>
-        {items.length === 0 ? <Banner text={t('downloads.empty')} icon="download" /> : null}
+        {items.length === 0 ? (
+          <View style={{ alignItems: 'center', gap: 12, paddingVertical: 32 }}>
+            <Mascot pose="relax" size={128} />
+            <Text variant="heading" align="center">
+              {t('downloads.empty')}
+            </Text>
+            <Text variant="bodySecondary" align="center">
+              {t('downloads.emptyHint')}
+            </Text>
+          </View>
+        ) : null}
         {items.map((i) => (
           <View
             key={i.tourId}

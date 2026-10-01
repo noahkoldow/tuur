@@ -163,6 +163,8 @@ interface RoamOpts {
   pool: PoiPool;
   interests: Interest[];
   frequency: NarrationFrequency;
+  /** First stop chosen at the start ("just go" / picked start): kept as target until it is reached. */
+  pinnedTargetId?: string;
   clock?: Clock;
 }
 
@@ -225,6 +227,7 @@ export class RoamController {
     // 2) pick the next target when idle (after cooldown) or when the current one was left behind
     const cfg = ROAM_PROFILES[this.o.frequency];
     const target = st.route[st.index];
+    if (target && target.id === this.o.pinnedTargetId && !st.reached[target.id]) return;
     const idle = st.awaitingRoute || !target || st.route.length === 0;
     const cooled = this.clock.now() - this.lastNarrated >= cfg.cooldownSec * 1000;
     const busy = Boolean(st.playback) || Boolean(st.pending);

@@ -3,6 +3,10 @@
 export const config = {
   /** `demo` runs entirely in memory (fixtures + shared logic): web preview, tests, no Firebase needed. */
   backend: (process.env.EXPO_PUBLIC_BACKEND ?? 'firebase') as 'firebase' | 'demo',
+  /** `EXPO_PUBLIC_PAYWALL=off` unlocks every tour and mode (UI previews only; the server still enforces access). */
+  paywall: process.env.EXPO_PUBLIC_PAYWALL !== 'off',
+  /** Preview only: `osm` fetches real walking geometry for demo routes (see backend/previewRouting.ts). */
+  previewRouting: process.env.EXPO_PUBLIC_PREVIEW_ROUTING,
   useEmulators: process.env.EXPO_PUBLIC_USE_EMULATORS === 'true',
   emulatorHost: process.env.EXPO_PUBLIC_EMULATOR_HOST ?? 'localhost',
   functionsRegion: process.env.EXPO_PUBLIC_FUNCTIONS_REGION ?? 'europe-west1',

@@ -5,5 +5,7 @@ import type { Backend } from './types';
 
 /** Native: Firebase (or emulators), or the in-memory demo backend when EXPO_PUBLIC_BACKEND=demo. */
 export function createBackend(): Backend {
-  return config.backend === 'demo' ? createDemoBackend({ enforceAccess: true }) : createFirebaseBackend();
+  return config.backend === 'demo'
+    ? createDemoBackend({ enforceAccess: config.paywall })
+    : createFirebaseBackend();
 }

@@ -57,9 +57,23 @@ export default function RootLayout() {
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: colors.surface.base },
-              animation: 'fade',
+              // native push with full-width back swipe; root screens cross-fade, sheets slide up
+              animation: 'default',
+              fullScreenGestureEnabled: true,
             }}
-          />
+          >
+            <Stack.Screen name="index" options={{ animation: 'fade' }} />
+            <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
+            <Stack.Screen name="home" options={{ animation: 'fade' }} />
+            <Stack.Screen name="play" options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen
+              name="summary/[id]"
+              options={{ animation: 'fade_from_bottom', gestureEnabled: false }}
+            />
+            <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="redeem" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="join/[token]" options={{ presentation: 'modal' }} />
+          </Stack>
         </BackendProvider>
       </SafeAreaProvider>
     </ErrorBoundary>

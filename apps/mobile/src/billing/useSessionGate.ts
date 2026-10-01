@@ -9,7 +9,7 @@ export function useSessionGate(
 ) {
   const router = useRouter();
   const ent = useEntitlementStore();
-  const { placeId } = useArea(position);
+  const { placeId } = useArea(position, { tours: false });
   const unlocked = canUseSession(ent, mode, placeId);
   return {
     unlocked,

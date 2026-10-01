@@ -15,6 +15,7 @@ export function withOfflineFirst(base: Backend, library: OfflineLibrary, files: 
     ensureArea: (tile, rings) => base.ensureArea(tile, rings),
     watchArea: (tile, cb) => base.watchArea(tile, cb),
     getPois: (tiles) => base.getPois(tiles),
+    getExploredSpots: (tiles) => base.getExploredSpots(tiles),
     composePlannedRoute: (req) => base.composePlannedRoute(req),
     getTeaser: (req) => base.getTeaser(req),
     reportNarration: (i) => base.reportNarration(i),

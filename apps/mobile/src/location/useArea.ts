@@ -21,9 +21,13 @@ export interface AreaState {
 
 /**
  * Drives the home screen (spec 4.1): position -> tile (only the geohash leaves the device) -> ensureArea ->
- * progressive loading while the area is explored -> auto tours for the place.
+ * progressive loading while the area is explored -> optionally the auto tours for the place (`tours: false` skips
+ * their generation, e.g. for the individual modes).
  */
-export function useArea(position: { lat: number; lng: number } | null): AreaState {
+export function useArea(
+  position: { lat: number; lng: number } | null,
+  { tours: withTours = true }: { tours?: boolean } = {},
+): AreaState {
   const backend = useBackend();
   const lang = useSettings((s) => s.language);
   const lat = position?.lat;
@@ -35,7 +39,9 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
   );
   const [area, setArea] = useState<AreaInfo | null>(null);
   const [tours, setTours] = useState<Tour[]>([]);
-  const [tourCall, setTourCall] = useState<GenerateToursResult['status'] | 'idle' | 'error'>('idle');
+  const [tourCall, setTourCall] = useState<GenerateToursResult['status'] | 'idle' | 'error' | 'skipped'>(
+    withTours ? 'idle' : 'skipped',
+  );
   const [error, setError] = useState<string | undefined>();
   const [errorCode, setErrorCode] = useState<'network' | 'generic' | undefined>();
   const [ensureFailed, setEnsureFailed] = useState(false);
@@ -46,7 +52,7 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
     if (!tile) return;
     setArea(null);
     setTours([]);
-    setTourCall('idle');
+    setTourCall(withTours ? 'idle' : 'skipped');
     setError(undefined);
     setErrorCode(undefined);
     setEnsureFailed(false);
@@ -68,13 +74,13 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
       cancelled = true;
       unsub();
     };
-  }, [backend, tile, nonce]);
+  }, [backend, tile, nonce, withTours]);
 
   const placeId = area?.placeId;
   const ready = area?.status === 'ready' || area?.status === 'low_content';
 
   useEffect(() => {
-    if (!tile || !ready || !placeId) return;
+    if (!withTours || !tile || !ready || !placeId) return;
     let cancelled = false;
     const unsub = backend.watchTours(placeId, (t) => !cancelled && setTours(t));
     setTourCall('generating');
@@ -92,7 +98,7 @@ export function useArea(position: { lat: number; lng: number } | null): AreaStat
       cancelled = true;
       unsub();
     };
-  }, [backend, tile, ready, placeId, lang, nonce]);
+  }, [backend, tile, ready, placeId, lang, nonce, withTours]);
 
   const phase = deriveAreaPhase({ position, area, tourCall, toursCount: tours.length, ensureFailed });
 

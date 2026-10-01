@@ -3,6 +3,7 @@ import { createFileStore } from './fileStoreFactory';
 import { OfflineLibrary } from './library';
 import { DownloadManager } from './manager';
 import { createMapPackManager } from './mapPacksFactory';
+import { useSettings } from '../state/settings';
 import type { FileStore } from './fileStore';
 
 let files: FileStore | undefined;
@@ -26,6 +27,7 @@ export function getDownloadManager(): DownloadManager {
     files: getFileStore(),
     maps: createMapPackManager(),
     library: getOfflineLibrary(),
+    voice: () => useSettings.getState().voiceId,
   });
   return manager;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { haptics, springs } from '../motion';
 import { colors, radii } from '../theme';
 import { shadow } from '../theme';
 
@@ -13,6 +14,10 @@ interface Props {
   handleLabel: string;
   /** Header rendered inside the draggable area (always visible). */
   header?: React.ReactNode;
+  /** The content scroll view (e.g. to follow the transcript). */
+  scrollRef?: React.RefObject<ScrollView | null>;
+  /** The listener scrolled the content themselves. */
+  onUserScroll?: () => void;
 }
 
 /**
@@ -27,6 +32,8 @@ export function Sheet({
   children,
   handleLabel,
   header,
+  scrollRef,
+  onUserScroll,
 }: Props) {
   const { height: screenH } = useWindowDimensions();
   const snaps = useMemo(() => snapPoints.map((s) => Math.min(s, screenH * 0.92)), [snapPoints, screenH]);
@@ -35,14 +42,17 @@ export function Sheet({
   const offset = useRef(new Animated.Value(max - snaps[index ?? initialIndex]!)).current;
   const startOffset = useRef(0);
 
-  const snapTo = (i: number) => {
-    setCurrent(i);
+  const snapTo = (i: number, velocity = 0) => {
+    setCurrent((cur) => {
+      if (cur !== i) haptics.select();
+      return i;
+    });
     onIndexChange?.(i);
     Animated.spring(offset, {
       toValue: max - snaps[i]!,
+      velocity,
       useNativeDriver: true,
-      bounciness: 3,
-      speed: 16,
+      ...springs.sheet,
     }).start();
   };
   useEffect(() => {
@@ -57,16 +67,21 @@ export function Sheet({
         onPanResponderGrant: () => {
           offset.stopAnimation((v) => (startOffset.current = v));
         },
-        onPanResponderMove: (_, g) =>
-          offset.setValue(Math.max(0, Math.min(max - snaps[0]!, startOffset.current + g.dy))),
+        onPanResponderMove: (_, g) => {
+          // rubber band beyond the outer snap points instead of a hard stop
+          const raw = startOffset.current + g.dy;
+          const lo = 0;
+          const hi = max - snaps[0]!;
+          offset.setValue(raw < lo ? lo + (raw - lo) * 0.25 : raw > hi ? hi + (raw - hi) * 0.25 : raw);
+        },
         onPanResponderRelease: (_, g) => {
-          const projected = startOffset.current + g.dy + g.vy * 120;
+          const projected = startOffset.current + g.dy + g.vy * 220;
           const visible = max - projected;
           let best = 0;
           snaps.forEach((s, i) => {
             if (Math.abs(s - visible) < Math.abs(snaps[best]! - visible)) best = i;
           });
-          snapTo(best);
+          snapTo(best, g.vy);
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,6 +126,8 @@ export function Sheet({
         {header}
       </View>
       <ScrollView
+        ref={scrollRef}
+        onScrollBeginDrag={onUserScroll}
         // always scrollable: content below the header must stay reachable for screen-reader and switch users
         scrollEnabled
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}

@@ -26,4 +26,10 @@ describe('deriveAreaPhase', () => {
       'failed',
     );
   });
+  it('skips the tour phases when auto tours are not requested', () => {
+    const skip = { ...base, tourCall: 'skipped' as const };
+    expect(deriveAreaPhase({ ...skip, area: { status: 'ingesting', poiCount: 0 } })).toBe('exploring');
+    expect(deriveAreaPhase({ ...skip, area: { status: 'ready', poiCount: 9 } })).toBe('ready');
+    expect(deriveAreaPhase({ ...skip, area: { status: 'low_content', poiCount: 2 } })).toBe('low_content');
+  });
 });

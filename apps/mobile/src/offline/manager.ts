@@ -39,6 +39,8 @@ export interface DownloadDeps {
   library: OfflineLibrary;
   now?: () => number;
   concurrency?: number;
+  /** Guide voice persona for downloaded audio (settings). */
+  voice?: () => string | undefined;
 }
 
 const hash = (s: string) => {
@@ -183,6 +185,7 @@ export class DownloadManager {
         lang,
         lengthTier: tier,
         download: true,
+        ...(this.d.voice?.() ? { voice: this.d.voice()! } : {}),
         access: { tourId: tour.id, mode: 'tour' },
       });
       const audioFile = `downloads/${tour.id}/audio/${hash(n.key)}.mp3`;
@@ -211,6 +214,7 @@ export class DownloadManager {
         toPoiId: item.toPoiId!,
         lang,
         walkMinutes: Math.max(1, Math.round(to.walkMinutesFromPrev)),
+        ...(this.d.voice?.() ? { voice: this.d.voice()! } : {}),
         access: { tourId: tour.id, mode: 'tour' },
       });
       const audioFile = `downloads/${tour.id}/audio/${hash(t.key)}.mp3`;

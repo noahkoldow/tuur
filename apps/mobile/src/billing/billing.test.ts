@@ -41,6 +41,10 @@ const narration = (backend: Backend, tourId: string, poiId: string) =>
 describe('gating and unlocking (demo backend mirrors the server rules)', () => {
   it('serves the free tour, locks the paid one and unlocks it with a credit', async () => {
     const { backend, free, paid, state } = await setup();
+    // the free tour of a city is claimed once (verified phone + rewarded ad, server rule since the release work)
+    await expect(narration(backend, free.id, free.stops[0]!.poiId)).rejects.toMatchObject({ code: 'locked' });
+    await backend.auth.confirmPhoneVerification(await backend.auth.requestPhoneVerification('+49'), '000000');
+    await backend.createRewardNonce({ tourId: free.id });
     await expect(narration(backend, free.id, free.stops[0]!.poiId)).resolves.toBeTruthy();
     const err = await narration(backend, paid.id, paid.stops[0]!.poiId).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BackendError);

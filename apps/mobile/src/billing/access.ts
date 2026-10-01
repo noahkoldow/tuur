@@ -1,9 +1,11 @@
 import { decideAccess, isSubscriber, type Entitlement } from '@tuur/shared';
+import { config } from '../config';
 
 type Ents = { entitlements: Entitlement[] };
 
 /** Whether a standard tour may be started (free tour, bought/redeemed tour or subscription). */
 export function canStartTour(s: Ents, tourId: string, free: boolean, now = Date.now()) {
+  if (!config.paywall) return true;
   return decideAccess(s.entitlements, { tourId, tourFree: free, mode: 'tour' }, now).allowed;
 }
 
@@ -14,6 +16,7 @@ export function canUseSession(
   placeId: string | undefined,
   now = Date.now(),
 ) {
+  if (!config.paywall) return true;
   return decideAccess(s.entitlements, { mode, ...(placeId ? { placeId } : {}) }, now).allowed;
 }
 

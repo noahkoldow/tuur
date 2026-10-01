@@ -1,4 +1,5 @@
-import { Pressable } from 'react-native';
+import { haptics } from '../motion';
+import { PressableScale } from './PressableScale';
 import { colors, fonts, radii } from '../theme';
 import { Text } from './Text';
 
@@ -13,11 +14,18 @@ export function Chip({
   onPress?: () => void;
 }) {
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityState={{ selected: Boolean(selected) }}
       accessibilityLabel={label}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              haptics.select();
+              onPress();
+            }
+          : undefined
+      }
       style={{
         minHeight: 44,
         paddingHorizontal: 16,
@@ -37,6 +45,6 @@ export function Chip({
       >
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }

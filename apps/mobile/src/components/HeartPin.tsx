@@ -1,12 +1,17 @@
-import Svg, { G, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import type { Interest } from '@tuur/shared';
 import { MARK_ASPECT_RATIO, MARK_PATH, MARK_VIEWBOX, colors, fonts } from '@tuur/ui';
+import { INTEREST_ICON } from './icons';
 import { Text } from './Text';
 
 export type PinState = 'current' | 'visited' | 'upcoming';
 
 interface Props {
   number?: number;
+  /** Category glyph inside the heart, so the kind of stop is visible at a glance. */
+  interest?: Interest;
   state?: PinState;
   size?: number;
   /** Partner stops use the same shape with a clearly separate "Partner" badge (spec 2.2/7.3). */
@@ -14,16 +19,18 @@ interface Props {
   partnerLabel?: string;
 }
 
-const [VB_W, VB_H] = MARK_VIEWBOX.split(' ').slice(2).map(Number) as [number, number];
+/** Map pin widths: compact so dense tours stay readable; the current stop is slightly larger. */
+export const pinSize = (state: PinState = 'upcoming') => (state === 'current' ? 40 : 30);
 
 /**
- * Map marker in the silhouette of the brand mark: current = red fill with white number, visited = grey,
- * upcoming = red outline. The tip of the heart marks the coordinate (anchor bottom).
+ * Map marker in the silhouette of the brand mark: current = red fill, visited = grey, upcoming = red outline. The
+ * category glyph sits in the heart, the stop number in a small badge; the tip marks the coordinate (anchor bottom).
  */
 export function HeartPin({
   number,
+  interest,
   state = 'upcoming',
-  size = 44,
+  size = pinSize(),
   partner,
   partnerLabel = 'Partner',
 }: Props) {
@@ -31,37 +38,73 @@ export function HeartPin({
   const fill = state === 'visited' ? colors.marker.visited : colors.marker.current;
   const w = size;
   const h = size / MARK_ASPECT_RATIO;
+  const glyph = interest ? INTEREST_ICON[interest] : undefined;
+  const glyphColor = filled ? '#FFFFFF' : colors.brand.redPressed;
+  const badge = Math.max(14, Math.round(size * 0.46));
   return (
     <View
-      style={{ alignItems: 'center' }}
+      style={{
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        // touch target of at least 44 pt around a smaller pin; the tip stays at the bottom edge (anchor)
+        minWidth: 44,
+        minHeight: 44,
+        paddingTop: number !== undefined ? badge / 3 : 0,
+        paddingRight: badge / 3,
+      }}
       accessible
       accessibilityLabel={number !== undefined ? `${number}` : undefined}
     >
-      <Svg width={w} height={h} viewBox={MARK_VIEWBOX}>
-        <Path
-          d={MARK_PATH}
-          fill={filled ? fill : '#FFFFFF'}
-          stroke={filled ? '#FFFFFF' : colors.brand.red}
-          strokeWidth={filled ? 14 : 44}
-          strokeLinejoin="round"
-          fillRule="evenodd"
-        />
+      <View style={{ width: w, height: h }}>
+        <Svg width={w} height={h} viewBox={MARK_VIEWBOX}>
+          <Path
+            d={MARK_PATH}
+            fill={filled ? fill : '#FFFFFF'}
+            stroke={filled ? '#FFFFFF' : colors.brand.red}
+            strokeWidth={filled ? 22 : 40}
+            strokeLinejoin="round"
+            fillRule="evenodd"
+          />
+        </Svg>
+        {glyph ? (
+          <View
+            pointerEvents="none"
+            style={{ position: 'absolute', left: 0, right: 0, top: h * 0.4, alignItems: 'center' }}
+          >
+            <MaterialCommunityIcons name={glyph} size={Math.round(w * 0.36)} color={glyphColor} />
+          </View>
+        ) : null}
         {number !== undefined ? (
-          <G>
-            <SvgText
-              x={VB_W / 2}
-              y={VB_H * 0.78}
-              fontSize={VB_H * 0.3}
-              fontFamily={fonts.heading}
-              fontWeight="800"
-              textAnchor="middle"
-              fill={filled ? '#FFFFFF' : colors.brand.redPressed}
+          <View
+            style={{
+              position: 'absolute',
+              top: -badge / 3,
+              right: -badge / 3,
+              minWidth: badge,
+              height: badge,
+              paddingHorizontal: 3,
+              borderRadius: badge / 2,
+              backgroundColor: state === 'visited' ? colors.marker.visited : colors.ink.primary,
+              borderWidth: 1.5,
+              borderColor: '#FFFFFF',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text
+              allowFontScaling={false}
+              style={{
+                fontFamily: fonts.heading,
+                fontSize: badge * 0.6,
+                lineHeight: badge * 0.8,
+                color: '#FFFFFF',
+              }}
             >
               {String(number)}
-            </SvgText>
-          </G>
+            </Text>
+          </View>
         ) : null}
-      </Svg>
+      </View>
       {partner ? (
         <View
           style={{

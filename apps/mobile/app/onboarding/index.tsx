@@ -1,49 +1,77 @@
-import { useState } from 'react';
-import { Image, Platform, ScrollView, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, BackHandler, Image, Platform, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { BackendError } from '../../src/backend';
 import { INTERESTS, SUPPORTED_UI_LANGUAGES, type Interest, type UiLanguage } from '@tuur/shared';
-import { useBackend } from '../../src/backend';
+import { BackendError, useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
 import { Button, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
+import { Mascot } from '../../src/components/Mascot';
 import { Screen } from '../../src/components/Screen';
-import { SpinningMark } from '../../src/components/SpinningMark';
 import { Text } from '../../src/components/Text';
 import { requestForeground } from '../../src/location/real';
+import { haptics, useReduceMotion } from '../../src/motion';
 import { useSettings } from '../../src/state/settings';
 import wordmark from '../../assets/wordmark-red.png';
-import { colors, radii } from '../../src/theme';
+import { colors } from '../../src/theme';
 
-type Step = 'welcome' | 'language' | 'interests' | 'permissions' | 'account' | 'safety';
-const ORDER: Step[] = ['welcome', 'language', 'interests', 'permissions', 'account', 'safety'];
+type Step = 'welcome' | 'interests' | 'location';
+const ORDER: Step[] = ['welcome', 'interests', 'location'];
 const LANGUAGE_NAMES: Record<UiLanguage, string> = { de: 'Deutsch', en: 'English' };
 
-/** Onboarding (spec 11): logo -> language -> interests (skippable) -> permissions with explanation -> optional login. */
+/**
+ * Onboarding in three steps (spec 11, shortened per UX audit D49): welcome (language from the device, switchable;
+ * terms/privacy links), interests (skippable), location with the reason and a one-line traffic safety note. The
+ * account stays optional (settings); everyone starts anonymously.
+ */
 export default function Onboarding() {
   const { t } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
+  const reduceMotion = useReduceMotion();
   const { language, interests, set } = useSettings();
   const [step, setStep] = useState<Step>('welcome');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const idx = ORDER.indexOf(step);
-  const next = () => setStep(ORDER[Math.min(ORDER.length - 1, idx + 1)]!);
-  const back = () => idx > 0 && setStep(ORDER[idx - 1]!);
+  const slide = useRef(new Animated.Value(0)).current;
+  const dir = useRef(1);
 
-  const finish = () => {
-    set({ onboarded: true });
-    router.replace('/home');
+  const go = (to: Step) => {
+    dir.current = ORDER.indexOf(to) >= idx ? 1 : -1;
+    setStep(to);
   };
+  const next = () => go(ORDER[Math.min(ORDER.length - 1, idx + 1)]!);
+  const back = () => idx > 0 && go(ORDER[idx - 1]!);
 
-  const run = async (f: () => Promise<unknown>) => {
+  // steps glide in from the side they come from
+  useEffect(() => {
+    if (reduceMotion) return slide.setValue(0);
+    slide.setValue(dir.current);
+    Animated.spring(slide, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
+  }, [step, slide, reduceMotion]);
+
+  // Android back goes one step back instead of leaving the app
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (idx === 0) return false;
+      back();
+      return true;
+    });
+    return () => sub.remove();
+  });
+
+  const finish = async (askLocation: boolean) => {
     setBusy(true);
     setError(undefined);
     try {
-      await f();
-      next();
+      if (askLocation) await requestForeground();
+      await backend.auth.ensureSignedIn();
+      haptics.success();
+      set({ onboarded: true });
+      router.replace('/home');
     } catch (e) {
       setError(e instanceof BackendError && e.code === 'network' ? t('errors.network') : t('errors.generic'));
     } finally {
@@ -72,138 +100,110 @@ export default function Onboarding() {
         </Row>
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 20, paddingVertical: 24 }}
-        showsVerticalScrollIndicator={false}
+      <Animated.View
+        style={{
+          flex: 1,
+          opacity: slide.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }),
+          transform: [{ translateX: slide.interpolate({ inputRange: [-1, 1], outputRange: [-48, 48] }) }],
+        }}
       >
-        {step === 'welcome' && (
-          <View style={{ alignItems: 'center', gap: 28 }}>
-            <SpinningMark size={120} label={t('loading.loading')} />
-            <Image
-              accessibilityLabel="tuur"
-              source={wordmark}
-              style={{ width: 200, height: 72 }}
-              resizeMode="contain"
-            />
-            <Text variant="title" align="center">
-              {t('onboarding.welcomeTitle')}
-            </Text>
-            <Text variant="bodySecondary" align="center">
-              {t('onboarding.welcomeBody')}
-            </Text>
-          </View>
-        )}
-
-        {step === 'language' && (
-          <View style={{ gap: 16 }}>
-            <Text variant="title">{t('onboarding.languageTitle')}</Text>
-            <Text variant="bodySecondary">{t('onboarding.languageHint')}</Text>
-            {SUPPORTED_UI_LANGUAGES.map((l) => (
-              <Button
-                key={l}
-                variant={language === l ? 'primary' : 'secondary'}
-                label={LANGUAGE_NAMES[l]}
-                onPress={() => set({ language: l })}
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 20, paddingVertical: 24 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {step === 'welcome' && (
+            <View style={{ alignItems: 'center', gap: 22 }}>
+              <Mascot pose="wave" size={148} />
+              <Image
+                accessibilityLabel="tuur"
+                source={wordmark}
+                style={{ width: 180, height: 64 }}
+                resizeMode="contain"
               />
-            ))}
-          </View>
-        )}
-
-        {step === 'interests' && (
-          <View style={{ gap: 16 }}>
-            <Text variant="title">{t('onboarding.interestsTitle')}</Text>
-            <Text variant="bodySecondary">{t('onboarding.interestsHint')}</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-              {INTERESTS.map((i) => (
-                <Chip
-                  key={i}
-                  label={t(`interests.${i}`)}
-                  selected={interests.includes(i)}
-                  onPress={() =>
-                    set({
-                      interests: interests.includes(i)
-                        ? interests.filter((x: Interest) => x !== i)
-                        : [...interests, i],
-                    })
-                  }
-                />
-              ))}
+              <Text variant="title" align="center">
+                {t('onboarding.welcomeTitle')}
+              </Text>
+              <Text variant="bodySecondary" align="center">
+                {t('onboarding.tuuHello')}
+              </Text>
+              <Row gap={8}>
+                {SUPPORTED_UI_LANGUAGES.map((l) => (
+                  <Chip
+                    key={l}
+                    label={LANGUAGE_NAMES[l]}
+                    selected={language === l}
+                    onPress={() => set({ language: l })}
+                  />
+                ))}
+              </Row>
             </View>
-          </View>
-        )}
+          )}
 
-        {step === 'permissions' && (
-          <View style={{ gap: 16 }}>
-            <View
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: radii.lg,
-                backgroundColor: colors.brand.redTint,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            />
-            <Text variant="title">{t('onboarding.permissionsTitle')}</Text>
-            <Text variant="body">{t('onboarding.permissionsBody')}</Text>
-            <Banner text={t('onboarding.permissionsBackground')} />
-          </View>
-        )}
+          {step === 'interests' && (
+            <View style={{ gap: 16 }}>
+              <Text variant="title">{t('onboarding.interestsTitle')}</Text>
+              <Text variant="bodySecondary">{t('onboarding.interestsHint')}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                {INTERESTS.map((i) => (
+                  <Chip
+                    key={i}
+                    label={t(`interests.${i}`)}
+                    selected={interests.includes(i)}
+                    onPress={() =>
+                      set({
+                        interests: interests.includes(i)
+                          ? interests.filter((x: Interest) => x !== i)
+                          : [...interests, i],
+                      })
+                    }
+                  />
+                ))}
+              </View>
+            </View>
+          )}
 
-        {step === 'account' && (
-          <View style={{ gap: 14 }}>
-            <Text variant="title">{t('onboarding.accountTitle')}</Text>
-            <Text variant="bodySecondary">{t('onboarding.accountBody')}</Text>
-            {Platform.OS === 'ios' || backend.kind === 'demo' ? (
-              <Button
-                variant="secondary"
-                icon="smartphone"
-                label={t('onboarding.signInApple')}
-                loading={busy}
-                onPress={() => void run(() => backend.auth.signInWithApple())}
-              />
-            ) : null}
-            <Button
-              variant="secondary"
-              icon="log-in"
-              label={t('onboarding.signInGoogle')}
-              loading={busy}
-              onPress={() => void run(() => backend.auth.signInWithGoogle())}
-            />
-            {error ? <Banner tone="error" text={error} /> : null}
-          </View>
-        )}
-
-        {step === 'safety' && (
-          <View style={{ gap: 16 }}>
-            <Banner tone="warning" text={t('onboarding.safetyBody')} />
-            <Text variant="title">{t('onboarding.safetyTitle')}</Text>
-          </View>
-        )}
-      </ScrollView>
+          {step === 'location' && (
+            <View style={{ gap: 16 }}>
+              <Mascot pose="point" size={96} />
+              <Text variant="title">{t('onboarding.permissionsTitle')}</Text>
+              <Text variant="body">{t('onboarding.permissionsBody')}</Text>
+              <Banner text={t('onboarding.permissionsBackground')} />
+              <Banner tone="warning" icon="alert-triangle" text={t('onboarding.safetyBody')} />
+              {error ? <Banner tone="error" text={error} /> : null}
+            </View>
+          )}
+        </ScrollView>
+      </Animated.View>
 
       <View style={{ gap: 10, paddingBottom: 16 }}>
-        {step === 'permissions' ? (
+        {step === 'welcome' ? (
           <>
-            <Button
-              label={t('onboarding.allowLocation')}
-              loading={busy}
-              onPress={() => void run(() => requestForeground())}
-            />
-            <Button variant="ghost" label={t('onboarding.notNow')} onPress={next} />
+            <Button label={t('onboarding.start')} icon="arrow-right" onPress={next} />
+            <Text variant="caption" align="center">
+              {t('onboarding.legalConsent')}
+            </Text>
+            <Row gap={4} style={{ justifyContent: 'center' }}>
+              <Button
+                variant="ghost"
+                label={t('onboarding.legalTerms')}
+                onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
+              />
+              <Button
+                variant="ghost"
+                label={t('onboarding.legalPrivacy')}
+                onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}
+              />
+            </Row>
           </>
-        ) : step === 'account' ? (
-          <Button
-            label={t('onboarding.startAnonymous')}
-            loading={busy}
-            onPress={() => void run(() => backend.auth.ensureSignedIn())}
-          />
-        ) : step === 'safety' ? (
-          <Button label={t('onboarding.safetyOk')} onPress={finish} />
-        ) : (
+        ) : step === 'interests' ? (
           <>
             <Button label={t('common.continue')} onPress={next} />
-            {step === 'interests' ? <Button variant="ghost" label={t('common.skip')} onPress={next} /> : null}
+            <Button variant="ghost" label={t('common.skip')} onPress={next} />
+          </>
+        ) : (
+          <>
+            <Button label={t('onboarding.allowLocation')} loading={busy} onPress={() => void finish(true)} />
+            <Button variant="ghost" label={t('onboarding.notNow')} onPress={() => void finish(false)} />
           </>
         )}
       </View>

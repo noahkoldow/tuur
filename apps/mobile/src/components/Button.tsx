@@ -1,6 +1,9 @@
-import { ActivityIndicator, Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { HIT, colors, fonts, radii } from '../theme';
+import { colors as palette, shadow } from '../theme';
+import { PressableScale } from './PressableScale';
+import { SpinningMark } from './SpinningMark';
 import { Text } from './Text';
 
 interface Props {
@@ -32,7 +35,7 @@ export function Button({
 }: Props) {
   const isPrimary = variant === 'primary';
   return (
-    <Pressable
+    <PressableScale
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -66,7 +69,19 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary ? '#fff' : colors.brand.red} />
+        <>
+          <SpinningMark size={22} label={label} color={isPrimary ? '#FFFFFF' : colors.brand.red} />
+          <Text
+            style={{
+              fontFamily: fonts.heading,
+              fontSize: isPrimary ? 18 : 16,
+              lineHeight: 22,
+              color: isPrimary ? '#fff' : variant === 'ghost' ? colors.brand.redPressed : colors.ink.primary,
+            }}
+          >
+            {label}
+          </Text>
+        </>
       ) : (
         <>
           {icon ? <Feather name={icon} size={20} color={isPrimary ? '#fff' : colors.ink.primary} /> : null}
@@ -82,7 +97,7 @@ export function Button({
           </Text>
         </>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -93,6 +108,7 @@ export function IconButton({
   size = 52,
   primary,
   disabled,
+  onMap,
 }: {
   icon: keyof typeof Feather.glyphMap;
   label: string;
@@ -100,9 +116,12 @@ export function IconButton({
   size?: number;
   primary?: boolean;
   disabled?: boolean;
+  /** Floating over a map: white with shadow so it stays visible on any map background. */
+  onMap?: boolean;
 }) {
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.92}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: Boolean(disabled) }}
@@ -119,14 +138,19 @@ export function IconButton({
           ? pressed
             ? colors.brand.redPressed
             : colors.brand.red
-          : pressed
-            ? colors.border
-            : colors.surface.subtle,
+          : onMap
+            ? pressed
+              ? palette.surface.subtle
+              : palette.surface.base
+            : pressed
+              ? colors.border
+              : colors.surface.subtle,
+        ...(onMap ? shadow.card : null),
         opacity: disabled ? 0.4 : 1,
       })}
     >
       <Feather name={icon} size={size * 0.42} color={primary ? '#fff' : colors.ink.primary} />
-    </Pressable>
+    </PressableScale>
   );
 }
 

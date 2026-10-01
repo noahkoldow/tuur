@@ -1,4 +1,5 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
+import { PressableScale } from './PressableScale';
 import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -21,7 +22,8 @@ export function OptionCard({
   const { t } = useTranslation();
   const img = poi.imageRefs[0];
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.98}
       accessibilityRole="button"
       accessibilityLabel={`${poi.partnerId ? `${t('partner.label')}: ` : ''}${poi.name}. ${t('fork.walk', { minutes: Math.round(walkMinutes) })}. ${teaser ?? ''}`}
       accessibilityHint={t('fork.go')}
@@ -72,6 +74,6 @@ export function OptionCard({
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }

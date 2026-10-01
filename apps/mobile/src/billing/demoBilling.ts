@@ -46,6 +46,8 @@ export function createDemoBilling(backend: Backend): BillingProvider {
     init: async () => undefined,
     offers: async () => OFFERS,
     async purchase(id: ProductId) {
+      // demo seats are added directly by the demo backend's addGroupSeat
+      if (id === 'tuur_group_seat') return 'purchased';
       const o = OFFERS.find((x) => x.id === id)!;
       if (o.kind === 'credit') backend.demo?.grantCredits(o.credits ?? 1);
       else backend.demo?.grantSubscription();

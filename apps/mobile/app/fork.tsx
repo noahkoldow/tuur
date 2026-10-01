@@ -8,6 +8,7 @@ import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
+import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
 import { Screen } from '../src/components/Screen';
 import { SpinningMark } from '../src/components/SpinningMark';
@@ -16,6 +17,7 @@ import { ForkController, type ForkChoice } from '../src/guide/modes';
 import { startForkSession } from '../src/guide/session';
 import { usePoiPool } from '../src/hooks/usePoiPool';
 import { usePosition } from '../src/location/usePosition';
+import { formatDurationShort } from '../src/format';
 import { useSettings } from '../src/state/settings';
 
 const TIMES = [60, 90, 120];
@@ -98,7 +100,7 @@ export default function Fork() {
           {TIMES.map((m) => (
             <Chip
               key={m}
-              label={`${m / 60 >= 1 ? (m / 60).toFixed(m % 60 ? 1 : 0) + ' h' : m + ' min'}`}
+              label={formatDurationShort(m, language)}
               selected={minutes === m}
               onPress={() => setMinutes(m)}
             />
@@ -107,8 +109,11 @@ export default function Fork() {
         {startError ? <Banner tone="error" text={t('errors.startFailed')} /> : null}
         {!ready ? (
           <View style={{ alignItems: 'center', gap: 10, paddingVertical: 24 }}>
-            <SpinningMark size={64} label={t('plan.waitArea')} />
-            <Text variant="caption">{t('plan.waitArea')}</Text>
+            <Mascot pose="think" size={112} />
+            <Row gap={10}>
+              <SpinningMark size={32} label={t('plan.waitArea')} />
+              <Text variant="caption">{t('plan.waitArea')}</Text>
+            </Row>
           </View>
         ) : !gate.unlocked ? (
           <View style={{ gap: 12 }}>
@@ -119,9 +124,12 @@ export default function Fork() {
           <Banner text={t('fork.none')} />
         ) : (
           <View style={{ gap: 12 }}>
-            <Text variant="heading" accessibilityRole="header">
-              {t('fork.choose')}
-            </Text>
+            <Row gap={10}>
+              <Mascot pose="point" size={48} />
+              <Text variant="heading" accessibilityRole="header" style={{ flex: 1 }}>
+                {t('fork.choose')}
+              </Text>
+            </Row>
             <Row gap={12} style={{ alignItems: 'stretch' }}>
               {options.map((o) => (
                 <OptionCard
