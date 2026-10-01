@@ -1,9 +1,9 @@
 import { View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
-import { colors, radii } from '../theme';
+import { metrics, sys } from '../theme';
+import { Icon } from './Icon';
 import { Text } from './Text';
 
-/** Notices use icon + text (never colour alone) and status colours distinct from the brand red (spec 2.2). */
+/** Notices use symbol + text (never color alone) and status colors distinct from the brand red. */
 export function Banner({
   text,
   tone = 'info',
@@ -11,14 +11,9 @@ export function Banner({
 }: {
   text: string;
   tone?: 'info' | 'warning' | 'error';
-  icon?: keyof typeof Feather.glyphMap;
+  icon?: string;
 }) {
-  const fg =
-    tone === 'error'
-      ? colors.status.error
-      : tone === 'warning'
-        ? colors.status.warning
-        : colors.ink.secondary;
+  const fg = tone === 'error' ? sys.error : tone === 'warning' ? sys.warning : sys.labelSecondary;
   const glyph = icon ?? (tone === 'error' ? 'alert-octagon' : tone === 'warning' ? 'alert-triangle' : 'info');
   return (
     <View
@@ -26,14 +21,15 @@ export function Banner({
       style={{
         flexDirection: 'row',
         gap: 10,
-        padding: 12,
-        borderRadius: radii.md,
-        backgroundColor: colors.surface.subtle,
+        padding: 14,
+        borderRadius: metrics.radius.row + 4,
+        borderCurve: 'continuous',
+        backgroundColor: sys.elevated,
         alignItems: 'flex-start',
       }}
     >
-      <Feather name={glyph} size={20} color={fg} />
-      <Text variant="bodySecondary" style={{ flex: 1, color: colors.ink.primary }}>
+      <Icon name={glyph} size={20} color={fg} />
+      <Text variant="subheadline" color={sys.label} style={{ flex: 1 }}>
         {text}
       </Text>
     </View>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Share, View } from 'react-native';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
 import { BackendError, useBackend } from '../../src/backend';
@@ -11,9 +11,10 @@ import { config } from '../../src/config';
 import { ImageCredit } from '../../src/components/ImageCredit';
 import { AiBadge } from '../../src/components/AiBadge';
 import { Banner } from '../../src/components/Banner';
-import { Button, IconButton, Row } from '../../src/components/Button';
+import { Button, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
 import { SpinningMark } from '../../src/components/SpinningMark';
+import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
@@ -21,14 +22,16 @@ import { startTourSession, tourPath } from '../../src/guide/session';
 import { requestBackground } from '../../src/location/real';
 import { useTourDownload } from '../../src/offline/useDownload';
 import { estimateDownloadBytes, formatBytes } from '@tuur/shared';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettings } from '../../src/state/settings';
-import { colors, radii } from '../../src/theme';
+import { metrics, sys } from '../../src/theme';
 
 /** Tour preview (spec 5): map with the route, facts, stops with walking times, start. */
 export default function TourDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const backend = useBackend();
   const { language, interests, simulator } = useSettings();
   const [tour, setTour] = useState<Tour | null | undefined>(undefined);
@@ -119,8 +122,11 @@ export default function TourDetail() {
   };
 
   return (
-    <Screen padded={false}>
-      <View style={{ height: 240 }}>
+    <View style={{ flex: 1, backgroundColor: sys.grouped }}>
+      <Stack.Screen
+        options={{ headerShown: true, title: '', headerTransparent: true, headerShadowVisible: false }}
+      />
+      <View style={{ height: 280 }}>
         <TuurMap
           center={tour.stops[0]!.location}
           route={path}
@@ -133,30 +139,60 @@ export default function TourDetail() {
             partner: s.partner,
           }))}
         />
-        <View style={{ position: 'absolute', top: 12, left: 12 }}>
-          <IconButton icon="arrow-left" label={t('common.back')} onPress={() => router.back()} size={44} />
-        </View>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 140 }}>
-        <Text variant="title" accessibilityRole="header">
-          {text?.title ?? tour.template}
-        </Text>
-        <Text variant="bodySecondary">{text?.description}</Text>
+      <ScrollView
+        style={{
+          marginTop: -28,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderCurve: 'continuous',
+          backgroundColor: sys.grouped,
+        }}
+        contentContainerStyle={{
+          padding: metrics.margin,
+          paddingTop: 24,
+          gap: 24,
+          paddingBottom: insets.bottom + 96,
+        }}
+      >
+        <View style={{ gap: 8 }}>
+          <Text variant="title1" accessibilityRole="header">
+            {text?.title ?? tour.template}
+          </Text>
+          <Text variant="body" color={sys.labelSecondary}>
+            {text?.description}
+          </Text>
+        </View>
 
-        <Row gap={10} style={{ flexWrap: 'wrap' }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            borderRadius: metrics.radius.card,
+            borderCurve: 'continuous',
+            backgroundColor: sys.elevated,
+          }}
+        >
           <Fact
             label={t('tour.duration')}
             value={t('common.minutes', { count: Math.round(tour.durationMinutes) })}
           />
+          <View style={{ width: 0.5, backgroundColor: sys.separator, marginVertical: 12 }} />
           <Fact
             label={t('tour.distance')}
             value={t('common.km', { value: formatKm(tour.distanceMeters, language) })}
           />
+          <View style={{ width: 0.5, backgroundColor: sys.separator, marginVertical: 12 }} />
           <Fact label={t('tour.stopsTitle')} value={String(tour.stops.length)} />
-        </Row>
+        </View>
+
         {tour.themes.length ? (
           <View style={{ gap: 8 }}>
-            <Text variant="label">{t('tour.themes')}</Text>
+            <Text
+              variant="footnote"
+              style={{ textTransform: 'uppercase', paddingHorizontal: metrics.margin }}
+            >
+              {t('tour.themes')}
+            </Text>
             <Row gap={8} style={{ flexWrap: 'wrap' }}>
               {tour.themes.map((th) => (
                 <Chip key={th} label={t(`interests.${th}`)} selected />
@@ -166,53 +202,67 @@ export default function TourDetail() {
         ) : null}
         {tour.hasPartner ? <Banner text={t('tour.sponsored')} icon="award" /> : null}
 
-        <Text variant="heading" accessibilityRole="header">
-          {t('tour.stopsTitle')}
-        </Text>
-        <View style={{ gap: 4 }}>
+        <ListGroup title={t('tour.stopsTitle')}>
           {tour.stops.map((s, i) => (
-            <Row key={s.poiId} gap={12} style={{ paddingVertical: 8 }}>
-              <View
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: colors.brand.redTint,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text variant="label" color={colors.brand.redPressed}>
-                  {i + 1}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text variant="body">{s.name}</Text>
-                {i > 0 ? (
-                  <Text variant="caption">
-                    {t('tour.walkFromPrev', { minutes: Math.round(s.walkMinutesFromPrev) })}
-                  </Text>
-                ) : null}
-              </View>
-              {s.partner ? (
-                <View
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderColor: colors.brand.red,
-                  }}
-                >
-                  <Text variant="caption">{t('common.partner')}</Text>
-                </View>
-              ) : null}
-            </Row>
+            <ListRow
+              key={s.poiId}
+              label={`${i + 1}. ${s.name}`}
+              {...(i > 0
+                ? { hint: t('tour.walkFromPrev', { minutes: Math.round(s.walkMinutesFromPrev) }) }
+                : {})}
+              {...(s.partner ? { value: t('common.partner') } : {})}
+            />
           ))}
-        </View>
+        </ListGroup>
+
+        <ListGroup>
+          {dl.complete ? (
+            <ListRow icon="check-circle" label={t('downloads.downloaded')} />
+          ) : dl.phase === 'running' ? (
+            <ListRow
+              icon="download"
+              label={t('downloads.downloading', { percent: Math.round(dl.fraction * 100) })}
+              trailing={
+                <Button variant="ghost" size="regular" label={t('downloads.cancel')} onPress={dl.cancel} />
+              }
+            />
+          ) : (
+            <ListRow
+              icon="download"
+              label={
+                dl.partial
+                  ? t('downloads.resume')
+                  : `${t('downloads.download')} (${t('downloads.size', { size: formatBytes(estimateDownloadBytes(tour)) })})`
+              }
+              onPress={() => (unlocked ? void dl.start() : openPaywall())}
+            />
+          )}
+          {bought ? (
+            <ListRow
+              icon="share"
+              label={t('paywall.share')}
+              hint={t('paywall.shareHint')}
+              onPress={() => void share()}
+            />
+          ) : null}
+        </ListGroup>
+        {dl.error ? (
+          <Banner
+            tone="warning"
+            text={dl.error === 'no_space' ? t('downloads.noSpace') : t('downloads.failed')}
+          />
+        ) : null}
+        {shareMsg ? <Banner tone="warning" text={shareMsg} /> : null}
+        {startError ? (
+          <Banner
+            tone="error"
+            text={startError === 'denied' ? t('errors.locationDenied') : t('errors.startFailed')}
+          />
+        ) : null}
+
         <AiBadge text={t('tour.aiNotice')} />
         {tour.coverImage ? (
-          <View style={{ borderRadius: radii.md, overflow: 'hidden' }}>
+          <View style={{ borderRadius: metrics.radius.card, borderCurve: 'continuous', overflow: 'hidden' }}>
             <Image
               source={{ uri: tour.coverImage.url }}
               style={{ height: 160 }}
@@ -223,19 +273,18 @@ export default function TourDetail() {
           </View>
         ) : null}
       </ScrollView>
+
       <View
+        pointerEvents="box-none"
         style={{
           position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          paddingHorizontal: 20,
-          paddingTop: 12,
-          paddingBottom: 24,
-          gap: 10,
-          backgroundColor: colors.surface.base,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
+          left: metrics.margin,
+          right: metrics.margin,
+          bottom: insets.bottom + 12,
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 4 },
         }}
       >
         <Button
@@ -244,70 +293,22 @@ export default function TourDetail() {
           loading={starting}
           onPress={() => void start()}
         />
-        {bought ? (
-          <Button
-            variant="secondary"
-            icon="share-2"
-            label={t('paywall.share')}
-            accessibilityHint={t('paywall.shareHint')}
-            onPress={() => void share()}
-          />
-        ) : null}
-        {shareMsg ? <Banner tone="warning" text={shareMsg} /> : null}
-        {startError ? (
-          <Banner
-            tone="error"
-            text={startError === 'denied' ? t('errors.locationDenied') : t('errors.startFailed')}
-          />
-        ) : null}
-        {dl.complete ? (
-          <Banner icon="check-circle" text={t('downloads.downloaded')} />
-        ) : dl.phase === 'running' ? (
-          <Row gap={10}>
-            <Button
-              style={{ flex: 1 }}
-              variant="secondary"
-              label={t('downloads.downloading', { percent: Math.round(dl.fraction * 100) })}
-              onPress={() => undefined}
-              disabled
-            />
-            <Button variant="ghost" label={t('downloads.cancel')} onPress={dl.cancel} />
-          </Row>
-        ) : (
-          <Button
-            variant="secondary"
-            icon="download"
-            label={
-              dl.partial
-                ? t('downloads.resume')
-                : `${t('downloads.download')} (${t('downloads.size', { size: formatBytes(estimateDownloadBytes(tour)) })})`
-            }
-            onPress={() => (unlocked ? void dl.start() : openPaywall())}
-          />
-        )}
-        {dl.error ? (
-          <Banner
-            tone="warning"
-            text={dl.error === 'no_space' ? t('downloads.noSpace') : t('downloads.failed')}
-          />
-        ) : null}
       </View>
-    </Screen>
+    </View>
   );
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <View
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderRadius: radii.md,
-        backgroundColor: colors.surface.subtle,
-      }}
+      accessible
+      accessibilityLabel={`${label}: ${value}`}
+      style={{ flex: 1, padding: 14, gap: 2, alignItems: 'center' }}
     >
-      <Text variant="caption">{label}</Text>
-      <Text variant="heading">{value}</Text>
+      <Text variant="headline">{value}</Text>
+      <Text variant="footnote" align="center">
+        {label}
+      </Text>
     </View>
   );
 }

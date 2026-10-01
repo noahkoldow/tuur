@@ -21,5 +21,5 @@ pnpm workspaces + Turborepo. `apps/mobile` (Expo SDK 57, Expo Router, dev build 
 - Every external service sits behind a provider interface with a mock provider; no secrets in code (`.env.example`, `defineSecret`).
 - No hard-coded Gemini model names: read `config/ai` with defaults in `packages/shared`.
 - Core logic (routing, pacing, scoring, tours, tokens, entitlements) lives as pure functions in `packages/shared` with unit tests.
-- Design: white surfaces, sparing `brand.red`; use tokens from `@tuur/ui`. Loader = `SpinningMark` (mark rotating around its vertical axis).
+- Design: Apple HIG (D50): system tab bar and native headers, inset grouped lists, SF Symbols (`Icon`), semantic colors from `sys` (light + dark), text styles via `Text` variants, Liquid Glass only on floating map controls (`Glass`), `brand.red` only for the primary action / selected tab / progress. Loader = `SpinningMark` (mark rotating around its vertical axis).
 - Phases must satisfy typecheck + lint + tests before the next starts.

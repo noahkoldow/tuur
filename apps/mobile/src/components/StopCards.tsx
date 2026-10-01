@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Linking, View } from 'react-native';
 import { Image } from 'expo-image';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import type { ImageRef, Interest, Poi } from '@tuur/shared';
 import { formatKm } from '../format';
 import { colors, radii, shadow } from '../theme';
+import { Icon } from './Icon';
 import { INTEREST_ICON } from './icons';
 import { ImageCredit } from './ImageCredit';
 import { SnapCarousel, type SnapCarouselItem } from './SnapCarousel';
@@ -116,9 +116,8 @@ const cardStyle = {
   height: CARD_H,
   borderRadius: radii.lg,
   overflow: 'hidden' as const,
+  borderCurve: 'continuous' as const,
   backgroundColor: colors.surface.base,
-  borderWidth: 1,
-  borderColor: colors.border,
   ...shadow.card,
 };
 
@@ -154,7 +153,7 @@ function HeroCard({
             justifyContent: 'center',
           }}
         >
-          <MaterialCommunityIcons
+          <Icon
             name={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
             size={64}
             color={colors.brand.red}
@@ -185,11 +184,7 @@ function HeroCard({
                 backgroundColor: '#FFFFFF',
               }}
             >
-              <MaterialCommunityIcons
-                name={INTEREST_ICON[interest]}
-                size={13}
-                color={colors.brand.redPressed}
-              />
+              <Icon name={INTEREST_ICON[interest]} size={13} color={colors.brand.redPressed} />
               <Text variant="caption" style={{ color: colors.ink.primary, fontSize: 12, lineHeight: 16 }}>
                 {t(`interests.${interest}`)}
               </Text>
@@ -261,10 +256,10 @@ function PromptCard({
   const { t } = useTranslation();
   return (
     <View style={[cardStyle, { padding: 18, gap: 10 }]}>
-      <Text variant="label" style={{ color: colors.brand.redPressed }}>
+      <Text variant="subheadline" style={{ color: colors.brand.redPressed, fontWeight: '600' }}>
         {prompt}
       </Text>
-      <Text variant="body" numberOfLines={7} style={{ flex: 1, fontSize: 17, lineHeight: 25 }}>
+      <Text variant="body" numberOfLines={7} style={{ flex: 1 }}>
         {body}
       </Text>
       {footer ? (

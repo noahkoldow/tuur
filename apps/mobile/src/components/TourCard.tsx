@@ -1,10 +1,10 @@
 import { Pressable, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
 import { formatKm } from '../format';
-import { colors, radii } from '../theme';
+import { metrics, sys } from '../theme';
+import { Icon } from './Icon';
 import { Text } from './Text';
 
 /** Card in the tour list (spec 5.1): cover, title, duration, length, themes, free / partner markers. */
@@ -32,19 +32,18 @@ export function TourCard({
         flexDirection: 'row',
         gap: 14,
         padding: 12,
-        borderRadius: radii.lg,
-        backgroundColor: pressed ? colors.surface.subtle : colors.surface.base,
-        borderWidth: 1,
-        borderColor: colors.border,
+        borderRadius: metrics.radius.card,
+        borderCurve: 'continuous',
+        backgroundColor: pressed ? sys.fill : sys.elevated,
       })}
     >
       <View
         style={{
           width: 84,
           height: 84,
-          borderRadius: radii.md,
+          borderRadius: 12,
           overflow: 'hidden',
-          backgroundColor: colors.surface.subtle,
+          backgroundColor: sys.fill,
           alignItems: 'center',
           justifyContent: 'center',
         }}
@@ -57,14 +56,14 @@ export function TourCard({
             accessibilityIgnoresInvertColors
           />
         ) : (
-          <Feather name="map" size={28} color={colors.ink.tertiary} />
+          <Icon name="map" size={28} color={sys.labelTertiary} />
         )}
       </View>
       <View style={{ flex: 1, gap: 4, justifyContent: 'center' }}>
-        <Text variant="heading" numberOfLines={2}>
+        <Text variant="headline" numberOfLines={2}>
           {text?.title ?? tour.template}
         </Text>
-        <Text variant="caption" numberOfLines={2}>
+        <Text variant="footnote" numberOfLines={2}>
           {text?.teaser}
         </Text>
         <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -75,7 +74,7 @@ export function TourCard({
           <Text variant="caption">{t('common.stops', { count: tour.stops.length })}</Text>
           {locked && !tour.free ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Feather name="lock" size={13} color={colors.ink.secondary} />
+              <Icon name="lock" size={13} color={sys.labelSecondary} />
               <Text variant="caption">{t('paywall.locked')}</Text>
             </View>
           ) : null}
@@ -85,14 +84,10 @@ export function TourCard({
                 paddingHorizontal: 8,
                 paddingVertical: 2,
                 borderRadius: 8,
-                backgroundColor: colors.brand.redTint,
+                backgroundColor: sys.accentTint,
               }}
             >
-              <Text
-                variant="caption"
-                color={colors.brand.redPressed}
-                style={{ fontFamily: 'PlusJakartaSans_700Bold' }}
-              >
+              <Text variant="caption" color={sys.accentText} style={{ fontWeight: '600' }}>
                 {t('common.free')}
               </Text>
             </View>
@@ -103,8 +98,7 @@ export function TourCard({
                 paddingHorizontal: 8,
                 paddingVertical: 2,
                 borderRadius: 8,
-                borderWidth: 1,
-                borderColor: colors.brand.red,
+                backgroundColor: sys.fill,
               }}
             >
               <Text variant="caption">{t('common.partner')}</Text>

@@ -1,7 +1,7 @@
-import type { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { Interest, TravelMode } from '@tuur/shared';
 
-export type McIcon = keyof typeof MaterialCommunityIcons.glyphMap;
+/** Icon names understood by `Icon` (resolved to SF Symbols on iOS). */
+export type McIcon = string;
 
 /** One glyph per interest, used in map pins, stop cards and spot markers so a stop's kind is visible at a glance. */
 export const INTEREST_ICON: Record<Interest, McIcon> = {

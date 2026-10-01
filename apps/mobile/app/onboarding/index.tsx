@@ -14,7 +14,7 @@ import { requestForeground } from '../../src/location/real';
 import { haptics, useReduceMotion } from '../../src/motion';
 import { useSettings } from '../../src/state/settings';
 import wordmark from '../../assets/wordmark-red.png';
-import { colors } from '../../src/theme';
+import { sys } from '../../src/theme';
 
 type Step = 'welcome' | 'interests' | 'location';
 const ORDER: Step[] = ['welcome', 'interests', 'location'];
@@ -84,7 +84,11 @@ export default function Onboarding() {
       <View
         style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48 }}
       >
-        {idx > 0 ? <Button variant="ghost" label={t('common.back')} onPress={back} /> : <View />}
+        {idx > 0 ? (
+          <Button variant="ghost" size="regular" label={t('common.back')} onPress={back} />
+        ) : (
+          <View />
+        )}
         <Row gap={6}>
           {ORDER.map((s, i) => (
             <View
@@ -93,7 +97,7 @@ export default function Onboarding() {
                 width: i === idx ? 22 : 8,
                 height: 8,
                 borderRadius: 4,
-                backgroundColor: i <= idx ? colors.brand.red : colors.border,
+                backgroundColor: i === idx ? sys.accent : sys.fill,
               }}
             />
           ))}
@@ -123,7 +127,7 @@ export default function Onboarding() {
               <Text variant="title" align="center">
                 {t('onboarding.welcomeTitle')}
               </Text>
-              <Text variant="bodySecondary" align="center">
+              <Text variant="body" color={sys.labelSecondary} align="center">
                 {t('onboarding.tuuHello')}
               </Text>
               <Row gap={8}>
@@ -142,7 +146,9 @@ export default function Onboarding() {
           {step === 'interests' && (
             <View style={{ gap: 16 }}>
               <Text variant="title">{t('onboarding.interestsTitle')}</Text>
-              <Text variant="bodySecondary">{t('onboarding.interestsHint')}</Text>
+              <Text variant="body" color={sys.labelSecondary}>
+                {t('onboarding.interestsHint')}
+              </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {INTERESTS.map((i) => (
                   <Chip
@@ -179,17 +185,19 @@ export default function Onboarding() {
         {step === 'welcome' ? (
           <>
             <Button label={t('onboarding.start')} icon="arrow-right" onPress={next} />
-            <Text variant="caption" align="center">
+            <Text variant="footnote" align="center">
               {t('onboarding.legalConsent')}
             </Text>
             <Row gap={4} style={{ justifyContent: 'center' }}>
               <Button
                 variant="ghost"
+                size="regular"
                 label={t('onboarding.legalTerms')}
                 onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
               />
               <Button
                 variant="ghost"
+                size="regular"
                 label={t('onboarding.legalPrivacy')}
                 onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}
               />

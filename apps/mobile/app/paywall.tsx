@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Linking, Platform, ScrollView, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Linking, Platform, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Checkbox } from '../src/components/Checkbox';
 import { yearlyValue } from '../src/billing/pricing';
 import { useBackend, BackendError } from '../src/backend';
 import { Banner } from '../src/components/Banner';
-import { Button, IconButton, Row } from '../src/components/Button';
-import { Screen } from '../src/components/Screen';
+import { Button, Row } from '../src/components/Button';
+import { CloseButton } from '../src/components/HeaderButton';
+import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import type { Offer } from '../src/billing/types';
@@ -19,7 +20,7 @@ import {
   subscribed,
   useEntitlementStore,
 } from '../src/billing/entitlements';
-import { colors, radii } from '../src/theme';
+import { metrics, sys } from '../src/theme';
 
 type Params = {
   kind?: 'tour' | 'session';
@@ -147,25 +148,35 @@ export default function Paywall() {
   const canBuy = consent;
 
   return (
-    <Screen padded={false}>
-      <Row style={{ justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8 }}>
-        <IconButton icon="x" label={t('paywall.close')} onPress={() => router.back()} size={44} />
-      </Row>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 48 }}>
-        <Text variant="title" accessibilityRole="header">
-          {kind === 'tour' ? t('paywall.title') : t('paywall.titleSession')}
-        </Text>
-        <Text variant="bodySecondary">
-          {kind === 'tour' ? t('paywall.subtitleTour') : t('paywall.subtitleSession')}
-        </Text>
+    <>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: '',
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: sys.grouped as string },
+          headerRight: () => <CloseButton label={t('paywall.close')} onPress={() => router.back()} />,
+        }}
+      />
+      <ScrollScreen>
+        <View style={{ gap: 8 }}>
+          <Text variant="title1" accessibilityRole="header">
+            {kind === 'tour' ? t('paywall.title') : t('paywall.titleSession')}
+          </Text>
+          <Text variant="body" color={sys.labelSecondary}>
+            {kind === 'tour' ? t('paywall.subtitleTour') : t('paywall.subtitleSession')}
+          </Text>
+        </View>
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
 
         {total > 0 ? (
           <Card>
-            <Text variant="heading">{t('paywall.balance', { count: total })}</Text>
+            <Text variant="headline">{t('paywall.balance', { count: total })}</Text>
             {kind === 'tour' && ent.wallet.rewardBalance > 0 ? (
-              <Text variant="caption">{t('paywall.balanceReward', { count: ent.wallet.rewardBalance })}</Text>
+              <Text variant="footnote">
+                {t('paywall.balanceReward', { count: ent.wallet.rewardBalance })}
+              </Text>
             ) : null}
             <Button
               label={busy === 'spend' ? t('paywall.unlocking') : t('paywall.unlockWithCredit')}
@@ -181,7 +192,7 @@ export default function Paywall() {
           {credits.map((o) => (
             <Button
               key={o.id}
-              // one red primary on the screen: the single credit; everything else is an outline button
+              // one filled primary on the screen: the single credit; everything else is secondary
               variant={o.credits === 5 || total > 0 ? 'secondary' : 'primary'}
               disabled={!canBuy}
               label={`${o.credits === 5 ? t('paywall.buyCredits5') : t('paywall.buyCredit')} · ${o.priceString}`}
@@ -189,18 +200,18 @@ export default function Paywall() {
               onPress={() => void buy(o)}
             />
           ))}
-          <Text variant="caption">{t('paywall.creditHint')}</Text>
+          <Text variant="footnote">{t('paywall.creditHint')}</Text>
         </Card>
 
         {subs.length ? (
           <Card>
-            <Text variant="heading">{t('paywall.subscribe')}</Text>
+            <Text variant="headline">{t('paywall.subscribe')}</Text>
             {[yearly, monthly]
               .flatMap((o) => (o ? [o] : []))
               .map((o) => (
-                <View key={o.id} style={{ gap: 4 }}>
+                <View key={o.id} style={{ gap: 6 }}>
                   {o.period === 'year' ? (
-                    <Text variant="label" color={colors.brand.redPressed}>
+                    <Text variant="subheadline" color={sys.accentText} style={{ fontWeight: '600' }}>
                       {value && value.savedPercent > 0
                         ? `${t('paywall.recommended')} · ${t('paywall.saveBadge', { percent: value.savedPercent })}`
                         : t('paywall.recommended')}
@@ -216,12 +227,12 @@ export default function Paywall() {
                     onPress={() => void buy(o)}
                   />
                   {o.period === 'year' && value ? (
-                    <Text variant="caption">{t('paywall.perMonth', { price: value.perMonthString })}</Text>
+                    <Text variant="footnote">{t('paywall.perMonth', { price: value.perMonthString })}</Text>
                   ) : null}
                 </View>
               ))}
-            <Text variant="caption">{t('paywall.subDisclosure')}</Text>
-            <Button variant="ghost" label={t('paywall.manageSubs')} onPress={manageSubs} />
+            <Text variant="footnote">{t('paywall.subDisclosure')}</Text>
+            <Button variant="ghost" size="regular" label={t('paywall.manageSubs')} onPress={manageSubs} />
           </Card>
         ) : null}
 
@@ -234,7 +245,7 @@ export default function Paywall() {
               loading={busy === 'ad' || waitingReward}
               onPress={() => void watchAd()}
             />
-            <Text variant="caption">{t('paywall.watchAdHint')}</Text>
+            <Text variant="footnote">{t('paywall.watchAdHint')}</Text>
           </Card>
         ) : null}
 
@@ -244,12 +255,17 @@ export default function Paywall() {
           loading={busy === 'restore'}
           onPress={() => void restore()}
         />
-        <Row gap={16} style={{ justifyContent: 'center' }}>
-          <Button variant="ghost" label={t('paywall.terms')} onPress={() => open('terms')} />
-          <Button variant="ghost" label={t('paywall.privacy')} onPress={() => open('privacy')} />
+        <Row gap={8} style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Button variant="ghost" size="regular" label={t('paywall.terms')} onPress={() => open('terms')} />
+          <Button
+            variant="ghost"
+            size="regular"
+            label={t('paywall.privacy')}
+            onPress={() => open('privacy')}
+          />
         </Row>
-      </ScrollView>
-    </Screen>
+      </ScrollScreen>
+    </>
   );
 }
 
@@ -258,11 +274,10 @@ function Card({ children }: { children: React.ReactNode }) {
     <View
       style={{
         gap: 12,
-        padding: 16,
-        borderRadius: radii.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface.base,
+        padding: metrics.margin,
+        borderRadius: metrics.radius.card,
+        borderCurve: 'continuous',
+        backgroundColor: sys.elevated,
       }}
     >
       {children}

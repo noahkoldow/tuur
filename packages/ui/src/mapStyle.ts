@@ -5,7 +5,39 @@ export interface MapStyleOptions {
   tilesUrl: string;
   /** Glyph URL template with {fontstack} and {range}. */
   glyphsUrl: string;
+  /** Follows the system appearance (dark-mode.md); defaults to light. */
+  appearance?: 'light' | 'dark';
 }
+
+/** Colors of the two appearances; the dark map keeps the same restraint so the red route still dominates. */
+const MAP_COLORS = {
+  light: {
+    land: colors.surface.subtle,
+    water: '#E3E9EC',
+    park: '#ECEFEA',
+    building: '#EAEAEA',
+    casing: colors.border,
+    road: '#FFFFFF',
+    path: '#DADADA',
+    label: colors.ink.secondary,
+    placeLabel: colors.ink.primary,
+    poiLabel: colors.ink.tertiary,
+    halo: '#FFFFFF',
+  },
+  dark: {
+    land: '#151517',
+    water: '#0F1A21',
+    park: '#1A201C',
+    building: '#202023',
+    casing: '#0B0B0C',
+    road: '#2E2E32',
+    path: '#48484C',
+    label: '#A8A8AE',
+    placeLabel: '#EDEDF0',
+    poiLabel: '#8C8C92',
+    halo: '#151517',
+  },
+} as const;
 
 type Json = Record<string, unknown>;
 
@@ -14,17 +46,15 @@ type Json = Record<string, unknown>;
  * red route dominates. Built for OpenMapTiles vector tiles; the provider is configurable (spec 3 "Karte").
  */
 export function buildTuurMapStyle(o: MapStyleOptions): Json {
-  const land = colors.surface.subtle;
-  const water = '#E3E9EC';
-  const park = '#ECEFEA';
-  const building = '#EAEAEA';
-  const label = colors.ink.secondary;
+  const dark = o.appearance === 'dark';
+  const c = MAP_COLORS[dark ? 'dark' : 'light'];
+  const { land, water, park, building, label } = c;
   const font = ['Noto Sans Regular'];
   const fontBold = ['Noto Sans Bold'];
-  const halo = { 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.4 };
+  const halo = { 'text-halo-color': c.halo, 'text-halo-width': 1.4 };
   return {
     version: 8,
-    name: 'tuur-light',
+    name: dark ? 'tuur-dark' : 'tuur-light',
     sources: { openmaptiles: { type: 'vector', url: o.tilesUrl } },
     glyphs: o.glyphsUrl,
     layers: [
@@ -74,7 +104,7 @@ export function buildTuurMapStyle(o: MapStyleOptions): Json {
         filter: ['in', 'class', 'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': colors.border,
+          'line-color': c.casing,
           'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 1, 16, 9, 19, 26],
         },
       },
@@ -86,7 +116,7 @@ export function buildTuurMapStyle(o: MapStyleOptions): Json {
         filter: ['in', 'class', 'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#FFFFFF',
+          'line-color': c.road,
           'line-width': ['interpolate', ['exponential', 1.4], ['zoom'], 10, 0.6, 16, 7, 19, 22],
         },
       },
@@ -97,7 +127,7 @@ export function buildTuurMapStyle(o: MapStyleOptions): Json {
         'source-layer': 'transportation',
         filter: ['in', 'class', 'path', 'pedestrian', 'track'],
         paint: {
-          'line-color': '#DADADA',
+          'line-color': c.path,
           'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 2.2],
           'line-dasharray': [2, 1.5],
         },
@@ -114,7 +144,7 @@ export function buildTuurMapStyle(o: MapStyleOptions): Json {
           'text-size': ['interpolate', ['linear'], ['zoom'], 8, 11, 14, 14],
           'text-max-width': 8,
         },
-        paint: { 'text-color': colors.ink.primary, ...halo },
+        paint: { 'text-color': c.placeLabel, ...halo },
       },
       {
         id: 'road-label',
@@ -144,7 +174,7 @@ export function buildTuurMapStyle(o: MapStyleOptions): Json {
           'text-anchor': 'top',
           'text-offset': [0, 0.6],
         },
-        paint: { 'text-color': colors.ink.tertiary, ...halo },
+        paint: { 'text-color': c.poiLabel, ...halo },
       },
     ],
   };
@@ -159,12 +189,13 @@ export interface MapEnv {
  * Resolves the style for the current environment: an explicit style URL wins, then the tuur style on MapTiler
  * tiles, and finally the public MapLibre demo tiles so development works without any key.
  */
-export function resolveMapStyle(env: MapEnv): string | Json {
+export function resolveMapStyle(env: MapEnv, appearance: 'light' | 'dark' = 'light'): string | Json {
   if (env.styleUrl) return env.styleUrl;
   if (env.maptilerKey) {
     return buildTuurMapStyle({
       tilesUrl: `https://api.maptiler.com/tiles/v3/tiles.json?key=${env.maptilerKey}`,
       glyphsUrl: `https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=${env.maptilerKey}`,
+      appearance,
     });
   }
   return 'https://demotiles.maplibre.org/style.json';

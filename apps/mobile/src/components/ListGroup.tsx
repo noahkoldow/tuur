@@ -1,10 +1,14 @@
 import { Children, Fragment, isValidElement } from 'react';
 import { Pressable, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
-import { colors, radii } from '../theme';
+import { haptics } from '../motion';
+import { metrics, sys } from '../theme';
+import { Icon } from './Icon';
 import { Text } from './Text';
 
-/** Grouped settings list: a caption above a white rounded card whose rows are separated by hairlines. */
+const ICON_COL = 22;
+const GAP = 12;
+
+/** Inset grouped list (lists-and-tables.md): small caps header, rounded elevated container, hairline separators. */
 export function ListGroup({
   title,
   footer,
@@ -16,31 +20,41 @@ export function ListGroup({
 }) {
   const rows = Children.toArray(children).filter(isValidElement);
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 6 }}>
       {title ? (
         <Text
-          variant="label"
+          variant="footnote"
           accessibilityRole="header"
-          style={{
-            color: colors.ink.secondary,
-            paddingHorizontal: 4,
-            textTransform: 'uppercase',
-            fontSize: 12,
-          }}
+          style={{ paddingHorizontal: metrics.margin, textTransform: 'uppercase' }}
         >
           {title}
         </Text>
       ) : null}
-      <View style={{ backgroundColor: colors.surface.base, borderRadius: radii.lg, overflow: 'hidden' }}>
+      <View
+        style={{
+          backgroundColor: sys.elevated,
+          borderRadius: metrics.radius.card,
+          borderCurve: 'continuous',
+          overflow: 'hidden',
+        }}
+      >
         {rows.map((row, i) => (
           <Fragment key={i}>
-            {i > 0 ? <View style={{ height: 1, backgroundColor: colors.border, marginLeft: 60 }} /> : null}
+            {i > 0 ? (
+              <View
+                style={{
+                  height: 0.5,
+                  backgroundColor: sys.separator,
+                  marginLeft: metrics.margin + ICON_COL + GAP,
+                }}
+              />
+            ) : null}
             {row}
           </Fragment>
         ))}
       </View>
       {footer ? (
-        <Text variant="caption" style={{ paddingHorizontal: 4 }}>
+        <Text variant="footnote" style={{ paddingHorizontal: metrics.margin }}>
           {footer}
         </Text>
       ) : null}
@@ -48,7 +62,10 @@ export function ListGroup({
   );
 }
 
-/** One row: icon tile, label with optional hint, and a chevron (navigates) or a custom trailing control. */
+/**
+ * One row: a quiet leading symbol, the label (with an optional footnote), a value and either a chevron (navigates) or a
+ * custom trailing control. At least 44 pt tall; it grows with the text size.
+ */
 export function ListRow({
   icon,
   label,
@@ -59,7 +76,7 @@ export function ListRow({
   destructive,
   external,
 }: {
-  icon: keyof typeof Feather.glyphMap;
+  icon?: string;
   label: string;
   hint?: string;
   value?: string;
@@ -69,34 +86,32 @@ export function ListRow({
   /** Opens outside the app (system settings): shows an external-link glyph instead of the chevron. */
   external?: boolean;
 }) {
-  const tint = destructive ? colors.status.error : colors.ink.primary;
+  const tint = destructive ? sys.error : sys.label;
   const body = (
     <>
-      <View
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 10,
-          backgroundColor: destructive ? colors.surface.subtle : colors.brand.redTint,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Feather name={icon} size={17} color={destructive ? colors.status.error : colors.brand.redPressed} />
-      </View>
+      {icon ? (
+        <View style={{ width: ICON_COL, alignItems: 'center' }}>
+          <Icon name={icon} size={20} color={destructive ? sys.error : sys.labelSecondary} />
+        </View>
+      ) : null}
       <View style={{ flex: 1, gap: 2 }}>
         <Text variant="body" style={{ color: tint }}>
           {label}
         </Text>
-        {hint ? <Text variant="caption">{hint}</Text> : null}
+        {hint ? <Text variant="footnote">{hint}</Text> : null}
       </View>
-      {value ? <Text variant="bodySecondary">{value}</Text> : null}
+      {value ? (
+        <Text variant="body" color={sys.labelSecondary} style={{ flexShrink: 1, textAlign: 'right' }}>
+          {value}
+        </Text>
+      ) : null}
       {trailing ??
         (onPress ? (
-          <Feather
+          <Icon
             name={external ? 'external-link' : 'chevron-right'}
-            size={18}
-            color={colors.ink.tertiary}
+            size={external ? 18 : 14}
+            color={sys.labelTertiary}
+            weight="semibold"
           />
         ) : null)}
     </>
@@ -104,10 +119,10 @@ export function ListRow({
   const style = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 14,
-    minHeight: 56,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: GAP,
+    minHeight: 44,
+    paddingHorizontal: metrics.margin,
+    paddingVertical: 11,
   };
   if (!onPress)
     return (
@@ -120,9 +135,129 @@ export function ListRow({
       accessibilityRole="button"
       accessibilityLabel={hint ? `${label}. ${hint}` : label}
       onPress={onPress}
-      style={({ pressed }) => [style, pressed ? { backgroundColor: colors.surface.subtle } : null]}
+      style={({ pressed }) => [style, pressed ? { backgroundColor: sys.fill } : null]}
     >
       {body}
     </Pressable>
+  );
+}
+
+export interface Choice {
+  id: string;
+  label: string;
+  detail?: string;
+}
+
+/**
+ * Picker as an inline-expanding list (pickers.md): the row shows the current choice; opening it reveals checkmark
+ * rows. Single choice closes on selection; `multiple` stays open so several can be toggled.
+ */
+export function ChoiceRows({
+  icon,
+  label,
+  hint,
+  choices,
+  selected,
+  onChange,
+  multiple,
+  open,
+  onToggle,
+}: {
+  icon?: string;
+  label: string;
+  hint?: string;
+  choices: Choice[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  multiple?: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const value = choices
+    .filter((c) => selected.includes(c.id))
+    .map((c) => c.label)
+    .join(', ');
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}${value ? `, ${value}` : ''}`}
+        onPress={onToggle}
+        style={({ pressed }) => [
+          {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: GAP,
+            minHeight: 44,
+            paddingHorizontal: metrics.margin,
+            paddingVertical: 11,
+          },
+          pressed ? { backgroundColor: sys.fill } : null,
+        ]}
+      >
+        {icon ? (
+          <View style={{ width: ICON_COL, alignItems: 'center' }}>
+            <Icon name={icon} size={20} color={sys.labelSecondary} />
+          </View>
+        ) : null}
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text variant="body">{label}</Text>
+          {hint ? <Text variant="footnote">{hint}</Text> : null}
+        </View>
+        {value ? (
+          <Text variant="body" color={sys.labelSecondary} numberOfLines={1} style={{ flexShrink: 1 }}>
+            {value}
+          </Text>
+        ) : null}
+        <Icon
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={14}
+          color={sys.labelTertiary}
+          weight="semibold"
+        />
+      </Pressable>
+      {open
+        ? choices.map((c) => {
+            const on = selected.includes(c.id);
+            return (
+              <Pressable
+                key={c.id}
+                accessibilityRole={multiple ? 'checkbox' : 'radio'}
+                accessibilityState={{ checked: on }}
+                accessibilityLabel={c.detail ? `${c.label}. ${c.detail}` : c.label}
+                onPress={() => {
+                  haptics.select();
+                  if (multiple) onChange(on ? selected.filter((x) => x !== c.id) : [...selected, c.id]);
+                  else {
+                    onChange([c.id]);
+                    onToggle();
+                  }
+                }}
+                style={({ pressed }) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: GAP,
+                    minHeight: 44,
+                    paddingVertical: 10,
+                    paddingRight: metrics.margin,
+                    paddingLeft: metrics.margin + ICON_COL + GAP,
+                    borderTopWidth: 0.5,
+                    borderTopColor: sys.separator,
+                  },
+                  pressed ? { backgroundColor: sys.fill } : null,
+                ]}
+              >
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text variant="body">{c.label}</Text>
+                  {c.detail ? <Text variant="footnote">{c.detail}</Text> : null}
+                </View>
+                {on ? <Icon name="check" size={18} color={sys.accent} weight="semibold" /> : null}
+              </Pressable>
+            );
+          })
+        : null}
+    </View>
   );
 }

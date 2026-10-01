@@ -1,5 +1,6 @@
 export const de = {
   app: { name: 'tuur', tagline: 'Dein KI-Audio-Stadtguide' },
+  tabs: { explore: 'Entdecken', offline: 'Offline', profile: 'Profil' },
   common: {
     continue: 'Weiter',
     skip: 'Überspringen',

@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import { View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import type { ActiveSession } from '../guide/session';
 import { haptics } from '../motion';
-import { colors, radii } from '../theme';
+import { metrics, sys } from '../theme';
 import { IconButton } from './Button';
+import { Icon } from './Icon';
 import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 
@@ -48,34 +48,35 @@ export function MiniPlayer({
         gap: 12,
         padding: 8,
         paddingLeft: 10,
-        borderRadius: radii.lg,
-        backgroundColor: colors.surface.subtle,
+        minHeight: 60,
+        borderRadius: metrics.radius.card,
+        borderCurve: 'continuous',
+        backgroundColor: sys.elevated,
       }}
     >
       <View
         style={{
           width: 40,
           height: 40,
-          borderRadius: 12,
-          backgroundColor: colors.brand.red,
+          borderRadius: 10,
+          backgroundColor: sys.accent,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Feather name="headphones" size={20} color="#FFFFFF" />
+        <Icon name="headphones" size={20} color={sys.onAccent} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text variant="label" numberOfLines={1}>
+        <Text variant="subheadline" numberOfLines={1} style={{ fontWeight: '600', color: sys.label }}>
           {title}
         </Text>
-        <Text variant="caption" numberOfLines={1}>
+        <Text variant="footnote" numberOfLines={1}>
           {line}
         </Text>
       </View>
       <IconButton
         icon={paused ? 'play' : 'pause'}
         label={paused ? t('player.play') : t('player.pause')}
-        size={44}
         onPress={() => {
           haptics.tap();
           if (paused) session.runtime.resume();

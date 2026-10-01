@@ -1,9 +1,13 @@
 import { haptics } from '../motion';
+import { sys } from '../theme';
+import { Icon } from './Icon';
 import { PressableScale } from './PressableScale';
-import { colors, fonts, radii } from '../theme';
 import { Text } from './Text';
 
-/** Selectable chip. Selected uses the brand tint with `redPressed` text (AA on tint), never bare brand red for small text. */
+/**
+ * Selectable capsule (44 pt). Selection is shown with a checkmark and the tint, not by color alone, and the label
+ * stays AA on the tint (accentText).
+ */
 export function Chip({
   label,
   selected,
@@ -29,20 +33,16 @@ export function Chip({
       style={{
         minHeight: 44,
         paddingHorizontal: 16,
-        justifyContent: 'center',
-        borderRadius: radii.pill,
-        backgroundColor: selected ? colors.brand.redTint : colors.surface.subtle,
-        borderWidth: 1.5,
-        borderColor: selected ? colors.brand.red : 'transparent',
+        paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: 999,
+        backgroundColor: selected ? sys.accentTint : sys.fill,
       }}
     >
-      <Text
-        style={{
-          fontFamily: fonts.headingMedium,
-          fontSize: 15,
-          color: selected ? colors.brand.redPressed : colors.ink.primary,
-        }}
-      >
+      {selected ? <Icon name="check" size={14} color={sys.accentText} weight="bold" /> : null}
+      <Text variant="subheadline" style={{ fontWeight: '600', color: selected ? sys.accentText : sys.label }}>
         {label}
       </Text>
     </PressableScale>

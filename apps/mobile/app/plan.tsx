@@ -20,7 +20,7 @@ import { roundPosition } from '../src/location/privacy';
 import { usePosition } from '../src/location/usePosition';
 import { haptics } from '../src/motion';
 import { useSettings } from '../src/state/settings';
-import { colors } from '../src/theme';
+import { metrics, sys } from '../src/theme';
 
 const TIMES = [30, 60, 90, 120, 180];
 
@@ -133,8 +133,8 @@ export default function Plan() {
     : t('plan.startRoute');
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
-      <View style={{ height: '42%' }}>
+    <View style={{ flex: 1, backgroundColor: sys.grouped }}>
+      <View style={{ height: '46%' }}>
         <TuurMap
           center={position ?? { lat: 52.52, lng: 13.405 }}
           zoom={15}
@@ -152,18 +152,21 @@ export default function Plan() {
             setPickDest(false);
           }}
         />
-        <View style={{ position: 'absolute', top: insets.top + 8, left: 16 }}>
-          <IconButton
-            icon="arrow-left"
-            label={t('common.back')}
-            onPress={() => router.back()}
-            size={48}
-            onMap
-          />
+        <View style={{ position: 'absolute', top: insets.top + 8, left: metrics.margin }}>
+          <IconButton icon="arrow-left" label={t('common.back')} onPress={() => router.back()} onMap />
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: insets.bottom + 120 }}>
+      <ScrollView
+        style={{
+          marginTop: -28,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderCurve: 'continuous',
+          backgroundColor: sys.background,
+        }}
+        contentContainerStyle={{ padding: 20, paddingTop: 24, gap: 24, paddingBottom: insets.bottom + 120 }}
+      >
         <View style={{ gap: 4 }}>
           <Text variant="title" accessibilityRole="header">
             {t('plan.title')}
@@ -253,17 +256,16 @@ export default function Plan() {
       </ScrollView>
 
       <View
+        pointerEvents="box-none"
         style={{
           position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          paddingHorizontal: 20,
-          paddingTop: 12,
-          paddingBottom: insets.bottom + 12,
-          backgroundColor: colors.surface.base,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
+          left: metrics.margin,
+          right: metrics.margin,
+          bottom: insets.bottom + 12,
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 4 },
         }}
       >
         <Button label={cta} icon="play" loading={busy} disabled={!preview} onPress={() => void start()} />
@@ -275,7 +277,7 @@ export default function Plan() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={{ gap: 10 }}>
-      <Text variant="heading" accessibilityRole="header">
+      <Text variant="headline" accessibilityRole="header">
         {title}
       </Text>
       {children}

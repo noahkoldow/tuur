@@ -37,4 +37,22 @@ describe('map style', () => {
     expect(typeof resolveMapStyle({ maptilerKey: 'k' })).toBe('object');
     expect(resolveMapStyle({})).toContain('demotiles');
   });
+
+  it('has a dark appearance with only dark fills and the same layers', () => {
+    const dark = buildTuurMapStyle({
+      tilesUrl: 'https://t/tiles.json',
+      glyphsUrl: 'https://g/{fontstack}/{range}.pbf',
+      appearance: 'dark',
+    }) as { layers: { id: string }[] };
+    expect(dark.layers.map((l) => l.id)).toEqual(style.layers.map((l) => l.id));
+    const lum = (hex: string) => {
+      const n = parseInt(hex.slice(1), 16);
+      return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+    };
+    const fills = [...JSON.stringify(dark).matchAll(/"(?:fill|background)-color":"(#[0-9A-Fa-f]{6})"/g)].map(
+      (m) => m[1]!,
+    );
+    expect(fills.length).toBeGreaterThan(3);
+    for (const c of fills) expect(lum(c)).toBeLessThan(0.2); // stays dark
+  });
 });

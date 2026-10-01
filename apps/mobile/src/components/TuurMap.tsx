@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { View, useColorScheme } from 'react-native';
 import {
   Camera,
   GeoJSONSource,
@@ -46,13 +46,17 @@ export function TuurMap({
 }: TuurMapProps) {
   const { t } = useTranslation();
   const cameraRef = useRef<CameraRef>(null);
+  const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const style = useMemo(
     () =>
-      resolveMapStyle({
-        ...(config.mapStyleUrl ? { styleUrl: config.mapStyleUrl } : {}),
-        ...(config.maptilerKey ? { maptilerKey: config.maptilerKey } : {}),
-      }),
-    [],
+      resolveMapStyle(
+        {
+          ...(config.mapStyleUrl ? { styleUrl: config.mapStyleUrl } : {}),
+          ...(config.maptilerKey ? { maptilerKey: config.maptilerKey } : {}),
+        },
+        appearance,
+      ),
+    [appearance],
   );
   const navigating = Boolean(leg && leg.length > 1);
   const [mapZoom, setMapZoom] = useState(zoom);

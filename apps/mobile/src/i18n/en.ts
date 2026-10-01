@@ -4,6 +4,7 @@ type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };
 
 export const en: Widen<typeof de> = {
   app: { name: 'tuur', tagline: 'Your AI audio city guide' },
+  tabs: { explore: 'Explore', offline: 'Offline', profile: 'Profile' },
   common: {
     continue: 'Continue',
     skip: 'Skip',

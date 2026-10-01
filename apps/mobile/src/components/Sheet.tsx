@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { haptics, springs } from '../motion';
-import { colors, radii } from '../theme';
-import { shadow } from '../theme';
+import { radii, sys } from '../theme';
 
 interface Props {
   /** Visible heights in px for each snap stop, ascending. */
@@ -18,6 +17,8 @@ interface Props {
   scrollRef?: React.RefObject<ScrollView | null>;
   /** The listener scrolled the content themselves. */
   onUserScroll?: () => void;
+  /** Sheet surface: `grouped` (default) suits list content, `plain` suits reading text. */
+  tone?: 'grouped' | 'plain';
 }
 
 /**
@@ -34,7 +35,9 @@ export function Sheet({
   header,
   scrollRef,
   onUserScroll,
+  tone = 'grouped',
 }: Props) {
+  const background = tone === 'grouped' ? sys.grouped : sys.background;
   const { height: screenH } = useWindowDimensions();
   const snaps = useMemo(() => snapPoints.map((s) => Math.min(s, screenH * 0.92)), [snapPoints, screenH]);
   const max = snaps[snaps.length - 1]!;
@@ -97,12 +100,17 @@ export function Sheet({
           right: 0,
           bottom: 0,
           height: max,
-          backgroundColor: colors.surface.base,
-          borderTopLeftRadius: 24,
-          borderTopRightRadius: 24,
+          backgroundColor: background,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderCurve: 'continuous',
           transform: [{ translateY: offset }],
+          shadowColor: '#000',
+          shadowOpacity: 0.14,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: -4 },
+          elevation: 12,
         },
-        shadow.card,
       ]}
     >
       <View {...pan.panHandlers}>
@@ -119,9 +127,17 @@ export function Sheet({
             )
           }
           onPress={() => snapTo((current + 1) % snaps.length)}
-          style={{ alignItems: 'center', paddingVertical: 10 }}
+          style={{ alignItems: 'center', justifyContent: 'center', minHeight: 24 }}
         >
-          <View style={{ width: 44, height: 5, borderRadius: 3, backgroundColor: colors.border }} />
+          <View
+            style={{
+              width: 36,
+              height: 5,
+              borderRadius: 3,
+              backgroundColor: sys.labelTertiary,
+              opacity: 0.6,
+            }}
+          />
         </Pressable>
         {header}
       </View>
@@ -130,7 +146,7 @@ export function Sheet({
         onScrollBeginDrag={onUserScroll}
         // always scrollable: content below the header must stay reachable for screen-reader and switch users
         scrollEnabled
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
         {children}

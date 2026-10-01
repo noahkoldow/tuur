@@ -3,12 +3,13 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  type ColorValue,
   View,
   type ImageSourcePropType,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { colors, radii, spacing } from '../theme';
+import { radii, spacing, sys } from '../theme';
 import { Text } from './Text';
 import idlePng from '../../assets/mascot/tuu_01_idle_front.png';
 import walkPng from '../../assets/mascot/tuu_02_walk_forward.png';
@@ -148,13 +149,13 @@ interface TipProps {
   pose: MascotPose;
   text: string;
   size?: number;
-  /** Bubble fill; use `colors.surface.base` on grey (`surface.subtle`) screens. */
-  bubble?: string;
+  /** Bubble fill; use `sys.elevated` on grouped (grey) screens. */
+  bubble?: ColorValue;
   style?: StyleProp<ViewStyle>;
 }
 
 /** Tuu next to a short one-line hint in a speech bubble. The text is read; Tuu stays decorative. */
-export function MascotTip({ pose, text, size = 56, bubble = colors.surface.subtle, style }: TipProps) {
+export function MascotTip({ pose, text, size = 56, bubble = sys.fill, style }: TipProps) {
   return (
     <View style={[{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, style]}>
       <Mascot pose={pose} size={size} />
@@ -180,7 +181,7 @@ export function MascotTip({ pose, text, size = 56, bubble = colors.surface.subtl
             paddingVertical: 10,
           }}
         >
-          <Text variant="bodySecondary" style={{ color: colors.ink.primary }}>
+          <Text variant="subheadline" color={sys.label}>
             {text}
           </Text>
         </View>

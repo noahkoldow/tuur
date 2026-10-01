@@ -1,35 +1,19 @@
-import { Pressable, View } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { colors, fonts, shadow } from '../theme';
+import { fonts, shadow, sys } from '../theme';
+import { IconButton } from './Button';
+import { Icon } from './Icon';
 import { Text } from './Text';
 import { INTEREST_ICON } from './icons';
 import type { MapSpot } from './mapTypes';
 
-/** Google-Maps-style button: brings the camera back to the user; the map otherwise stays where the user pans it. */
+/** Brings the camera back to the user; the map otherwise stays where the user pans it. Floats on glass. */
 export function LocateButton({ onPress, bottom }: { onPress: () => void; bottom: number }) {
   const { t } = useTranslation();
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={t('map.locate')}
-      onPress={onPress}
-      hitSlop={6}
-      style={({ pressed }) => ({
-        position: 'absolute',
-        right: 16,
-        bottom,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: pressed ? colors.surface.subtle : colors.surface.base,
-        ...shadow.card,
-      })}
-    >
-      <MaterialCommunityIcons name="crosshairs-gps" size={24} color={colors.brand.redPressed} />
-    </Pressable>
+    <View style={{ position: 'absolute', right: 16, bottom }}>
+      <IconButton onMap icon="navigation" label={t('map.locate')} onPress={onPress} />
+    </View>
   );
 }
 
@@ -56,17 +40,13 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
           borderRadius: d / 2,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: spot.hot ? colors.brand.red : colors.surface.base,
+          backgroundColor: spot.hot ? sys.accent : sys.elevated,
           borderWidth: 2,
-          borderColor: spot.hot ? '#FFFFFF' : colors.brand.red,
+          borderColor: spot.hot ? '#FFFFFF' : sys.accent,
           ...shadow.card,
         }}
       >
-        <MaterialCommunityIcons
-          name={glyph}
-          size={Math.round(d * 0.5)}
-          color={spot.hot ? '#FFFFFF' : colors.brand.redPressed}
-        />
+        <Icon name={glyph} size={Math.round(d * 0.5)} color={spot.hot ? '#FFFFFF' : sys.accentText} />
       </View>
       {spot.hot ? (
         <View
@@ -77,12 +57,12 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
             width: 18,
             height: 18,
             borderRadius: 9,
-            backgroundColor: colors.surface.base,
+            backgroundColor: sys.elevated,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <MaterialCommunityIcons name="fire" size={13} color={colors.brand.redPressed} />
+          <Icon name="fire" size={12} color={sys.accentText} />
         </View>
       ) : null}
     </View>
@@ -108,9 +88,9 @@ export function ClusterMarker({ count, hot }: { count: number; hot: boolean }) {
           borderRadius: d / 2,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: hot ? colors.brand.red : colors.surface.base,
+          backgroundColor: hot ? sys.accent : sys.elevated,
           borderWidth: 2,
-          borderColor: hot ? '#FFFFFF' : colors.brand.red,
+          borderColor: hot ? '#FFFFFF' : sys.accent,
           ...shadow.card,
         }}
       >
@@ -119,7 +99,7 @@ export function ClusterMarker({ count, hot }: { count: number; hot: boolean }) {
           style={{
             fontFamily: fonts.heading,
             fontSize: 15,
-            color: hot ? '#FFFFFF' : colors.brand.redPressed,
+            color: hot ? '#FFFFFF' : sys.accentText,
           }}
         >
           {count}

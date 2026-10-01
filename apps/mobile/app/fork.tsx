@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { type RoutingProfile } from '@tuur/shared';
 import { useBackend } from '../src/backend';
 import { useSessionGate } from '../src/billing/useSessionGate';
 import { Banner } from '../src/components/Banner';
-import { Button, IconButton, Row } from '../src/components/Button';
+import { Button, Row } from '../src/components/Button';
 import { Chip } from '../src/components/Chip';
 import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
-import { Screen } from '../src/components/Screen';
+import { ScrollScreen } from '../src/components/Screen';
 import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
 import { ForkController, type ForkChoice } from '../src/guide/modes';
@@ -19,6 +19,7 @@ import { usePoiPool } from '../src/hooks/usePoiPool';
 import { usePosition } from '../src/location/usePosition';
 import { formatDurationShort } from '../src/format';
 import { useSettings } from '../src/state/settings';
+import { sys } from '../src/theme';
 
 const TIMES = [60, 90, 120];
 
@@ -85,34 +86,41 @@ export default function Fork() {
   };
 
   return (
-    <Screen>
-      <Row style={{ justifyContent: 'space-between', paddingVertical: 8 }}>
-        <IconButton icon="arrow-left" label={t('common.back')} onPress={() => router.back()} size={44} />
-        <Text variant="title" accessibilityRole="header">
-          {t('fork.title')}
+    <>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: t('fork.title'),
+          headerTransparent: true,
+          headerShadowVisible: false,
+        }}
+      />
+      <ScrollScreen grouped={false}>
+        <Text variant="body" color={sys.labelSecondary}>
+          {t('fork.intro')}
         </Text>
-        <View style={{ width: 44 }} />
-      </Row>
-      <ScrollView contentContainerStyle={{ gap: 18, paddingVertical: 12 }}>
-        <Text variant="bodySecondary">{t('fork.intro')}</Text>
-        <Text variant="heading">{t('fork.timeTitle')}</Text>
-        <Row gap={8}>
-          {TIMES.map((m) => (
-            <Chip
-              key={m}
-              label={formatDurationShort(m, language)}
-              selected={minutes === m}
-              onPress={() => setMinutes(m)}
-            />
-          ))}
-        </Row>
+        <View style={{ gap: 10 }}>
+          <Text variant="headline" accessibilityRole="header">
+            {t('fork.timeTitle')}
+          </Text>
+          <Row gap={8} style={{ flexWrap: 'wrap' }}>
+            {TIMES.map((m) => (
+              <Chip
+                key={m}
+                label={formatDurationShort(m, language)}
+                selected={minutes === m}
+                onPress={() => setMinutes(m)}
+              />
+            ))}
+          </Row>
+        </View>
         {startError ? <Banner tone="error" text={t('errors.startFailed')} /> : null}
         {!ready ? (
           <View style={{ alignItems: 'center', gap: 10, paddingVertical: 24 }}>
             <Mascot pose="think" size={112} />
             <Row gap={10}>
-              <SpinningMark size={32} label={t('plan.waitArea')} />
-              <Text variant="caption">{t('plan.waitArea')}</Text>
+              <SpinningMark size={28} label={t('plan.waitArea')} />
+              <Text variant="subheadline">{t('plan.waitArea')}</Text>
             </Row>
           </View>
         ) : !gate.unlocked ? (
@@ -126,7 +134,7 @@ export default function Fork() {
           <View style={{ gap: 12 }}>
             <Row gap={10}>
               <Mascot pose="point" size={48} />
-              <Text variant="heading" accessibilityRole="header" style={{ flex: 1 }}>
+              <Text variant="title3" accessibilityRole="header" style={{ flex: 1 }}>
                 {t('fork.choose')}
               </Text>
             </Row>
@@ -144,7 +152,7 @@ export default function Fork() {
             {busy ? <Button label={t('common.loading')} onPress={() => undefined} loading /> : null}
           </View>
         )}
-      </ScrollView>
-    </Screen>
+      </ScrollScreen>
+    </>
   );
 }

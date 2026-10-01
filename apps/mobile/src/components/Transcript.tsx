@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { tokenize, wordAt, type Paragraph } from '@tuur/shared';
-import { colors, fonts } from '../theme';
+import { sys } from '../theme';
 import { Text } from './Text';
 
 /**
@@ -37,7 +37,7 @@ export function Transcript({
         const current = i === paragraphIndex;
         const style = {
           opacity: current ? 1 : 0.6,
-          fontFamily: current ? fonts.headingMedium : fonts.body,
+          fontWeight: current ? ('600' as const) : ('400' as const),
         };
         const record = (e: { nativeEvent: { layout: { y: number } } }) => {
           ys.current[i] = e.nativeEvent.layout.y;
@@ -55,10 +55,7 @@ export function Transcript({
             <Text variant="body" style={style}>
               {tokenize(p.text).map((tok, j) =>
                 j === at.token ? (
-                  <Text
-                    key={j}
-                    style={{ backgroundColor: colors.brand.redTint, color: colors.brand.redPressed }}
-                  >
+                  <Text key={j} style={{ backgroundColor: sys.accentTint, color: sys.accentText }}>
                     {tok}
                   </Text>
                 ) : (

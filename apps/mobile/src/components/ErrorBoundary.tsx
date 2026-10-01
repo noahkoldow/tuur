@@ -4,6 +4,7 @@ import i18n from '../i18n';
 import { recordError } from '../telemetry';
 import { Banner } from './Banner';
 import { Button } from './Button';
+import { sys } from '../theme';
 import { Mascot } from './Mascot';
 import { Text } from './Text';
 
@@ -22,9 +23,11 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 16, backgroundColor: '#FFFFFF' }}>
+      <View
+        style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 16, backgroundColor: sys.background }}
+      >
         <Mascot pose="think" size={120} style={{ alignSelf: 'center' }} />
-        <Text variant="title" accessibilityRole="header">
+        <Text variant="title1" accessibilityRole="header">
           tuur
         </Text>
         <Banner tone="error" text={i18n.t('errors.generic')} />

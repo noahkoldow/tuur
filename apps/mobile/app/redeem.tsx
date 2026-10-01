@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { BackendError, useBackend, type RedemptionToken } from '../src/backend';
 import { Banner } from '../src/components/Banner';
-import { Button, IconButton, Row } from '../src/components/Button';
+import { Button } from '../src/components/Button';
+import { CloseButton } from '../src/components/HeaderButton';
+import { Icon } from '../src/components/Icon';
 import { QrCode } from '../src/components/QrCode';
 import { Screen } from '../src/components/Screen';
 import { SpinningMark } from '../src/components/SpinningMark';
@@ -13,7 +14,7 @@ import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import { currentPosition } from '../src/location/real';
 import { usePosition } from '../src/location/usePosition';
-import { colors } from '../src/theme';
+import { metrics, sys } from '../src/theme';
 
 const fmt = (ms: number) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -80,59 +81,75 @@ export default function Redeem() {
   const expired = Boolean(token) && left <= 0 && !done;
 
   return (
-    <Screen>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <IconButton icon="x" label={t('paywall.close')} onPress={() => router.back()} size={44} />
-      </Row>
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-        {busy ? (
-          <SpinningMark size={72} label={t('common.loading')} />
-        ) : error ? (
-          <>
-            <Feather name="alert-circle" size={44} color={colors.ink.secondary} />
-            <Text variant="title" accessibilityRole="header" style={{ textAlign: 'center' }}>
-              {t('partner.errorTitle')}
-            </Text>
-            <Text variant="bodySecondary" style={{ textAlign: 'center' }}>
-              {error}
-            </Text>
-            <Button variant="secondary" label={t('partner.newCode')} onPress={() => void create()} />
-          </>
-        ) : token && done ? (
-          <>
-            <Banner icon="check-circle" text={t('partner.redeemed')} />
-            <Text variant="heading">{token.offerTitle}</Text>
-            <Button label={t('paywall.close')} onPress={() => router.back()} />
-          </>
-        ) : token ? (
-          <>
-            <Text variant="title" accessibilityRole="header" style={{ textAlign: 'center' }}>
-              {t('partner.qrTitle')}
-            </Text>
-            <Text variant="heading" style={{ textAlign: 'center' }}>
-              {token.offerTitle} · {token.partnerName}
-            </Text>
-            <View style={{ opacity: expired ? 0.25 : 1 }}>
-              <QrCode value={token.token} size={260} label={token.offerTitle} />
-            </View>
-            {expired ? (
-              <>
-                <Banner tone="warning" text={t('partner.expired')} />
-                <Button label={t('partner.newCode')} onPress={() => void create()} />
-              </>
-            ) : (
-              <>
-                <Text variant="heading" color={colors.brand.redPressed}>
-                  {t('partner.expiresIn', { time: fmt(left) })}
-                </Text>
-                <Text variant="caption" style={{ textAlign: 'center' }}>
-                  {t('partner.qrHint')}
-                </Text>
-              </>
-            )}
-          </>
-        ) : null}
-      </View>
-    </Screen>
+    <>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: '',
+          headerShadowVisible: false,
+          headerRight: () => <CloseButton label={t('paywall.close')} onPress={() => router.back()} />,
+        }}
+      />
+      <Screen padded>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          {busy ? (
+            <SpinningMark size={72} label={t('common.loading')} />
+          ) : error ? (
+            <>
+              <Icon name="alert-circle" size={44} color={sys.labelSecondary} />
+              <Text variant="title2" accessibilityRole="header" align="center">
+                {t('partner.errorTitle')}
+              </Text>
+              <Text variant="body" color={sys.labelSecondary} align="center">
+                {error}
+              </Text>
+              <Button variant="secondary" label={t('partner.newCode')} onPress={() => void create()} />
+            </>
+          ) : token && done ? (
+            <>
+              <Banner icon="check-circle" text={t('partner.redeemed')} />
+              <Text variant="headline">{token.offerTitle}</Text>
+              <Button label={t('paywall.close')} onPress={() => router.back()} />
+            </>
+          ) : token ? (
+            <>
+              <Text variant="title2" accessibilityRole="header" align="center">
+                {t('partner.qrTitle')}
+              </Text>
+              <Text variant="headline" align="center">
+                {token.offerTitle} · {token.partnerName}
+              </Text>
+              <View
+                style={{
+                  opacity: expired ? 0.25 : 1,
+                  padding: 16,
+                  borderRadius: metrics.radius.card,
+                  borderCurve: 'continuous',
+                  // QR codes need a light quiet zone in both appearances
+                  backgroundColor: '#FFFFFF',
+                }}
+              >
+                <QrCode value={token.token} size={248} label={token.offerTitle} />
+              </View>
+              {expired ? (
+                <>
+                  <Banner tone="warning" text={t('partner.expired')} />
+                  <Button label={t('partner.newCode')} onPress={() => void create()} />
+                </>
+              ) : (
+                <>
+                  <Text variant="headline" color={sys.accentText}>
+                    {t('partner.expiresIn', { time: fmt(left) })}
+                  </Text>
+                  <Text variant="footnote" align="center">
+                    {t('partner.qrHint')}
+                  </Text>
+                </>
+              )}
+            </>
+          ) : null}
+        </View>
+      </Screen>
+    </>
   );
 }

@@ -17,7 +17,7 @@ import { useEntitlementSync } from '../src/billing/entitlements';
 import { getOfflineLibrary } from '../src/offline';
 import { setCrashReporting } from '../src/telemetry';
 import { useSettings } from '../src/state/settings';
-import { colors } from '../src/theme';
+import { sys } from '../src/theme';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -52,19 +52,20 @@ export default function RootLayout() {
     <ErrorBoundary>
       <SafeAreaProvider>
         <BackendProvider>
-          <StatusBar style="dark" />
+          <StatusBar style="auto" />
           <Stack
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: colors.surface.base },
-              // native push with full-width back swipe; root screens cross-fade, sheets slide up
+              contentStyle: { backgroundColor: sys.background },
+              headerTintColor: sys.accentText as string,
+              // native push with full-width back swipe; sheets slide up and swipe down to dismiss
               animation: 'default',
               fullScreenGestureEnabled: true,
             }}
           >
             <Stack.Screen name="index" options={{ animation: 'fade' }} />
             <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
-            <Stack.Screen name="home" options={{ animation: 'fade' }} />
+            <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
             <Stack.Screen name="play" options={{ animation: 'slide_from_bottom' }} />
             <Stack.Screen
               name="summary/[id]"

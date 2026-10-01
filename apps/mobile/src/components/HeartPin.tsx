@@ -1,8 +1,8 @@
 import Svg, { Path } from 'react-native-svg';
 import { View } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { Interest } from '@tuur/shared';
 import { MARK_ASPECT_RATIO, MARK_PATH, MARK_VIEWBOX, colors, fonts } from '@tuur/ui';
+import { Icon } from './Icon';
 import { INTEREST_ICON } from './icons';
 import { Text } from './Text';
 
@@ -71,7 +71,7 @@ export function HeartPin({
             pointerEvents="none"
             style={{ position: 'absolute', left: 0, right: 0, top: h * 0.4, alignItems: 'center' }}
           >
-            <MaterialCommunityIcons name={glyph} size={Math.round(w * 0.36)} color={glyphColor} />
+            <Icon name={glyph} size={Math.round(w * 0.36)} color={glyphColor} weight="semibold" />
           </View>
         ) : null}
         {number !== undefined ? (

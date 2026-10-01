@@ -1,7 +1,7 @@
-import { Platform } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { HIT, colors, fonts, radii } from '../theme';
+import { HIT } from '../theme';
+import { Icon } from './Icon';
 import { PressableScale } from './PressableScale';
 import { SpinningMark } from './SpinningMark';
 import { Text } from './Text';
@@ -19,13 +19,18 @@ export function AppleSignInButton({
   busy?: boolean;
   onPress: () => void;
 }) {
+  const dark = useColorScheme() === 'dark';
   if (Platform.OS === 'ios' && !busy)
     return (
       <AppleAuthentication.AppleAuthenticationButton
         buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-        buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-        cornerRadius={radii.lg}
-        style={{ height: HIT + 4 }}
+        buttonStyle={
+          dark
+            ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+            : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+        }
+        cornerRadius={25}
+        style={{ height: 50 }}
         onPress={onPress}
       />
     );
@@ -37,9 +42,9 @@ export function AppleSignInButton({
       disabled={busy}
       onPress={onPress}
       style={{
-        minHeight: HIT + 4,
-        borderRadius: radii.lg,
-        backgroundColor: '#000000',
+        minHeight: Math.max(HIT, 50),
+        borderRadius: 25,
+        backgroundColor: dark ? '#FFFFFF' : '#000000',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -47,11 +52,13 @@ export function AppleSignInButton({
       }}
     >
       {busy ? (
-        <SpinningMark size={22} label={label} color="#FFFFFF" />
+        <SpinningMark size={22} label={label} color={dark ? '#000000' : '#FFFFFF'} />
       ) : (
-        <MaterialCommunityIcons name="apple" size={22} color="#FFFFFF" />
+        <Icon name="apple" size={22} color={dark ? '#000000' : '#FFFFFF'} />
       )}
-      <Text style={{ fontFamily: fonts.heading, fontSize: 17, color: colors.surface.base }}>{label}</Text>
+      <Text variant="headline" color={dark ? '#000000' : '#FFFFFF'}>
+        {label}
+      </Text>
     </PressableScale>
   );
 }

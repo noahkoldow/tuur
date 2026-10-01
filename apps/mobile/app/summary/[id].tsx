@@ -1,14 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { Image, Platform, ScrollView, Share, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
 import { CITY_BADGES, decodePolyline, earnedBadges, summarizeWalk, type LatLng } from '@tuur/shared';
+import { palette } from '@tuur/ui';
 import { Button, IconButton, Row } from '../../src/components/Button';
+import { Icon } from '../../src/components/Icon';
+import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Mascot } from '../../src/components/Mascot';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
@@ -16,7 +18,7 @@ import { formatKm } from '../../src/format';
 import { goHome } from '../../src/navigation';
 import { useHistory, type TourRecord } from '../../src/state/history';
 import { useSettings } from '../../src/state/settings';
-import { colors, radii, shadow } from '../../src/theme';
+import { metrics, sys } from '../../src/theme';
 import wordmark from '../../assets/wordmark-red.png';
 
 const formatDuration = (ms: number, lang: string) => {
@@ -129,7 +131,7 @@ export default function Summary() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface.subtle }}>
+    <View style={{ flex: 1, backgroundColor: sys.grouped }}>
       <View style={{ height: 300 }}>
         <TuurMap
           center={line[0] ?? record.center}
@@ -144,14 +146,28 @@ export default function Summary() {
             state: 'visited',
           }))}
         />
-        <View style={{ position: 'absolute', top: insets.top + 8, left: 16 }}>
-          <IconButton icon="x" label={t('common.close')} onPress={() => goHome(router)} size={48} onMap />
+        <View style={{ position: 'absolute', top: insets.top + 8, left: metrics.margin }}>
+          <IconButton icon="x" label={t('common.close')} onPress={() => goHome(router)} onMap />
         </View>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 120 }}>
+      <ScrollView
+        style={{
+          marginTop: -28,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderCurve: 'continuous',
+          backgroundColor: sys.grouped,
+        }}
+        contentContainerStyle={{
+          padding: metrics.margin,
+          paddingTop: 24,
+          gap: 20,
+          paddingBottom: insets.bottom + 140,
+        }}
+      >
         <View style={{ gap: 2 }}>
-          <Text variant="caption">{date}</Text>
-          <Text variant="title" accessibilityRole="header">
+          <Text variant="footnote">{date}</Text>
+          <Text variant="title1" accessibilityRole="header">
             {title}
           </Text>
         </View>
@@ -166,26 +182,37 @@ export default function Summary() {
                 flexGrow: 1,
                 padding: 14,
                 gap: 4,
-                borderRadius: radii.lg,
-                backgroundColor: colors.surface.base,
+                borderRadius: metrics.radius.card,
+                borderCurve: 'continuous',
+                backgroundColor: sys.elevated,
               }}
             >
-              <MaterialCommunityIcons name={f.icon} size={20} color={colors.brand.redPressed} />
-              <Text variant="title">{f.value}</Text>
-              <Text variant="caption">{f.label}</Text>
+              <Icon name={f.icon} size={20} color={sys.labelSecondary} />
+              <Text variant="title2">{f.value}</Text>
+              <Text variant="footnote">{f.label}</Text>
             </View>
           ))}
         </View>
 
         {newBadge ? (
-          <Row gap={12} style={{ padding: 14, borderRadius: radii.lg, backgroundColor: colors.surface.base }}>
+          <Row
+            gap={12}
+            style={{
+              padding: 14,
+              borderRadius: metrics.radius.card,
+              borderCurve: 'continuous',
+              backgroundColor: sys.elevated,
+            }}
+          >
             <Mascot pose="celebrate" size={72} />
             <View style={{ flex: 1, gap: 2 }}>
-              <Text variant="label" style={{ color: colors.brand.redPressed }}>
+              <Text variant="subheadline" style={{ color: sys.accentText, fontWeight: '600' }}>
                 {t('summary.newBadge')}
               </Text>
-              <Text variant="heading">{lang === 'de' ? newBadge.city.names.de : newBadge.city.names.en}</Text>
-              <Text variant="caption">
+              <Text variant="headline">
+                {lang === 'de' ? newBadge.city.names.de : newBadge.city.names.en}
+              </Text>
+              <Text variant="footnote">
                 {t(`profile.tier${newBadge.tier[0]!.toUpperCase()}${newBadge.tier.slice(1)}`)}
               </Text>
             </View>
@@ -193,54 +220,33 @@ export default function Summary() {
         ) : null}
 
         {record.stops.length ? (
-          <View style={{ gap: 8 }}>
-            <Text variant="heading">{t('summary.stopsTitle')}</Text>
+          <ListGroup title={t('summary.stopsTitle')}>
             {record.stops.map((s, i) => (
-              <Row key={s.id} gap={12}>
-                <View
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 14,
-                    backgroundColor: colors.brand.redTint,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text variant="label" color={colors.brand.redPressed}>
-                    {i + 1}
-                  </Text>
-                </View>
-                <Text variant="body" style={{ flex: 1 }} numberOfLines={1}>
-                  {s.name}
-                </Text>
-              </Row>
+              <ListRow key={s.id} label={`${i + 1}. ${s.name}`} />
             ))}
-          </View>
+          </ListGroup>
         ) : null}
 
         {/* the picture that is shared (also visible, so people see what they share) */}
-        <Text variant="heading">{t('summary.cardTitle')}</Text>
+        <Text variant="footnote" style={{ textTransform: 'uppercase', paddingHorizontal: metrics.margin }}>
+          {t('summary.cardTitle')}
+        </Text>
         <View collapsable={false} ref={card}>
           <ShareCard record={record} line={line} title={title} date={date} facts={facts} />
         </View>
       </ScrollView>
       <View
+        pointerEvents="box-none"
         style={{
           position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          padding: 16,
-          paddingBottom: insets.bottom + 16,
-          gap: 8,
-          backgroundColor: colors.surface.base,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
+          left: metrics.margin,
+          right: metrics.margin,
+          bottom: insets.bottom + 12,
+          gap: 4,
         }}
       >
         <Button label={t('summary.share')} icon="share" loading={sharing} onPress={() => void share()} />
-        <Button variant="ghost" label={t('player.backHome')} onPress={() => goHome(router)} />
+        <Button variant="ghost" size="regular" label={t('player.backHome')} onPress={() => goHome(router)} />
       </View>
     </View>
   );
@@ -275,11 +281,11 @@ function ShareCard({
     <View
       style={{
         aspectRatio: 4 / 5,
-        borderRadius: radii.lg,
+        borderRadius: metrics.radius.card,
+        borderCurve: 'continuous',
         padding: 20,
-        backgroundColor: colors.surface.base,
+        backgroundColor: palette.light.background,
         gap: 12,
-        ...shadow.card,
       }}
     >
       <Row style={{ justifyContent: 'space-between' }}>
@@ -289,7 +295,9 @@ function ShareCard({
           resizeMode="contain"
           accessibilityLabel="tuur"
         />
-        <Text variant="caption">{date}</Text>
+        <Text variant="footnote" color={palette.light.labelSecondary}>
+          {date}
+        </Text>
       </Row>
       <View style={{ flex: 1 }}>
         {pts.length > 1 ? (
@@ -297,7 +305,7 @@ function ShareCard({
             <Polyline
               points={line.map(project).join(' ')}
               fill="none"
-              stroke={colors.brand.red}
+              stroke={palette.light.accent}
               strokeWidth={2.2}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -311,7 +319,7 @@ function ShareCard({
                   cy={y}
                   r={2.2}
                   fill="#FFFFFF"
-                  stroke={colors.brand.red}
+                  stroke={palette.light.accent}
                   strokeWidth={1.4}
                 />
               );
@@ -319,14 +327,16 @@ function ShareCard({
           </Svg>
         ) : null}
       </View>
-      <Text variant="title" numberOfLines={2}>
+      <Text variant="title1" numberOfLines={2} color={palette.light.label}>
         {title}
       </Text>
       <Row style={{ justifyContent: 'space-between' }}>
         {facts.map((f) => (
           <View key={f.label} style={{ gap: 2 }}>
-            <Text variant="heading">{f.value}</Text>
-            <Text variant="caption" style={{ fontSize: 11, lineHeight: 14 }}>
+            <Text variant="headline" color={palette.light.label}>
+              {f.value}
+            </Text>
+            <Text variant="caption" color={palette.light.labelSecondary}>
               {f.label}
             </Text>
           </View>

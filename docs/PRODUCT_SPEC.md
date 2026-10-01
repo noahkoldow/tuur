@@ -36,7 +36,7 @@ Verwende ausschließlich diese Dateien. Konfiguriere Icons und Splash in `app.co
 * Karten-Marker in Herz-Pin-Form: Wegpunkte auf der Karte nutzen die Silhouette der Bildmarke (rot gefüllt mit weißer Nummer für die aktuelle Tour, grau für besuchte Punkte, rot umrandet für kommende). Partner-Marker nutzen dieselbe Form mit einem klar unterscheidbaren „Partner“-Badge.
 * Kartenstil: heller, zurückhaltender Grundstil (hell-grau und weiß), damit die rote Route dominiert.
 * Barrierefreiheit: Kontraste nach WCAG AA; Weiß auf `#ED0516` nur für große bzw. fette Texte und Icons einsetzen, sonst `redPressed` verwenden.
-* v1 ist nur im hellen Theme; die Tokens sind so angelegt, dass ein Dark Mode später ergänzt werden kann.
+* ~~v1 ist nur im hellen Theme~~ – überholt durch D50 (2026-10-01): Hell und Dunkel folgen dem System, semantische Tokens in `packages/ui`.
 
 3. Tech-Stack (verbindlich)
 Monorepo mit pnpm workspaces und Turborepo:
@@ -215,7 +215,7 @@ Alle Schemas stehen als Zod in `packages/shared`. Die Security Rules werden mit 
 * Keine synchronisierte Gruppentour in Echtzeit (nur Teilen per Invite).
 * Kein Nutzer-generierter Content außer Feedback.
 * Keine Web-Version der Tour-App.
-* Kein Dark Mode in v1.
+* ~~Kein Dark Mode in v1.~~ (überholt durch D50: Dark Mode ist Teil des Apple-HIG-Redesigns.)
 * Keine proaktive weltweite Vorab-Generierung (alles on demand).
 
 13. Phasen & Akzeptanzkriterien

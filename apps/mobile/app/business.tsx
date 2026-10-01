@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Linking, Platform, ScrollView, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Linking, TextInput, View } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -12,14 +11,17 @@ import {
 } from '@tuur/shared';
 import { BackendError, useBackend } from '../src/backend';
 import { Banner } from '../src/components/Banner';
-import { Button, IconButton, Row } from '../src/components/Button';
+import { Button, Row } from '../src/components/Button';
 import { Checkbox } from '../src/components/Checkbox';
 import { Chip } from '../src/components/Chip';
+import { BackButton } from '../src/components/HeaderButton';
+import { ListGroup, ListRow } from '../src/components/ListGroup';
 import { Mascot } from '../src/components/Mascot';
+import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import { useSettings } from '../src/state/settings';
-import { colors, radii } from '../src/theme';
+import { metrics, sys } from '../src/theme';
 
 type Step = 'intro' | 'pricing' | 'apply' | 'sent';
 const STEPS: Step[] = ['intro', 'pricing', 'apply'];
@@ -80,213 +82,173 @@ export default function Business() {
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1, backgroundColor: colors.surface.base, paddingTop: insets.top }}
-    >
-      <Row style={{ justifyContent: 'space-between', paddingVertical: 8, paddingHorizontal: 16 }}>
-        <IconButton
-          icon="arrow-left"
-          label={t('common.back')}
-          onPress={() => (idx > 0 && step !== 'sent' ? setStep(STEPS[idx - 1]!) : router.back())}
-          size={44}
-        />
-        {step !== 'sent' ? (
-          <Row gap={6}>
-            {STEPS.map((s, i) => (
-              <View
-                key={s}
-                style={{
-                  width: i === idx ? 22 : 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: i <= idx ? colors.brand.red : colors.border,
-                }}
-              />
-            ))}
-          </Row>
-        ) : null}
-        <View style={{ width: 44 }} />
-      </Row>
-
-      <ScrollView
-        contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 32 }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {step === 'intro' ? (
-          <>
-            <Mascot pose="present" size={112} />
-            <Text variant="label" style={{ color: colors.brand.redPressed }}>
-              {t('business.entry')}
-            </Text>
-            <Text variant="display" accessibilityRole="header">
-              {t('business.step1Title')}
-            </Text>
-            <Point icon="map-marker-star-outline" text={t('business.step1Point1')} />
-            <Point icon="tag-outline" text={t('business.step1Point2')} />
-            <Point icon="qrcode" text={t('business.step1Point3')} />
-          </>
-        ) : null}
-
-        {step === 'pricing' ? (
-          <>
-            <Text variant="display" accessibilityRole="header">
-              {t('business.step2Title')}
-            </Text>
-            <PriceCard
-              amount={money(cafe.visitMinor)}
-              label={t('business.perVisit')}
-              hint={t('business.perVisitHint')}
+    <>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: step === 'sent' ? '' : t('business.entry'),
+          headerBackVisible: false,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: sys.grouped as string },
+          headerLeft: () => (
+            <BackButton
+              label={t('common.back')}
+              onPress={() => (idx > 0 && step !== 'sent' ? setStep(STEPS[idx - 1]!) : router.back())}
             />
-            <PriceCard amount={money(cafe.redemptionMinor)} label={t('business.perRedemption')} />
-            <PriceCard
-              amount="0 €"
-              label={t('business.freeVisits', { count: PRICING.freeVisits })}
-              hint={t('business.freeVisitsHint')}
-            />
-            <PriceCard
-              amount={money(PRICING.minMonthlyCapMinor)}
-              label={t('business.cap')}
-              hint={t('business.capHint', { amount: money(PRICING.minMonthlyCapMinor) })}
-            />
-            <Text variant="caption">{t('business.noBase')}</Text>
-          </>
-        ) : null}
-
-        {step === 'apply' ? (
-          <>
-            <Text variant="display" accessibilityRole="header">
-              {t('business.step3Title')}
-            </Text>
-            <Field label={t('business.placeName')} value={form.placeName} onChange={set('placeName')} />
-            <View style={{ gap: 8 }}>
-              <Text variant="label">{t('business.category')}</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {PARTNER_CATEGORIES.map((c) => (
-                  <Chip
-                    key={c}
-                    label={t(`business.cat_${c}`)}
-                    selected={form.category === c}
-                    onPress={() => setForm((f) => ({ ...f, category: c }))}
-                  />
-                ))}
-              </View>
-            </View>
-            <Field
-              label={t('business.address')}
-              value={form.address}
-              onChange={set('address')}
-              autoComplete="street-address"
-            />
-            <Field
-              label={t('business.email')}
-              value={form.contactEmail}
-              onChange={set('contactEmail')}
-              keyboardType="email-address"
-              autoComplete="email"
-            />
-            <Field
-              label={t('business.website')}
-              value={form.website}
-              onChange={set('website')}
-              keyboardType="url"
-            />
-            <Field
-              label={t('business.pitch')}
-              hint={t('business.pitchHint')}
-              value={form.pitch}
-              onChange={set('pitch')}
-              multiline
-            />
-            <Checkbox checked={consent} onChange={setConsent} label={t('business.consent')} />
-            <Button
-              variant="ghost"
-              label={t('settings.terms')}
-              onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
-            />
-            {error ? <Banner tone="warning" text={error} /> : null}
-          </>
-        ) : null}
-
-        {step === 'sent' ? (
-          <View style={{ gap: 16, paddingTop: 24 }}>
-            <Mascot pose="celebrate" size={120} />
-            <Text variant="display" accessibilityRole="header">
-              {t('business.sentTitle')}
-            </Text>
-            <Text variant="bodySecondary">{t('business.sentBody')}</Text>
-          </View>
-        ) : null}
-      </ScrollView>
-
-      <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: insets.bottom + 16, gap: 8 }}>
-        {step === 'intro' || step === 'pricing' ? (
-          <Button
-            label={t('common.continue')}
-            icon="arrow-right"
-            onPress={() => setStep(step === 'intro' ? 'pricing' : 'apply')}
-          />
-        ) : step === 'apply' ? (
-          <Button
-            label={t('business.submit')}
-            icon="send"
-            loading={busy}
-            disabled={!valid}
-            onPress={() => void submit()}
-          />
-        ) : (
-          <>
-            <Button
-              variant="secondary"
-              icon="external-link"
-              label={t('business.portal')}
-              onPress={() => void Linking.openURL(`${config.legal.webBaseUrl}/partner`)}
-            />
-            <Button label={t('common.done')} onPress={() => router.back()} />
-          </>
-        )}
-      </View>
-    </KeyboardAvoidingView>
-  );
-}
-
-function Point({
-  icon,
-  text,
-}: {
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-  text: string;
-}) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
-      <View
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: colors.brand.redTint,
-          alignItems: 'center',
-          justifyContent: 'center',
+          ),
         }}
-      >
-        <MaterialCommunityIcons name={icon} size={22} color={colors.brand.redPressed} />
-      </View>
-      <Text variant="body" style={{ flex: 1, paddingTop: 8 }}>
-        {text}
-      </Text>
-    </View>
-  );
-}
+      />
+      <View style={{ flex: 1, backgroundColor: sys.grouped }}>
+        <ScrollScreen contentContainerStyle={{ gap: 20, paddingBottom: insets.bottom + 120 }}>
+          {step === 'intro' ? (
+            <>
+              <Mascot pose="present" size={112} />
+              <Text variant="title1" accessibilityRole="header">
+                {t('business.step1Title')}
+              </Text>
+              <ListGroup>
+                <ListRow icon="map-pin" label={t('business.step1Point1')} />
+                <ListRow icon="tag" label={t('business.step1Point2')} />
+                <ListRow icon="qrcode" label={t('business.step1Point3')} />
+              </ListGroup>
+            </>
+          ) : null}
 
-function PriceCard({ amount, label, hint }: { amount: string; label: string; hint?: string }) {
-  return (
-    <View style={{ padding: 16, borderRadius: radii.lg, backgroundColor: colors.surface.subtle, gap: 4 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <Text variant="title">{amount}</Text>
-        <Text variant="label">{label}</Text>
+          {step === 'pricing' ? (
+            <>
+              <Text variant="title1" accessibilityRole="header">
+                {t('business.step2Title')}
+              </Text>
+              <ListGroup footer={t('business.noBase')}>
+                <ListRow
+                  label={t('business.perVisit')}
+                  hint={t('business.perVisitHint')}
+                  value={money(cafe.visitMinor)}
+                />
+                <ListRow label={t('business.perRedemption')} value={money(cafe.redemptionMinor)} />
+                <ListRow
+                  label={t('business.freeVisits', { count: PRICING.freeVisits })}
+                  hint={t('business.freeVisitsHint')}
+                  value={money(0)}
+                />
+                <ListRow
+                  label={t('business.cap')}
+                  hint={t('business.capHint', { amount: money(PRICING.minMonthlyCapMinor) })}
+                  value={money(PRICING.minMonthlyCapMinor)}
+                />
+              </ListGroup>
+            </>
+          ) : null}
+
+          {step === 'apply' ? (
+            <>
+              <Text variant="title1" accessibilityRole="header">
+                {t('business.step3Title')}
+              </Text>
+              <Field label={t('business.placeName')} value={form.placeName} onChange={set('placeName')} />
+              <View style={{ gap: 8 }}>
+                <Text variant="subheadline" style={{ fontWeight: '600', color: sys.label }}>
+                  {t('business.category')}
+                </Text>
+                <Row gap={8} style={{ flexWrap: 'wrap' }}>
+                  {PARTNER_CATEGORIES.map((c) => (
+                    <Chip
+                      key={c}
+                      label={t(`business.cat_${c}`)}
+                      selected={form.category === c}
+                      onPress={() => setForm((f) => ({ ...f, category: c }))}
+                    />
+                  ))}
+                </Row>
+              </View>
+              <Field
+                label={t('business.address')}
+                value={form.address}
+                onChange={set('address')}
+                autoComplete="street-address"
+              />
+              <Field
+                label={t('business.email')}
+                value={form.contactEmail}
+                onChange={set('contactEmail')}
+                keyboardType="email-address"
+                autoComplete="email"
+              />
+              <Field
+                label={t('business.website')}
+                value={form.website}
+                onChange={set('website')}
+                keyboardType="url"
+              />
+              <Field
+                label={t('business.pitch')}
+                hint={t('business.pitchHint')}
+                value={form.pitch}
+                onChange={set('pitch')}
+                multiline
+              />
+              <Checkbox checked={consent} onChange={setConsent} label={t('business.consent')} />
+              <Button
+                variant="ghost"
+                size="regular"
+                label={t('settings.terms')}
+                onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
+              />
+              {error ? <Banner tone="warning" text={error} /> : null}
+            </>
+          ) : null}
+
+          {step === 'sent' ? (
+            <View style={{ gap: 16, paddingTop: 24 }}>
+              <Mascot pose="celebrate" size={120} />
+              <Text variant="title1" accessibilityRole="header">
+                {t('business.sentTitle')}
+              </Text>
+              <Text variant="body" color={sys.labelSecondary}>
+                {t('business.sentBody')}
+              </Text>
+            </View>
+          ) : null}
+        </ScrollScreen>
+
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: metrics.margin,
+            right: metrics.margin,
+            bottom: insets.bottom + 12,
+            gap: 8,
+          }}
+        >
+          {step === 'intro' || step === 'pricing' ? (
+            <Button
+              label={t('common.continue')}
+              icon="arrow-right"
+              onPress={() => setStep(step === 'intro' ? 'pricing' : 'apply')}
+            />
+          ) : step === 'apply' ? (
+            <Button
+              label={t('business.submit')}
+              icon="send"
+              loading={busy}
+              disabled={!valid}
+              onPress={() => void submit()}
+            />
+          ) : (
+            <>
+              <Button
+                variant="secondary"
+                icon="external-link"
+                label={t('business.portal')}
+                onPress={() => void Linking.openURL(`${config.legal.webBaseUrl}/partner`)}
+              />
+              <Button label={t('common.done')} onPress={() => router.back()} />
+            </>
+          )}
+        </View>
       </View>
-      {hint ? <Text variant="caption">{hint}</Text> : null}
-    </View>
+    </>
   );
 }
 
@@ -309,8 +271,10 @@ function Field({
 }) {
   return (
     <View style={{ gap: 6 }}>
-      <Text variant="label">{label}</Text>
-      {hint ? <Text variant="caption">{hint}</Text> : null}
+      <Text variant="subheadline" style={{ fontWeight: '600', color: sys.label }}>
+        {label}
+      </Text>
+      {hint ? <Text variant="footnote">{hint}</Text> : null}
       <TextInput
         value={value}
         onChangeText={onChange}
@@ -319,13 +283,14 @@ function Field({
         {...(keyboardType ? { keyboardType, autoCapitalize: 'none' as const } : {})}
         {...(autoComplete ? { autoComplete } : {})}
         style={{
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: radii.sm,
-          padding: 12,
-          fontSize: 16,
-          color: colors.ink.primary,
-          minHeight: multiline ? 100 : 48,
+          borderRadius: metrics.radius.row + 4,
+          borderCurve: 'continuous',
+          backgroundColor: sys.elevated,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          fontSize: 17,
+          color: sys.label,
+          minHeight: multiline ? 112 : 48,
           textAlignVertical: multiline ? 'top' : 'center',
         }}
       />

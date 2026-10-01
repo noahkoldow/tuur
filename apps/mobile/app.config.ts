@@ -18,7 +18,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: 'tuur',
   version: '0.1.0',
   orientation: 'portrait',
-  userInterfaceStyle: 'light',
+  userInterfaceStyle: 'automatic',
   icon: `${brand}/icon-ios-1024.png`,
   ios: {
     bundleIdentifier: 'com.tuurapp',
@@ -71,7 +71,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-font',
     [
       'expo-splash-screen',
-      { image: `${brand}/splash-mark.png`, backgroundColor: '#FFFFFF', imageWidth: 160 },
+      {
+        image: `${brand}/splash-mark.png`,
+        backgroundColor: '#FFFFFF',
+        imageWidth: 160,
+        dark: { image: `${brand}/splash-mark.png`, backgroundColor: '#000000' },
+      },
     ],
     ['expo-localization', { supportedLocales: { ios: ['de', 'en'], android: ['de', 'en'] } }],
     [

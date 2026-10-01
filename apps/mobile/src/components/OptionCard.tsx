@@ -1,10 +1,10 @@
 import { View } from 'react-native';
-import { PressableScale } from './PressableScale';
 import { Image } from 'expo-image';
-import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import type { Poi } from '@tuur/shared';
-import { colors, radii } from '../theme';
+import { metrics, sys } from '../theme';
+import { Icon } from './Icon';
+import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 
 /** Crossroads option (spec 5.3): name, image, walking time and a teaser sentence. */
@@ -31,17 +31,16 @@ export function OptionCard({
       style={({ pressed }) => ({
         flex: 1,
         minWidth: 150,
-        borderRadius: radii.lg,
-        borderWidth: 1.5,
-        borderColor: pressed ? colors.brand.red : colors.border,
-        backgroundColor: colors.surface.base,
+        borderRadius: metrics.radius.card,
+        borderCurve: 'continuous',
+        backgroundColor: pressed ? sys.fill : sys.elevated,
         overflow: 'hidden',
       })}
     >
       <View
         style={{
-          height: 96,
-          backgroundColor: colors.surface.subtle,
+          height: 104,
+          backgroundColor: sys.fill,
           alignItems: 'center',
           justifyContent: 'center',
         }}
@@ -49,27 +48,27 @@ export function OptionCard({
         {img ? (
           <Image
             source={{ uri: img.thumbUrl ?? img.url }}
-            style={{ width: '100%', height: 96 }}
+            style={{ width: '100%', height: 104 }}
             contentFit="cover"
             accessibilityIgnoresInvertColors
           />
         ) : (
-          <Feather name="map-pin" size={28} color={colors.ink.tertiary} />
+          <Icon name="map-pin" size={28} color={sys.labelTertiary} />
         )}
       </View>
-      <View style={{ padding: 12, gap: 6 }}>
-        <Text variant="label" numberOfLines={3} style={{ fontSize: 16, lineHeight: 21 }}>
+      <View style={{ padding: 12, gap: 4 }}>
+        <Text variant="headline" numberOfLines={3}>
           {poi.name}
         </Text>
-        <Text variant="caption">{t('fork.walk', { minutes: Math.round(walkMinutes) })}</Text>
+        <Text variant="footnote">{t('fork.walk', { minutes: Math.round(walkMinutes) })}</Text>
         {poi.partnerId ? (
           <Text
-            variant="caption"
-            color={colors.brand.redPressed}
+            variant="footnote"
+            color={sys.accentText}
           >{`${t('partner.adLabel')} · ${t('partner.label')}`}</Text>
         ) : null}
         {teaser ? (
-          <Text variant="caption" numberOfLines={4} color={colors.ink.primary}>
+          <Text variant="subheadline" numberOfLines={4} color={sys.label}>
             {teaser}
           </Text>
         ) : null}

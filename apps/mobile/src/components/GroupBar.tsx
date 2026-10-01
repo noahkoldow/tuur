@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Share, View } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { GROUP_MAX_SIZE } from '@tuur/shared';
 import { BackendError, useBackend, type GroupInfo } from '../backend';
 import { getBilling } from '../billing/entitlements';
 import { inviteToGroup, type ActiveSession } from '../guide/session';
-import { colors, radii } from '../theme';
+import { metrics, sys } from '../theme';
+import { Icon } from './Icon';
 import { Banner } from './Banner';
 import { Button } from './Button';
 import { Text } from './Text';
@@ -89,14 +89,15 @@ export function GroupBar({ session }: { session: ActiveSession }) {
             alignItems: 'center',
             gap: 10,
             padding: 12,
-            borderRadius: radii.md,
-            backgroundColor: colors.surface.subtle,
+            borderRadius: metrics.radius.card,
+            borderCurve: 'continuous',
+            backgroundColor: sys.elevated,
           }}
         >
-          <MaterialCommunityIcons name="account-group" size={22} color={colors.brand.redPressed} />
+          <Icon name="users" size={22} color={sys.labelSecondary} />
           <View style={{ flex: 1 }}>
-            <Text variant="label">{group.status === 'live' ? t('group.live') : t('group.ended')}</Text>
-            <Text variant="caption">
+            <Text variant="headline">{group.status === 'live' ? t('group.live') : t('group.ended')}</Text>
+            <Text variant="footnote">
               {t('group.status', { members: group.members, capacity: group.capacity })}
             </Text>
           </View>
@@ -108,7 +109,7 @@ export function GroupBar({ session }: { session: ActiveSession }) {
                   width: 10,
                   height: 10,
                   borderRadius: 5,
-                  backgroundColor: i < group.members ? colors.brand.red : colors.border,
+                  backgroundColor: i < group.members ? sys.accent : sys.fill,
                 }}
               />
             ))}

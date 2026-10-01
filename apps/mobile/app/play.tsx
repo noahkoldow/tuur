@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ScrollView} from 'react-native';
+import type { ScrollView } from 'react-native';
 import { Alert, Animated, Platform, View } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -7,10 +7,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
 import { bearingDegrees, navigationView, type PublicOffer } from '@tuur/shared';
-import { Feather } from '@expo/vector-icons';
 import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
 import { GroupBar } from '../src/components/GroupBar';
+import { Icon } from '../src/components/Icon';
+import { ListGroup, ListRow } from '../src/components/ListGroup';
 import { Button, IconButton, Row } from '../src/components/Button';
 import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
@@ -28,7 +29,7 @@ import { endTourAndShowSummary, goHome, isEndingTour } from '../src/navigation';
 import { haptics } from '../src/motion';
 import { formatKm } from '../src/format';
 import { useSettings } from '../src/state/settings';
-import { colors, radii } from '../src/theme';
+import { colors, metrics, radii, sys } from '../src/theme';
 
 const NO_FORK: ForkSnapshot = { options: [], loading: false };
 const noopSubscribe = () => () => undefined;
@@ -189,10 +190,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
         : `${ui.target.distanceM >= 100 ? Math.round(ui.target.distanceM / 10) * 10 : ui.target.distanceM} m`;
 
   const header = (
-    <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 12 }}>
+    <View style={{ paddingHorizontal: metrics.margin, paddingBottom: 12, gap: 12 }}>
       <Row gap={10}>
         <Text
-          variant="title"
+          variant="title2"
           numberOfLines={2}
           accessibilityRole="header"
           accessibilityLiveRegion="polite"
@@ -223,8 +224,8 @@ function PlayInner({ session }: { session: ActiveSession }) {
                 backgroundColor: colors.brand.redTint,
               }}
             >
-              <Feather name="map-pin" size={18} color={colors.brand.redPressed} />
-              <Text variant="label" color={colors.brand.redPressed}>
+              <Icon name="map-pin" size={18} color={sys.accentText} />
+              <Text variant="label" color={sys.accentText}>
                 {t('cards.here')}
               </Text>
             </View>
@@ -245,7 +246,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
                     ],
                   }}
                 >
-                  <Feather name="navigation" size={32} color={colors.brand.redPressed} />
+                  <Icon name="navigation-variant" size={32} color={sys.accentText} weight="semibold" />
                 </Animated.View>
               ) : null}
               {/* distance is the most useful outdoor cue: large and high-contrast */}
@@ -295,7 +296,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const cardPoi = cardId ? pois.get(cardId) : undefined;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
+    <View style={{ flex: 1, backgroundColor: sys.grouped }}>
       <TuurMap
         center={center}
         route={nav.leg.length > 1 ? nav.ahead : path}
@@ -322,27 +323,21 @@ function PlayInner({ session }: { session: ActiveSession }) {
         style={{
           position: 'absolute',
           top: insets.top + 8,
-          left: 16,
-          right: 16,
+          left: metrics.margin,
+          right: metrics.margin,
           flexDirection: 'row',
           justifyContent: 'space-between',
         }}
       >
-        <IconButton
-          icon="chevron-down"
-          label={t('player.minimize')}
-          onPress={() => goHome(router)}
-          size={48}
-          onMap
-        />
+        <IconButton icon="chevron-down" label={t('player.minimize')} onPress={() => goHome(router)} onMap />
         <View style={{ alignItems: 'flex-end', gap: 8 }}>
           <TravelModeChip mode={ui.travelMode} />
           {simulator ? (
             <Button
               variant="secondary"
+              size="regular"
               label={t('player.simulateJump')}
               onPress={() => simulator.jumpTo(simulator.progressMeters + 120)}
-              style={{ minHeight: 44 }}
             />
           ) : null}
         </View>
@@ -361,7 +356,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
           {ui.phase === 'finished' ? (
             <View style={{ alignItems: 'center', gap: 12, paddingVertical: 8 }}>
               <Mascot pose="celebrate" size={136} />
-              <Text variant="heading" align="center">
+              <Text variant="title3" align="center">
                 {t('player.tuuFinished')}
               </Text>
               <Button
@@ -373,7 +368,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
             </View>
           ) : null}
           {cardStop && ui.phase !== 'finished' ? (
-            <View style={{ marginHorizontal: -20 }}>
+            <View style={{ marginHorizontal: -metrics.margin }}>
               <StopCards
                 poi={cardPoi}
                 name={cardStop.name}
@@ -395,7 +390,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
 
           {fork && (forkState.options.length > 0 || ui.awaitingRoute) ? (
             <View style={{ gap: 10 }}>
-              <Text variant="heading" accessibilityRole="header">
+              <Text variant="title3" accessibilityRole="header">
                 {t('fork.choose')}
               </Text>
               <Text variant="caption">
@@ -428,21 +423,22 @@ function PlayInner({ session }: { session: ActiveSession }) {
             <View
               style={{
                 gap: 8,
-                padding: 12,
-                borderRadius: radii.md,
-                borderWidth: 1,
-                borderColor: colors.brand.red,
-                backgroundColor: colors.brand.redTint,
+                padding: 16,
+                borderRadius: metrics.radius.card,
+                borderCurve: 'continuous',
+                backgroundColor: sys.accentTint,
               }}
             >
-              <Text variant="label" color={colors.brand.redPressed}>
+              <Text variant="label" color={sys.accentText}>
                 {`${t('partner.adLabel')} · ${t('partner.label')}`}
               </Text>
               <Text variant="caption">{t('partner.introNote')}</Text>
               {offers.map((o) => (
-                <View key={o.id} style={{ gap: 4 }}>
-                  <Text variant="heading">{o.title}</Text>
-                  <Text variant="bodySecondary">{o.description}</Text>
+                <View key={o.id} style={{ gap: 6 }}>
+                  <Text variant="headline">{o.title}</Text>
+                  <Text variant="subheadline" color={sys.label}>
+                    {o.description}
+                  </Text>
                   {o.terms ? <Text variant="caption">{`${t('partner.terms')}: ${o.terms}`}</Text> : null}
                   <Text variant="caption">
                     {t('partner.validUntil', { date: new Date(o.validUntil).toLocaleDateString(lang) })}
@@ -485,18 +481,20 @@ function PlayInner({ session }: { session: ActiveSession }) {
                 </View>
               ) : null}
               {n.grounding?.searchEntryPointHtml ? <Text variant="caption">Google Search</Text> : null}
-              <Button
-                variant="ghost"
-                icon="flag"
-                label={reported ? t('player.reported') : t('player.reportIssue')}
-                disabled={reported}
-                onPress={() => void report()}
-              />
             </>
           ) : null}
-          {ui.phase !== 'finished' ? (
-            <Button variant="secondary" icon="flag" label={t('player.endTour')} onPress={confirmFinish} />
-          ) : null}
+          <ListGroup>
+            {n ? (
+              <ListRow
+                icon="flag"
+                label={reported ? t('player.reported') : t('player.reportIssue')}
+                onPress={reported ? undefined : () => void report()}
+              />
+            ) : null}
+            {ui.phase !== 'finished' ? (
+              <ListRow icon="x" label={t('player.endTour')} destructive onPress={confirmFinish} />
+            ) : null}
+          </ListGroup>
         </View>
       </Sheet>
     </View>
