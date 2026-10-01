@@ -18,12 +18,12 @@ pnpm --filter @tuur/functions test:integration   # needs Java for the Firebase e
 
 ## 2. Firebase project
 
-- [ ] Blaze plan; region `europe-west1`; deploy `firestore.rules`, `firestore.indexes.json`, `storage.rules`, functions.
-- [ ] Enable Auth providers: Anonymous, Email/Password, Apple, Google. Register App Check (Play Integrity, App Attest/DeviceCheck) and turn enforcement on for Firestore, Storage and functions.
+- [x] Blaze plan; Firestore and Storage in `europe-west1`; Firestore rules/indexes and Storage rules deployed. Functions still need deployment after provider setup.
+- [ ] Enable Auth providers: Anonymous and Email/Password are active; configure Apple and Google. App Attest is registered for iOS `com.tuurapp`; register Android Play Integrity after adding SHA-256 `0F:76:EA:C5:51:57:EE:8D:AD:20:CB:67:60:9E:17:BF:71:CB:AD:74:BA:49:78:75:78:B3:DC:9F:C5:94:63:7E` and accepting its terms. Enforce APIs only after device verification.
 - [ ] Secrets: `GEMINI_API_KEY`, `ORS_API_KEY`, `REVENUECAT_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `REDEMPTION_TOKEN_SECRET`. Params: `TUUR_*_PROVIDER` set to the live providers (`gemini`, `openrouteservice`, `live`, `nominatim`, `stripe`), `TUUR_WEB_BASE_URL`.
 - [ ] Firestore TTL policies so counters and nonces disappear as the privacy policy says: `rateLimits.expireAt`, `rewardNonces.expiresAt`, `redemptionTokens.expiresAt` (redemption tokens are also deleted with the account), `narrationLocks.at` is small and can be cleaned by a scheduled job.
 - [ ] Storage lifecycle: none needed for `narrations/`; consider a bucket CORS/CDN for audio.
-- [ ] Budget alerts in Google Cloud Billing in addition to `config/ai` budgets and the kill switch.
+- [ ] Google Cloud Billing alerts for total project spend. AI generation has a hard USD 3/day cap in shared config; that does not cap Firebase infrastructure, maps, routing, or other provider charges.
 - [ ] Create the first admin with `scripts/set-admin.mjs`; sign in to `/admin`, open Costs and AI to confirm the config document exists.
 
 ## 3. Payments and ads
@@ -40,7 +40,7 @@ pnpm --filter @tuur/functions test:integration   # needs Java for the Firebase e
 - [ ] **Background location justification** (both stores): location is used only while a tour is running so the audio guide can narrate with the screen off; a foreground notification (Android) shows while active; permission is requested in context with a rationale screen; provide a demo video for Google Play review.
 - [ ] Age rating / audience: not for children under 16 (privacy policy), no user-generated content shown to other users.
 - [ ] Support URL and privacy policy URL (`<web>/legal/privacy`), terms URL (`<web>/legal/terms`), marketing URL.
-- [ ] Universal links / app links: replace `REPLACE_TEAMID` in `apple-app-site-association` and the SHA-256 fingerprint in `assetlinks.json`, verify `https://<web>/.well-known/...`, test an invite link with the app installed and not installed.
+- [ ] Universal links / app links: AASA is configured for `4GXK973R2W.com.tuurapp`; verify it at the chosen public legal/support hosting domain if invite links are enabled. Set the Android SHA-256 fingerprint in `assetlinks.json` and test invite links with the app installed and not installed.
 
 ## 5. On-device verification (not possible in CI)
 

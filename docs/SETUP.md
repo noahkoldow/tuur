@@ -13,16 +13,18 @@ Node >= 22, pnpm 10 (`corepack enable`), Java 17+ (Firestore emulator), Xcode / 
 
 ## Manual steps for production (needs accounts)
 
-- **Firebase**: create a project, **upgrade to the Blaze plan** (Functions, Cloud Tasks, external network calls), enable Auth (Anonymous, Apple, Google, Email), Firestore, Storage, App Check; set the id in `.firebaserc`.
-- **Secrets**: `firebase functions:secrets:set GEMINI_API_KEY ORS_API_KEY REVENUECAT_WEBHOOK_SECRET STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET`.
+- **Firebase**: production project `tuur-prod` is selected in `.firebaserc` and on the **Blaze** plan. Registered apps: iOS `1:261809139951:ios:c9df9603f42afbb74d2b1a` (`com.tuurapp`), Android `1:261809139951:android:ff3ce13eef954bba4d2b1a` (`app.tuur.guide`), Web `1:261809139951:web:d949d1c4acf0cf644d2b1a`. Firestore and Storage are in `europe-west1`; Firestore rules/indexes and Storage rules are deployed. Anonymous and Email/Password Auth are enabled. Still enable Google and Apple sign-in, register App Check, then deploy Functions after setting their secrets.
+- **Secrets**: `firebase functions:secrets:set GEMINI_API_KEY OPENAI_API_KEY ORS_API_KEY REVENUECAT_WEBHOOK_SECRET STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET`. `OPENAI_API_KEY` may be the literal `unused` if OpenAI voices are not wanted (personas then use their Gemini fallback voice).
+- **Voices (D45)**: set parameter `TUUR_TTS_PROVIDER=live` to use every TTS provider with a key (`gemini` = Gemini only, `mock` = silence). Pick the cast by ear first: `OPENAI_API_KEY=… GEMINI_API_KEY=… pnpm voices:samples`, then open `voice-samples/index.html`. The cast, default voice, TTS models and prices live in Firestore `config/ai` (`voiceCast`, `defaultVoiceId`, `ttsModels`, `pricing.ttsPerMCharsUsdByProvider`).
 - **Map tiles**: MapTiler key + custom light tuur style. **RevenueCat**, **AdMob** (+UMP), **Stripe**: create accounts/products later phases.
 - **Brand assets**: `pnpm brand` needs `sharp` and `potrace` (`npm i --no-save sharp potrace`).
+- **Mascot Tuu**: `pnpm mascot` regenerates `apps/mobile/assets/mascot/tuu_*.png` (512 px) from the originals in `assets/mascot` (`tuu_01_idle_front.png` … `tuu_10_sit_relaxed.png`; the original export names ending in `-1.png` … `-10.png` also work); needs `sharp` like `pnpm brand`.
 
 ## Monetization setup (Phase 9)
 
 1. **RevenueCat**: create a project with the iOS and Android apps; products `tuur_credit_1`, `tuur_credit_5` (consumables) and `tuur_sub_monthly`, `tuur_sub_yearly` (auto-renewing, one subscription group). Set the public SDK keys as `EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`. Add a webhook to the `revenueCatWebhook` function URL with an `Authorization: Bearer <secret>` header; store the secret as Firebase secret `REVENUECAT_WEBHOOK_SECRET`. Product mapping can be overridden in Firestore `config/billing`.
 2. **AdMob**: create app IDs and a rewarded + interstitial unit; set `ADMOB_*_APP_ID` (build time) and `EXPO_PUBLIC_ADMOB_*_UNIT`. Enable server-side verification on the rewarded unit and point it to the `admobSsv` function. Configure the UMP consent message in AdMob (EU/UK). Without env values Google test ads are used.
-3. **Invite links**: replace `REPLACE_TEAMID` in `apps/web/public/.well-known/apple-app-site-association` and the SHA-256 fingerprint in `assetlinks.json`; set `FUNCTIONS_BASE_URL` (and store URLs) for the web app.
+3. **Invite links**: the AASA file is configured for Apple Team ID `4GXK973R2W` and bundle ID `com.tuurapp`. Set the Android SHA-256 fingerprint in `assetlinks.json`; configure `FUNCTIONS_BASE_URL` (and store URLs) for the web app if invite landing pages are used.
 4. Firebase Functions need the Blaze plan for secrets and outbound network.
 
 ## Partner program setup (Phase 10)
