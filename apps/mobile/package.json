@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "web": "EXPO_PUBLIC_BACKEND=demo expo start --web"
+    "web": "EXPO_PUBLIC_BACKEND=demo EXPO_PUBLIC_PAYWALL=off expo start --web",
+    "go": "EXPO_PUBLIC_BACKEND=demo EXPO_PUBLIC_EXPO_GO=1 EXPO_PUBLIC_PAYWALL=off EXPO_PUBLIC_PREVIEW_ROUTING=osm expo start --go --tunnel --clear"
   },
   "dependencies": {
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
@@ -60,16 +61,25 @@
     "react-i18next": "^16.0.0",
     "react-native": "0.86.3",
     "react-native-google-mobile-ads": "^17.2.0",
+    "react-native-maps": "1.27.2",
     "react-native-purchases": "^10.10.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
     "react-native-track-player": "^4.1.2",
+    "react-native-view-shot": "5.1.0",
     "react-native-web": "~0.21.3",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0"
+  },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-maps"
+      ]
+    }
   }
 }

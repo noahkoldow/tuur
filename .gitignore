@@ -2,11 +2,16 @@ node_modules
 .next
 .expo
 .turbo
-lib
+# build output only (a bare "lib" also ignored apps/web/src/lib, whose sources were then never committed)
+functions/lib/
 dist
 *.log
 .env
 .env.local
+GoogleService-Info.plist
+google-services.json
+apps/mobile/GoogleService-Info.plist
+apps/mobile/google-services.json
 .emulator-data
 .firebase
 apps/web/public/brand
@@ -16,3 +21,6 @@ apps/mobile/android
 next-env.d.ts
 deploy
 apps/web/public/maplibre
+
+# local voice casting output (scripts/voice-samples.mjs)
+voice-samples/

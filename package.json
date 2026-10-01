@@ -15,7 +15,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "emulators": "firebase emulators:start --only auth,firestore,storage,functions",
+    "voices:samples": "node scripts/voice-samples.mjs",
     "brand": "node scripts/build-brand-assets.mjs",
+    "mascot": "node scripts/build-mascot-assets.mjs",
     "deploy:functions": "firebase deploy --only functions",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage",
     "test:integration": "pnpm --filter @tuur/functions test:integration"

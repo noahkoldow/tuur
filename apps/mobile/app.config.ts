@@ -3,20 +3,25 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const brand = '../../assets/brand/app';
 
 /** Native Firebase config files are provided per environment (never committed), see docs/SETUP.md. */
-const googleServicesIos = process.env.GOOGLE_SERVICES_INFO_PLIST;
-const googleServicesAndroid = process.env.GOOGLE_SERVICES_JSON;
+const googleServicesIos = process.env.GOOGLE_SERVICES_INFO_PLIST ?? './GoogleService-Info.plist';
+const googleServicesAndroid = process.env.GOOGLE_SERVICES_JSON ?? './google-services.json';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'tuur',
   slug: 'tuur',
+  owner: 'noehxpo',
+  extra: {
+    ...config.extra,
+    eas: { projectId: '2d786517-671d-464c-aafe-8893f358531e' },
+  },
   scheme: 'tuur',
   version: '0.1.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: `${brand}/icon-ios-1024.png`,
   ios: {
-    bundleIdentifier: 'app.tuur.guide',
+    bundleIdentifier: 'com.tuurapp',
     supportsTablet: false,
     usesAppleSignIn: true,
     associatedDomains: ['applinks:tuur.app'],
@@ -51,7 +56,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         action: 'VIEW',
         autoVerify: true,
-        data: [{ scheme: 'https', host: 'tuur.app', pathPrefix: '/invite' }],
+        data: [
+          { scheme: 'https', host: 'tuur.app', pathPrefix: '/invite' },
+          { scheme: 'https', host: 'tuur.app', pathPrefix: '/join' },
+        ],
         category: ['BROWSABLE', 'DEFAULT'],
       },
     ],
@@ -78,18 +86,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     '@maplibre/maplibre-react-native',
-    '@react-native-firebase/app',
+    ['@react-native-firebase/app', { ios: { disableSPM: true } }],
     '@react-native-firebase/auth',
     '@react-native-firebase/app-check',
     '@react-native-firebase/crashlytics',
     [
       'expo-build-properties',
-      { ios: { useFrameworks: 'static', deploymentTarget: '16.4' }, android: { minSdkVersion: 26 } },
+      { ios: { useFrameworks: 'dynamic', deploymentTarget: '16.4' }, android: { minSdkVersion: 26 } },
     ],
     'expo-apple-authentication',
     [
       '@react-native-google-signin/google-signin',
-      { iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME ?? 'com.googleusercontent.apps.REPLACE_ME' },
+      { iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME ?? 'com.googleusercontent.apps.tuur' },
     ],
     [
       'react-native-google-mobile-ads',
