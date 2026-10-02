@@ -1,30 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, BackHandler, Image, Platform, ScrollView, View } from 'react-native';
+import { Animated, BackHandler, Platform, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { INTERESTS, SUPPORTED_UI_LANGUAGES, type Interest, type UiLanguage } from '@tuur/shared';
 import { BackendError, useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
+import { Wordmark } from '../../src/components/Brand';
 import { Button, Row } from '../../src/components/Button';
 import { Chip } from '../../src/components/Chip';
-import { Segmented } from '../../src/components/Segmented';
-import { Mascot } from '../../src/components/Mascot';
+import { IntroArt, type IntroKind } from '../../src/components/IntroArt';
 import { Screen } from '../../src/components/Screen';
+import { Segmented } from '../../src/components/Segmented';
 import { Text } from '../../src/components/Text';
+import { TuuSays } from '../../src/components/TuuSays';
 import { requestForeground } from '../../src/location/real';
 import { haptics, useReduceMotion } from '../../src/motion';
 import { useSettings } from '../../src/state/settings';
-import wordmark from '../../assets/wordmark-red.png';
 import { sys } from '../../src/theme';
 
-type Step = 'welcome' | 'interests' | 'location';
-const ORDER: Step[] = ['welcome', 'interests', 'location'];
+type Step = 'intro1' | 'intro2' | 'intro3' | 'interests' | 'location';
+const ORDER: Step[] = ['intro1', 'intro2', 'intro3', 'interests', 'location'];
+const INTRO: Record<'intro1' | 'intro2' | 'intro3', { kind: IntroKind; n: 1 | 2 | 3 }> = {
+  intro1: { kind: 'walk', n: 1 },
+  intro2: { kind: 'story', n: 2 },
+  intro3: { kind: 'choose', n: 3 },
+};
 const LANGUAGE_NAMES: Record<UiLanguage, string> = { de: 'Deutsch', en: 'English' };
 
 /**
- * Onboarding in three steps (spec 11, shortened per UX audit D49): welcome (language from the device, switchable;
- * terms/privacy links), interests (skippable), location with the reason and a one-line traffic safety note. The
- * account stays optional (settings); everyone starts anonymously.
+ * Onboarding that shows instead of tells: three illustrated pages (walk and listen, tap a place, choose how), then
+ * interests (skippable) and the location request with its reason. The intro can be skipped at any time; the
+ * account stays optional, everyone starts anonymously. Terms and privacy are one tap away on the last intro page.
  */
 export default function Onboarding() {
   const { t } = useTranslation();
@@ -32,7 +38,7 @@ export default function Onboarding() {
   const backend = useBackend();
   const reduceMotion = useReduceMotion();
   const { language, interests, set } = useSettings();
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>('intro1');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const idx = ORDER.indexOf(step);
@@ -46,7 +52,7 @@ export default function Onboarding() {
   const next = () => go(ORDER[Math.min(ORDER.length - 1, idx + 1)]!);
   const back = () => idx > 0 && go(ORDER[idx - 1]!);
 
-  // steps glide in from the side they come from
+  // pages glide in from the side they come from
   useEffect(() => {
     if (reduceMotion) return slide.setValue(0);
     slide.setValue(dir.current);
@@ -80,6 +86,8 @@ export default function Onboarding() {
     }
   };
 
+  const intro = step === 'intro1' || step === 'intro2' || step === 'intro3' ? INTRO[step] : undefined;
+
   return (
     <Screen>
       <View
@@ -88,7 +96,7 @@ export default function Onboarding() {
         {idx > 0 ? (
           <Button variant="ghost" size="regular" label={t('common.back')} onPress={back} />
         ) : (
-          <View />
+          <Wordmark width={72} />
         )}
         <Row gap={6}>
           {ORDER.map((s, i) => (
@@ -103,6 +111,16 @@ export default function Onboarding() {
             />
           ))}
         </Row>
+        {intro ? (
+          <Button
+            variant="ghost"
+            size="regular"
+            label={t('onboarding.skipIntro')}
+            onPress={() => void finish(false)}
+          />
+        ) : (
+          <View style={{ width: 72 }} />
+        )}
       </View>
 
       <Animated.View
@@ -113,37 +131,42 @@ export default function Onboarding() {
         }}
       >
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 20, paddingVertical: 24 }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', gap: 20, paddingVertical: 16 }}
           showsVerticalScrollIndicator={false}
         >
-          {step === 'welcome' && (
-            <View style={{ alignItems: 'center', gap: 22 }}>
-              <Mascot pose="wave" size={148} />
-              <Image
-                accessibilityLabel="tuur"
-                source={wordmark}
-                style={{ width: 180, height: 64 }}
-                resizeMode="contain"
-              />
-              <Text variant="body" color={sys.labelSecondary} align="center">
-                {t('onboarding.tuuHello')}
-              </Text>
-              <View style={{ alignSelf: 'stretch' }}>
-                <Segmented
-                  label={t('settings.language')}
-                  segments={SUPPORTED_UI_LANGUAGES.map((l) => ({ value: l, label: LANGUAGE_NAMES[l] }))}
-                  value={language}
-                  onChange={(l) => set({ language: l })}
-                />
+          {intro ? (
+            <>
+              <IntroArt kind={intro.kind} />
+              <View
+                accessible
+                accessibilityLabel={t('onboarding.pageOf', { index: intro.n, total: 3 })}
+                style={{ gap: 8, paddingHorizontal: 4 }}
+              >
+                <Text variant="title1" accessibilityRole="header">
+                  {t(`onboarding.slide${intro.n}Title`)}
+                </Text>
+                <Text variant="body" color={sys.labelSecondary}>
+                  {t(`onboarding.slide${intro.n}Body`)}
+                </Text>
               </View>
-            </View>
-          )}
+              {intro.n === 1 ? (
+                <View style={{ alignSelf: 'stretch' }}>
+                  <Segmented
+                    label={t('settings.language')}
+                    segments={SUPPORTED_UI_LANGUAGES.map((l) => ({ value: l, label: LANGUAGE_NAMES[l] }))}
+                    value={language}
+                    onChange={(l) => set({ language: l })}
+                  />
+                </View>
+              ) : null}
+            </>
+          ) : null}
 
-          {step === 'interests' && (
+          {step === 'interests' ? (
             <View style={{ gap: 16 }}>
-              <Text variant="title">{t('onboarding.interestsTitle')}</Text>
-              <Text variant="body" color={sys.labelSecondary}>
-                {t('onboarding.interestsHint')}
+              <TuuSays pose="idle" text={t('onboarding.interestsHint')} />
+              <Text variant="title1" accessibilityRole="header">
+                {t('onboarding.interestsTitle')}
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {INTERESTS.map((i) => (
@@ -162,42 +185,53 @@ export default function Onboarding() {
                 ))}
               </View>
             </View>
-          )}
+          ) : null}
 
-          {step === 'location' && (
+          {step === 'location' ? (
             <View style={{ gap: 16 }}>
-              <Mascot pose="point" size={96} />
-              <Text variant="title">{t('onboarding.permissionsTitle')}</Text>
-              <Text variant="body">{t('onboarding.permissionsBody')}</Text>
+              <TuuSays pose="point" text={t('onboarding.permissionsBody')} />
+              <Text variant="title1" accessibilityRole="header">
+                {t('onboarding.permissionsTitle')}
+              </Text>
               <Banner text={t('onboarding.permissionsBackground')} />
               <Banner tone="warning" icon="alert-triangle" text={t('onboarding.safetyBody')} />
               {error ? <Banner tone="error" text={error} /> : null}
             </View>
-          )}
+          ) : null}
         </ScrollView>
       </Animated.View>
 
       <View style={{ gap: 10, paddingBottom: 16 }}>
-        {step === 'welcome' ? (
+        {intro ? (
           <>
-            <Button label={t('onboarding.start')} icon="arrow-right" onPress={next} />
+            <Button
+              label={intro.n === 3 ? t('onboarding.letsGo') : t('common.continue')}
+              icon="arrow-right"
+              onPress={next}
+            />
             <Text variant="footnote" align="center">
-              {t('onboarding.legalConsent')}
-            </Text>
-            <Row gap={4} style={{ justifyContent: 'center' }}>
-              <Button
-                variant="ghost"
-                size="regular"
-                label={t('onboarding.legalTerms')}
+              {t('onboarding.consentPre')}
+              <Text
+                variant="footnote"
+                accessibilityRole="link"
+                color={sys.accentText}
+                style={{ fontWeight: '600' }}
                 onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
-              />
-              <Button
-                variant="ghost"
-                size="regular"
-                label={t('onboarding.legalPrivacy')}
+              >
+                {t('onboarding.legalTerms')}
+              </Text>
+              {t('onboarding.consentAnd')}
+              <Text
+                variant="footnote"
+                accessibilityRole="link"
+                color={sys.accentText}
+                style={{ fontWeight: '600' }}
                 onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}
-              />
-            </Row>
+              >
+                {t('onboarding.legalPrivacy')}
+              </Text>
+              {t('onboarding.consentPost')}
+            </Text>
           </>
         ) : step === 'interests' ? (
           <>
@@ -206,8 +240,7 @@ export default function Onboarding() {
           </>
         ) : (
           <>
-            <Button label={t('onboarding.allowLocation')} loading={busy} onPress={() => void finish(true)} />
-            <Button variant="ghost" label={t('onboarding.notNow')} onPress={() => void finish(false)} />
+            <Button label={t('common.continue')} loading={busy} onPress={() => void finish(true)} />
           </>
         )}
       </View>

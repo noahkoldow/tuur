@@ -12,7 +12,7 @@ import { Chip } from '../src/components/Chip';
 import { Segmented } from '../src/components/Segmented';
 import { FloatingAction } from '../src/components/FloatingAction';
 import { ChoiceRows, ListGroup } from '../src/components/ListGroup';
-import { MascotTip } from '../src/components/Mascot';
+import { TuuSays } from '../src/components/TuuSays';
 import { interestOf } from '../src/components/StopCards';
 import { Text } from '../src/components/Text';
 import { TuurMap } from '../src/components/TuurMap';
@@ -171,12 +171,14 @@ export default function Plan() {
         }}
         contentContainerStyle={{ padding: 20, paddingTop: 24, gap: 24, paddingBottom: insets.bottom + 160 }}
       >
-        <View style={{ gap: 4 }}>
+        <View style={{ gap: 12 }}>
           <Text variant="title" accessibilityRole="header">
             {t('plan.title')}
           </Text>
-          {!ready || busy ? (
-            <MascotTip pose="think" size={48} text={busy ? t('plan.tuuBuilding') : t('plan.waitArea')} />
+          {busy ? (
+            <TuuSays pose="think" size={56} text={t('plan.tuuBuilding')} />
+          ) : ready ? (
+            <TuuSays pose="map" size={56} tipId="plan.intro" text={t('tuu.planIntro')} />
           ) : null}
         </View>
         <Section title={t('plan.timeTitle')}>

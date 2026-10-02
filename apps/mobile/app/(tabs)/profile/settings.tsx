@@ -27,8 +27,18 @@ import { metrics, sys } from '../../../src/theme';
 export default function Settings() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { language, interests, frequency, simulator, analyticsConsent, highlightWords, voiceId, set } =
-    useSettings();
+  const {
+    language,
+    interests,
+    frequency,
+    simulator,
+    analyticsConsent,
+    highlightWords,
+    voiceId,
+    tipsEnabled,
+    seenTips,
+    set,
+  } = useSettings();
   const backend = useBackend();
   const [notice, setNotice] = useState<{ tone: 'info' | 'warning'; text: string } | undefined>();
   const [user, setUser] = useState(backend.auth.current());
@@ -188,6 +198,28 @@ export default function Settings() {
             />
           }
         />
+        <ListRow
+          icon="message-circle"
+          label={t('tuu.tipsSetting')}
+          hint={t('tuu.tipsHint')}
+          trailing={
+            <Switch
+              value={tipsEnabled}
+              onValueChange={(v) => set({ tipsEnabled: v })}
+              accessibilityLabel={t('tuu.tipsSetting')}
+            />
+          }
+        />
+        {seenTips.length ? (
+          <ListRow
+            icon="rotate-ccw"
+            label={t('tuu.resetTips')}
+            onPress={() => {
+              set({ seenTips: [], tipsEnabled: true });
+              setNotice({ tone: 'info', text: t('tuu.resetTipsDone') });
+            }}
+          />
+        ) : null}
       </ListGroup>
 
       <ListGroup title={t('settings.sectionPrivacy')} footer={t('account.aiInfo')}>

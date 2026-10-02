@@ -18,6 +18,7 @@ import { SpinningMark } from '../../src/components/SpinningMark';
 import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
+import { TuuSays } from '../../src/components/TuuSays';
 import { TuurMap } from '../../src/components/TuurMap';
 import { startTourSession, tourPath } from '../../src/guide/session';
 import { requestBackground } from '../../src/location/real';
@@ -216,6 +217,12 @@ export default function TourDetail() {
           ))}
         </ListGroup>
 
+        {/* one hint at a time: the offline benefit first, once downloaded what starting does */}
+        {dl.complete ? (
+          <TuuSays pose="walk" size={56} tipId="tour.start" text={t('tuu.tourStart')} />
+        ) : (
+          <TuuSays pose="present" size={56} tipId="tour.offline" text={t('tuu.tourOffline')} />
+        )}
         <ListGroup>
           {dl.complete ? (
             <ListRow icon="check-circle" label={t('downloads.downloaded')} />

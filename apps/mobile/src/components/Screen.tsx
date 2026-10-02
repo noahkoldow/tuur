@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import { ScrollView, View, type ScrollViewProps, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { metrics, sys } from '../theme';
@@ -44,11 +45,13 @@ export function ScrollScreen({
   children,
   grouped = true,
   contentContainerStyle,
+  scrollRef,
   ...rest
-}: ScrollViewProps & { grouped?: boolean }) {
+}: ScrollViewProps & { grouped?: boolean; scrollRef?: Ref<ScrollView> }) {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
+      ref={scrollRef}
       contentInsetAdjustmentBehavior="automatic"
       automaticallyAdjustKeyboardInsets
       keyboardShouldPersistTaps="handled"

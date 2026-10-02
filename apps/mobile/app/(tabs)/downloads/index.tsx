@@ -5,10 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { formatBytes } from '@tuur/shared';
 import { Button, IconButton } from '../../../src/components/Button';
 import { ListGroup } from '../../../src/components/ListGroup';
-import { Mascot } from '../../../src/components/Mascot';
 import { RunningTour } from '../../../src/components/RunningTour';
 import { ScrollScreen } from '../../../src/components/Screen';
 import { Text } from '../../../src/components/Text';
+import { TuuSays } from '../../../src/components/TuuSays';
 import { getDownloadManager, getFileStore, getOfflineLibrary } from '../../../src/offline';
 import { metrics } from '../../../src/theme';
 
@@ -50,19 +50,17 @@ export default function Downloads() {
     return (
       <ScrollScreen contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}>
         <RunningTour />
-        <Mascot pose="relax" size={128} />
         <Text variant="title3" align="center">
           {t('downloads.empty')}
         </Text>
-        <Text variant="subheadline" align="center">
-          {t('downloads.emptyHint')}
-        </Text>
+        <TuuSays pose="relax" size={96} text={t('downloads.emptyHint')} style={{ alignSelf: 'stretch' }} />
       </ScrollScreen>
     );
 
   return (
     <ScrollScreen>
       <RunningTour />
+      <TuuSays pose="present" size={56} tipId="downloads.intro" text={t('tuu.downloadsTip')} />
       <ListGroup footer={footer}>
         {items.map((i) => (
           <View key={i.tourId} style={{ padding: metrics.margin, gap: 10 }}>

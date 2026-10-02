@@ -19,6 +19,9 @@ export interface SettingsState {
   highlightWords: boolean;
   /** Guide voice persona (see packages/shared narration/voices.ts). */
   voiceId: string;
+  /** Tuu's one-time tips: which were dismissed, and whether tips are shown at all. */
+  seenTips: string[];
+  tipsEnabled: boolean;
   set: (patch: Partial<Omit<SettingsState, 'set' | 'hydrated'>>) => void;
 }
 
@@ -34,6 +37,8 @@ export const useSettings = create<SettingsState>()(
       simulator: false,
       highlightWords: true,
       voiceId: DEFAULT_VOICE_ID,
+      seenTips: [],
+      tipsEnabled: true,
       set: (patch) => {
         if (patch.language) void setLanguage(patch.language);
         set(patch);
@@ -51,6 +56,8 @@ export const useSettings = create<SettingsState>()(
         simulator: s.simulator,
         highlightWords: s.highlightWords,
         voiceId: s.voiceId,
+        seenTips: s.seenTips,
+        tipsEnabled: s.tipsEnabled,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) void setLanguage(state.language);

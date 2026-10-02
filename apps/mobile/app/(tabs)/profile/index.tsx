@@ -8,7 +8,7 @@ import { useBackend } from '../../../src/backend';
 import { SettingsButton } from '../../../src/components/HeaderButton';
 import { Icon } from '../../../src/components/Icon';
 import { ListGroup, ListRow } from '../../../src/components/ListGroup';
-import { Mascot, MascotTip } from '../../../src/components/Mascot';
+import { TuuSays } from '../../../src/components/TuuSays';
 import { RunningTour } from '../../../src/components/RunningTour';
 import { ScrollScreen } from '../../../src/components/Screen';
 import { Text } from '../../../src/components/Text';
@@ -106,12 +106,14 @@ export default function Profile() {
             <Text variant="title2" accessibilityRole="header" style={{ flex: 1 }}>
               {t('profile.badges')}
             </Text>
-            {badges.length ? <Mascot pose="celebrate" size={44} style={{ marginVertical: -8 }} /> : null}
           </View>
           {badges.length ? (
-            <Text variant="footnote">{t('profile.badgesHint')}</Text>
+            <>
+              <Text variant="footnote">{t('profile.badgesHint')}</Text>
+              <TuuSays pose="celebrate" size={56} tipId="profile.badges" text={t('tuu.badges')} />
+            </>
           ) : (
-            <MascotTip pose="present" text={t('profile.badgesNone')} bubble={sys.elevated} />
+            <TuuSays pose="present" size={56} text={t('profile.badgesNone')} />
           )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {badges.map((b) => {

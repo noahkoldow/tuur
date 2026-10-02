@@ -13,6 +13,7 @@ import { FloatingAction } from '../../src/components/FloatingAction';
 import { Icon } from '../../src/components/Icon';
 import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Mascot } from '../../src/components/Mascot';
+import { TuuSays } from '../../src/components/TuuSays';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
 import { formatKm } from '../../src/format';
@@ -172,6 +173,8 @@ export default function Summary() {
             {title}
           </Text>
         </View>
+        {/* the badge card below already has Tuu celebrating; otherwise Tuu cheers here */}
+        {newBadge ? null : <TuuSays pose="celebrate" size={64} text={t('tuu.summary')} />}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
           {facts.map((f) => (
             <View

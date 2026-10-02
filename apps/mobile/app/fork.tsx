@@ -9,6 +9,7 @@ import { Banner } from '../src/components/Banner';
 import { Button, Row } from '../src/components/Button';
 import { Segmented } from '../src/components/Segmented';
 import { Mascot } from '../src/components/Mascot';
+import { TuuSays } from '../src/components/TuuSays';
 import { OptionCard } from '../src/components/OptionCard';
 import { ScrollScreen } from '../src/components/Screen';
 import { SpinningMark } from '../src/components/SpinningMark';
@@ -136,12 +137,10 @@ export default function Fork() {
           <Banner text={t('fork.none')} />
         ) : (
           <View style={{ gap: 12 }}>
-            <Row gap={10}>
-              <Mascot pose="point" size={48} />
-              <Text variant="title3" accessibilityRole="header" style={{ flex: 1 }}>
-                {t('fork.choose')}
-              </Text>
-            </Row>
+            <TuuSays pose="point" size={56} tipId="fork.intro" text={t('tuu.forkIntro')} />
+            <Text variant="title3" accessibilityRole="header">
+              {t('fork.choose')}
+            </Text>
             <Row gap={12} style={{ alignItems: 'stretch' }}>
               {options.map((o) => (
                 <OptionCard

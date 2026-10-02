@@ -3,12 +3,12 @@ import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { BackendError, useBackend } from '../../src/backend';
-import { Banner } from '../../src/components/Banner';
 import { Wordmark } from '../../src/components/Brand';
 import { Button } from '../../src/components/Button';
 import { Screen } from '../../src/components/Screen';
 import { SpinningMark } from '../../src/components/SpinningMark';
 import { Text } from '../../src/components/Text';
+import { TuuSays } from '../../src/components/TuuSays';
 
 type State = { phase: 'working' } | { phase: 'done'; tourId: string } | { phase: 'error'; own: boolean };
 
@@ -54,7 +54,7 @@ export default function InviteScreen() {
           </View>
         ) : state.phase === 'done' ? (
           <>
-            <Banner icon="check-circle" text={t('invite.success')} />
+            <TuuSays pose="wave" text={t('invite.success')} />
             <Button
               label={t('invite.openTour')}
               onPress={() => router.replace({ pathname: '/tour/[id]', params: { id: state.tourId } })}
@@ -62,7 +62,7 @@ export default function InviteScreen() {
           </>
         ) : (
           <>
-            <Banner tone="error" text={state.own ? t('invite.own') : t('invite.invalid')} />
+            <TuuSays pose="think" text={state.own ? t('invite.own') : t('invite.invalid')} />
             {!state.own ? (
               <Button
                 variant="tinted"

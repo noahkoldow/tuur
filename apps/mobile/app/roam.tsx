@@ -9,12 +9,12 @@ import { Banner } from '../src/components/Banner';
 import { Button, IconButton } from '../src/components/Button';
 import { Icon } from '../src/components/Icon';
 import { ListGroup, ListRow } from '../src/components/ListGroup';
-import { Mascot } from '../src/components/Mascot';
 import { Sheet } from '../src/components/Sheet';
 import { interestOf } from '../src/components/StopCards';
 import { INTEREST_ICON } from '../src/components/icons';
 import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
+import { TuuSays, useTip } from '../src/components/TuuSays';
 import { TuurMap } from '../src/components/TuurMap';
 import { startRoamSession } from '../src/guide/session';
 import { usePoiPool } from '../src/hooks/usePoiPool';
@@ -96,7 +96,10 @@ export default function Roam() {
       ? Math.max(1, Math.round(haversineMatrix([position, p.location], 'foot-walking').minutes[0]![1]!))
       : 0;
 
-  const collapsed = Math.round(320 * Math.min(1.6, Math.max(1, PixelRatio.getFontScale()))) + insets.bottom;
+  const tip = useTip('roam.intro');
+  const collapsed =
+    Math.round((tip.visible ? 420 : 320) * Math.min(1.6, Math.max(1, PixelRatio.getFontScale()))) +
+    insets.bottom;
   const expanded = Math.round(screenH * 0.72);
 
   return (
@@ -142,7 +145,6 @@ export default function Roam() {
             <Text variant="title2" accessibilityRole="header" style={{ flex: 1 }}>
               {t('roam.startTitle')}
             </Text>
-            <Mascot pose={picking ? 'point' : 'walk'} size={52} style={{ marginVertical: -8 }} />
           </View>
         }
       >
@@ -155,7 +157,12 @@ export default function Roam() {
           ) : null}
           {ready && !best ? <Banner icon="compass" text={t('roam.noStarts')} /> : null}
 
-          {!picking ? (
+          {startParam && !startError ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}>
+              <SpinningMark size={28} label={t('roam.findingStart')} />
+              <Text variant="subheadline">{t('roam.findingStart')}</Text>
+            </View>
+          ) : !picking ? (
             <>
               <View style={{ gap: 8 }}>
                 <Button
@@ -190,6 +197,7 @@ export default function Roam() {
                 disabled={!position}
                 onPress={() => void start(undefined, 'free')}
               />
+              <TuuSays pose="walk" tipId="roam.intro" text={t('tuu.roamIntro')} size={56} />
             </>
           ) : (
             <>

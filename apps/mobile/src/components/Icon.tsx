@@ -70,6 +70,7 @@ const SF: Record<string, string> = {
   'file-text': 'doc.text',
   'book-open': 'book',
   'message-circle': 'bubble.left',
+  'rotate-ccw': 'arrow.counterclockwise',
   activity: 'waveform.path.ecg',
   cpu: 'cpu',
   // notices

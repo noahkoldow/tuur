@@ -21,6 +21,7 @@ import { StopCards, interestOf } from '../src/components/StopCards';
 import { Transcript } from '../src/components/Transcript';
 import { TravelModeChip } from '../src/components/TravelModeChip';
 import { Text } from '../src/components/Text';
+import { TuuSays, useTip } from '../src/components/TuuSays';
 import { TuurMap } from '../src/components/TuurMap';
 import type { ForkSnapshot } from '../src/guide/modes';
 import { endSession, tourPath, useActiveSession, type ActiveSession } from '../src/guide/session';
@@ -143,7 +144,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
 
   const noticeText =
     ui.notice === 'vehicle_paused'
-      ? t('player.vehiclePaused')
+      ? undefined
       : ui.notice === 'vehicle_resumed'
         ? t('player.vehicleResumed')
         : ui.notice === 'unavailable'
@@ -185,6 +186,25 @@ function PlayInner({ session }: { session: ActiveSession }) {
   useEffect(() => {
     if (ui.notice === 'vehicle_paused') haptics.warning();
   }, [ui.notice]);
+  // One Tuu bubble at a time: vehicle pause > first-time controls tip > arrival > reading hint while narrating.
+  const controlsTip = useTip('play.controls');
+  const listenTip = useTip('play.listen');
+  const vehiclePaused = ui.notice === 'vehicle_paused';
+  const tuuBubble =
+    ui.phase === 'finished' ? null : vehiclePaused ? (
+      <TuuSays pose="relax" size={64} text={t('player.vehiclePaused')} />
+    ) : controlsTip.visible ? (
+      <TuuSays
+        pose={n && ui.phase === 'narrating' ? 'listen' : 'present'}
+        size={64}
+        tipId="play.controls"
+        text={t('tuu.playControls')}
+      />
+    ) : arrived && !(n && ui.phase === 'narrating') ? (
+      <TuuSays pose="celebrate" size={64} text={t('tuu.playArrived')} />
+    ) : n && ui.phase === 'narrating' && !showText && listenTip.visible ? (
+      <TuuSays pose="listen" size={64} tipId="play.listen" text={t('tuu.playListen')} />
+    ) : null;
   const distanceLabel =
     ui.target?.distanceM === undefined
       ? ''
@@ -204,8 +224,6 @@ function PlayInner({ session }: { session: ActiveSession }) {
         >
           {title}
         </Text>
-        {/* Tuu takes a seat while the guide is paused (D46) */}
-        {ui.phase === 'paused' ? <Mascot pose="relax" size={52} style={{ marginVertical: -6 }} /> : null}
       </Row>
       {ui.target?.distanceM !== undefined && ui.phase !== 'finished' && !(n && ui.phase === 'narrating') ? (
         <View
@@ -370,6 +388,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
               />
             </View>
           ) : null}
+          {tuuBubble}
           {cardStop && ui.phase !== 'finished' ? (
             <View style={{ marginHorizontal: -metrics.margin }}>
               <StopCards

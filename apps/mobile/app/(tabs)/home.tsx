@@ -1,10 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PixelRatio, Platform, View, useWindowDimensions } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Linking,
+  PixelRatio,
+  Platform,
+  ScrollView,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Image as RemoteImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { REGION_FIXTURES, spotScale, tilesAround, type ExploredSpot } from '@tuur/shared';
+import {
+  REGION_FIXTURES,
+  haversineMatrix,
+  rankRoamStarts,
+  spotScale,
+  tilesAround,
+  type ExploredSpot,
+  type Poi,
+} from '@tuur/shared';
 import { useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
 import { WordmarkPill } from '../../src/components/Brand';
@@ -13,11 +30,13 @@ import { Icon } from '../../src/components/Icon';
 import { INTEREST_ICON } from '../../src/components/icons';
 import { ListGroup, ListRow } from '../../src/components/ListGroup';
 import { Mascot, type MascotPose } from '../../src/components/Mascot';
-import { MiniPlayer } from '../../src/components/MiniPlayer';
+import { PlaceCard, PlaceCardSkeleton, PLACE_CARD_WIDTH } from '../../src/components/PlaceCard';
+import { RunningTour } from '../../src/components/RunningTour';
 import { Sheet } from '../../src/components/Sheet';
 import { SpinningMark } from '../../src/components/SpinningMark';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
+import { usePoiPool } from '../../src/hooks/usePoiPool';
 import { useActiveSession } from '../../src/guide/session';
 import { useArea } from '../../src/location/useArea';
 import { usePosition } from '../../src/location/usePosition';
@@ -39,13 +58,29 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const { height: screenH } = useWindowDimensions();
   const backend = useBackend();
-  const lang = useSettings((s) => s.language);
-  const { permission, position, request } = usePosition();
+  const { position, request } = usePosition();
   const area = useArea(position, { tours: false });
   const session = useActiveSession();
   const center = position ?? REGION_FIXTURES[0]!.center;
-  const poiCount = area.area?.poiCount ?? 0;
+  const interests = useSettings((s) => s.interests);
+  // without a position the carousel still shows the demo region's best places, so the first launch is never empty
+  const { pool, ready: poolReady } = usePoiPool(position ?? REGION_FIXTURES[0]!.center, 1);
+  // the best places to start nearby: what makes the app understandable at a glance
+  const places = useMemo(
+    () => (poolReady ? rankRoamStarts(position ?? center, pool.all(), interests).slice(0, 8) : []),
+    [poolReady, position, center, pool, interests],
+  );
+  const minutesTo = (p: Poi) =>
+    position
+      ? Math.max(1, Math.round(haversineMatrix([position, p.location], 'foot-walking').minutes[0]![1]!))
+      : 0;
   const [sheetIndex, setSheetIndex] = useState(1);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (poolReady) return setSlow(false);
+    const id = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(id);
+  }, [poolReady]);
   const explore = sheetIndex === 0;
   const [spots, setSpots] = useState<ExploredSpot[]>([]);
   const [spotsLoaded, setSpotsLoaded] = useState(false);
@@ -58,7 +93,7 @@ export default function Home() {
     Math.round(PEEK * Math.min(2, Math.max(1, PixelRatio.getFontScale()))) +
     (session ? MINI_H : 0) +
     bottomPad;
-  const medium = Math.max(380, Math.round(screenH * 0.5)) + (session ? MINI_H : 0) + bottomPad;
+  const medium = Math.max(420, Math.round(screenH * 0.66)) + (session ? MINI_H : 0) + bottomPad;
 
   // Explored spots of the surrounding tiles (loaded once the area exists; only tile ids leave the device).
   const tile = area.tile;
@@ -109,9 +144,22 @@ export default function Home() {
       ? spots.length > 0
         ? t('home.spotsHint')
         : t('home.spotsNone')
-      : poiCount > 0
-        ? t('home.nearby', { count: poiCount })
-        : t('home.yourArea');
+      : position
+        ? t('home.heroBody')
+        : t('home.examplesBody');
+
+  // a card needs the position: ask for it in context, then continue with the tapped place without a second tap
+  const openPlace = async (id: string) => {
+    if (!position && (await request()) === 'denied') {
+      // iOS shows the system prompt only once: point to the settings instead of failing silently
+      Alert.alert(t('permissions.locationDenied'), undefined, [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('settings.location'), onPress: () => void Linking.openSettings() },
+      ]);
+      return;
+    }
+    router.push({ pathname: '/roam', params: { start: id } });
+  };
 
   const goExplore = (on: boolean) => {
     setSheetIndex(on ? 0 : 1);
@@ -124,7 +172,7 @@ export default function Home() {
         center={center}
         zoom={15}
         user={position ?? undefined}
-        bottomInset={explore ? peek + (selected ? 150 : 0) : medium - 40}
+        bottomInset={explore ? peek + (selected ? 150 : 0) : Math.min(medium - 40, screenH * 0.5)}
         spots={mapSpots}
         onSpotPress={(id) => setSelected(spots.find((s) => s.poiId === id))}
         onMapPress={() => (explore ? setSelected(undefined) : goExplore(true))}
@@ -146,18 +194,7 @@ export default function Home() {
           <View>
             {session ? (
               <View style={{ paddingHorizontal: metrics.margin, paddingBottom: 8 }}>
-                <MiniPlayer
-                  session={session}
-                  title={
-                    session.tour?.texts[lang]?.title ??
-                    (session.mode === 'roam'
-                      ? t('roam.title')
-                      : session.mode === 'fork'
-                        ? t('fork.title')
-                        : t('home.continueTour'))
-                  }
-                  onOpen={() => router.push('/play')}
-                />
+                <RunningTour />
               </View>
             ) : null}
             <View
@@ -170,10 +207,14 @@ export default function Home() {
                 paddingBottom: 12,
               }}
             >
-              <Mascot pose={tuuPose} size={48} />
+              <Mascot pose={tuuPose} size={52} />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text variant="title3" accessibilityRole="header">
-                  {t('home.greeting')}
+                  {explore
+                    ? t('home.spotsTitle')
+                    : position
+                      ? t('home.storiesNearby')
+                      : t('home.examplesTitle')}
                 </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   {exploring ? <SpinningMark size={16} label={t('loading.exploring')} /> : null}
@@ -186,18 +227,14 @@ export default function Home() {
           </View>
         }
       >
-        <View style={{ gap: 20, paddingTop: 4 }}>
+        <View style={{ gap: 24, paddingTop: 4 }}>
           {area.phase === 'no-location' ? (
-            <View style={{ gap: 12 }}>
-              <Banner
-                icon="map-pin"
-                text={permission === 'denied' ? t('permissions.locationDenied') : t('home.noLocation')}
-              />
-              <Button variant="tinted" label={t('home.enableLocation')} onPress={() => void request()} />
-            </View>
-          ) : null}
-          {area.phase === 'low_content' ? (
-            <Banner icon="compass" text={`${t('home.lowContentTitle')}. ${t('home.lowContentBody')}`} />
+            <Button
+              variant="tinted"
+              icon="map-pin"
+              label={t('home.enableLocation')}
+              onPress={() => void request()}
+            />
           ) : null}
           {area.phase === 'failed' ? (
             <View style={{ gap: 12 }}>
@@ -209,6 +246,45 @@ export default function Home() {
             </View>
           ) : null}
 
+          {area.phase !== 'failed' ? (
+            <View style={{ gap: 12 }}>
+              {places.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  decelerationRate="fast"
+                  snapToInterval={PLACE_CARD_WIDTH + 12}
+                  style={{ marginHorizontal: -metrics.margin }}
+                  contentContainerStyle={{ gap: 12, paddingHorizontal: metrics.margin }}
+                >
+                  {places.map((p) => (
+                    <PlaceCard
+                      key={p.id}
+                      poi={p}
+                      minutes={position ? minutesTo(p) : undefined}
+                      onPress={() => void openPlace(p.id)}
+                    />
+                  ))}
+                </ScrollView>
+              ) : poolReady || slow ? (
+                <Text variant="subheadline">{poolReady ? t('home.noPlaces') : t('home.loadingPlaces')}</Text>
+              ) : (
+                <ScrollView
+                  horizontal
+                  scrollEnabled={false}
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginHorizontal: -metrics.margin }}
+                  contentContainerStyle={{ gap: 12, paddingHorizontal: metrics.margin }}
+                  accessibilityLabel={t('home.loadingPlaces')}
+                >
+                  {[0, 1, 2].map((i) => (
+                    <PlaceCardSkeleton key={i} />
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          ) : null}
+
           <View style={{ gap: 8 }}>
             <Button
               label={t('home.roamCta')}
@@ -216,13 +292,9 @@ export default function Home() {
               onPress={() => router.push('/roam')}
               accessibilityHint={t('home.roamBody')}
             />
-            <Text variant="footnote" align="center">
-              {t('home.roamBody')}
-            </Text>
           </View>
 
-          <ListGroup>
-            <ListRow icon="users" label={t('home.spotsTitle')} onPress={() => goExplore(true)} />
+          <ListGroup title={t('home.moreWays')}>
             <ListRow
               icon="edit-3"
               label={t('home.plannedTitle')}
@@ -234,6 +306,12 @@ export default function Home() {
               label={t('home.forkTitle')}
               hint={t('home.forkBody')}
               onPress={() => router.push('/fork')}
+            />
+            <ListRow
+              icon="users"
+              label={t('home.spotsTitle')}
+              hint={t('home.spotsHint')}
+              onPress={() => goExplore(true)}
             />
           </ListGroup>
         </View>
