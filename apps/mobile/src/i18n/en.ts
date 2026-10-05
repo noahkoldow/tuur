@@ -444,7 +444,7 @@ export const en: Widen<typeof de> = {
     exploreHint: 'Take a different turn. Tuu follows your direction; your walk and current story continue.',
     nextStop: 'Next stop: {{name}}',
     endTour: 'End tour',
-    minimize: 'Minimise player, the tour keeps running',
+    home: 'Go to home, the tour keeps running',
     notification: 'tuur is guiding your way.',
     foregroundOnly:
       'Without the “always” location permission the guide only follows you while the screen is on.',

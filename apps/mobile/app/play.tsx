@@ -406,7 +406,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
           justifyContent: 'space-between',
         }}
       >
-        <IconButton icon="chevron-down" label={t('player.minimize')} onPress={() => goHome(router)} onMap />
+        <IconButton icon="home" label={t('player.home')} onPress={() => goHome(router)} onMap />
         <View style={{ alignItems: 'flex-end', gap: 8, maxWidth: '80%' }}>
           <TravelModeChip mode={ui.travelMode} />
           {simulator ? (

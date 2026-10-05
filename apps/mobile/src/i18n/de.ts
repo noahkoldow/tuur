@@ -449,7 +449,7 @@ export const de = {
       'Bieg einfach anders ab. Tuu folgt deiner Richtung; dein Spaziergang und die aktuelle Geschichte laufen weiter.',
     nextStop: 'Nächste Station: {{name}}',
     endTour: 'Tour beenden',
-    minimize: 'Player verkleinern, die Tour läuft weiter',
+    home: 'Zur Startseite, die Tour läuft weiter',
     notification: 'tuur begleitet deinen Weg.',
     foregroundOnly:
       'Ohne Standortfreigabe „Immer“ läuft die Erzählung nur bei eingeschaltetem Bildschirm mit.',

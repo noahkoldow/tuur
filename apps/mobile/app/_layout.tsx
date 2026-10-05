@@ -105,10 +105,14 @@ function RootNavigator() {
           <Stack.Screen name="roam" />
           <Stack.Screen name="business" />
           <Stack.Screen name="invite/[token]" />
-          {/* minimizes with the chevron, so the gesture is a swipe down, not a back swipe from the edge */}
+          {/* Return home through the player's Home button so map/sheet gestures cannot dismiss it. */}
           <Stack.Screen
             name="play"
-            options={{ animation: 'slide_from_bottom', gestureDirection: 'vertical' }}
+            options={{
+              animation: 'slide_from_bottom',
+              gestureEnabled: false,
+              fullScreenGestureEnabled: false,
+            }}
           />
           <Stack.Screen
             name="summary/[id]"

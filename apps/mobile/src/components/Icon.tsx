@@ -9,6 +9,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
  */
 const SF: Record<string, string> = {
   // navigation and chrome
+  home: 'house',
   'arrow-left': 'chevron.left',
   'arrow-right': 'arrow.right',
   'chevron-down': 'chevron.down',
