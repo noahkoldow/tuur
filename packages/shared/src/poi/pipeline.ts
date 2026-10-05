@@ -4,6 +4,7 @@ import type { ImageRef, Poi } from '../schemas';
 import { classifyByRules, type Classification } from './classify';
 import { DEFAULT_MERGE, mergeRawPois, type MergeOptions, type MergedPoi } from './merge';
 import type { RawPoi } from './raw';
+import { localContextKind } from './localContext';
 import {
   DEFAULT_RELATIVE,
   estimateDwellMinutes,
@@ -22,6 +23,7 @@ export function isPubliclyAccessible(tags: Record<string, string>): boolean {
   if (access && ['private', 'no', 'customers', 'permit'].includes(access)) return false;
   if (tags['disused'] === 'yes' || tags['abandoned'] === 'yes') return false;
   if (tags['military'] && tags['military'] !== 'no') return false;
+  if (localContextKind(tags) === 'street' && tags['foot'] === 'no') return false;
   return true;
 }
 
@@ -77,8 +79,13 @@ export function buildPois(raw: RawPoi[], opt: BuildOptions): BuildResult {
     }
     const raw0 = raws[i]!;
     if (raw0 < min && cls.interests.length === 0) return;
-    const base = rel[i]!;
-    const image = m.imageFile ? opt.images?.get(m.imageFile) : undefined;
+    // A street remains a short local detail even if it is the best documented object in a sparse tile.
+    const local = localContextKind(m.osmTags) !== undefined && raw0 < 30 && m.sitelinks < 8;
+    const base = local ? Math.max(18, Math.min(24, rel[i]!)) : rel[i]!;
+    // One source's outdated / unlicensed file must not hide another source's verified photo.
+    const image = [m.imageFile, ...m.members.map((member) => member.imageFile)]
+      .map((file) => (file ? opt.images?.get(file) : undefined))
+      .find((candidate) => candidate !== undefined);
     pois.push({
       id,
       name: m.name,

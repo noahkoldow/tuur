@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import type { Map as MlMap, GeoJSONSource, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { geohashBounds, geohashCenter, type Area } from '@tuur/shared';
+import { resolveMapStyle } from '@tuur/ui';
 
 const STATUS_COLOR: Record<string, string> = {
   ready: '#1b7f3b',
@@ -11,13 +12,6 @@ const STATUS_COLOR: Record<string, string> = {
   failed: '#b00020',
   low_content: '#6b7280',
   empty: '#c7c7c7',
-};
-
-const DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
-const PLAIN_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#eef0f1' } }],
 };
 
 function collection(areas: Area[], selected?: string) {
@@ -110,15 +104,15 @@ export function AreaMap({
     void (async () => {
       const maplibre = await import('maplibre-gl');
       maplibre.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
-      // own style -> public demo tiles -> plain background: the tile overlay must work even without any map provider
+      // The OSM default preserves the same tuur style if our style endpoint is temporarily unavailable.
       const tryStyle = async (url: string, ms: number) => {
         const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
         if (!res.ok) throw new Error('style');
         return (await res.json()) as StyleSpecification;
       };
-      const style = await tryStyle('/map-style.json', 4000)
-        .catch(() => tryStyle(DEMO_STYLE, 4000))
-        .catch(() => PLAIN_STYLE);
+      const style = await tryStyle('/map-style.json', 4000).catch(
+        () => resolveMapStyle({}) as unknown as StyleSpecification,
+      );
       if (cancelled || !el.current) return;
       const m = new maplibre.Map({
         container: el.current,

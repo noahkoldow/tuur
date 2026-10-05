@@ -1,8 +1,7 @@
-import { config } from '../config';
 import { MapLibreMapPackManager } from './mapLibrePacks';
-import { NoopMapPackManager, type MapPackManager } from './mapPacks';
+import type { MapPackManager } from './mapPacks';
 
-/** Native: MapLibre offline packs (demo backend uses the no-op manager). */
+/** Native packs require a source explicitly configured for offline use. */
 export function createMapPackManager(): MapPackManager {
-  return config.backend === 'demo' ? new NoopMapPackManager() : new MapLibreMapPackManager();
+  return new MapLibreMapPackManager();
 }

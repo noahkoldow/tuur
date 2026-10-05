@@ -34,7 +34,8 @@ import type { LlmProvider } from '../providers/llm';
 import { CachedRoutingProvider, type RoutingProvider } from '../providers/routing';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
-import { logUsage, spentToday } from '../util/usage';
+import { spentToday } from '../util/usage';
+import { budgetedLlm, budgetedRouting } from '../providers/budgeted';
 
 export interface TourDeps {
   db: Firestore;
@@ -140,25 +141,12 @@ export async function makeConcept(
   let concept: TourConcept | undefined;
   for (let attempt = 0; attempt < 2 && !concept; attempt++) {
     try {
-      const r = await deps.llm.generateTourConcept({
+      const r = await budgetedLlm(deps.llm, deps.db, cfg, deps.now, { tile }).generateTourConcept({
         model: cfg.models.narration,
         system: tourSystemPrompt(input.lang),
         user: tourUserPrompt(input),
         input,
       });
-      await logUsage(
-        deps.db,
-        cfg.pricing,
-        {
-          kind: 'narration',
-          model: cfg.models.narration,
-          usage: r.usage,
-          tile,
-          ok: true,
-          note: 'tour_concept',
-        },
-        deps.now(),
-      );
       const parsed = TourConceptSchema.safeParse(r.output);
       if (parsed.success) concept = sanitizeConcept(parsed.data, input);
     } catch {
@@ -179,7 +167,11 @@ async function buildTour(
   lang: string,
   existing: Tour | undefined,
 ): Promise<Built> {
-  const routing = new CachedRoutingProvider(deps.routing, deps.db, deps.now);
+  const routing = new CachedRoutingProvider(
+    budgetedRouting(deps.routing, deps.db, cfg, deps.now, prep.start.tile),
+    deps.db,
+    deps.now,
+  );
   const matrix: TravelMatrix = await routing.matrix(prep.matrixPoints, profile);
   let plan: TourPlan = solveTour(prep, matrix, { profile });
   if (plan.issues.length) return { rejected: plan.issues };
@@ -222,19 +214,6 @@ async function buildTour(
     plan.stops.map((s) => s.location),
     profile,
   );
-  if (routing.upstreamCalls) {
-    await logUsage(
-      deps.db,
-      cfg.pricing,
-      {
-        kind: 'routing',
-        usage: { routingCalls: routing.upstreamCalls },
-        tile: plan.stops[0]!.tile,
-        ok: true,
-      },
-      deps.now(),
-    );
-  }
 
   const now = deps.now();
   const cover = plan.stops.flatMap((s) => s.imageRefs)[0];
@@ -369,6 +348,7 @@ export async function generateAutoTours(
     const profile = input.profile ?? 'foot-walking';
     const kept: Tour[] = [];
     for (const template of deps.templates ?? DEFAULT_TEMPLATES) {
+      if (template.id === 'local_walk' && kept.length) continue;
       const prev = existing.get(tourId(placeId, template.id));
       if (prev && (prev.source === 'edited' || prev.pinned || prev.locked)) {
         kept.push(prev);

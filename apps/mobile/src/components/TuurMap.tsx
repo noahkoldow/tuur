@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, useColorScheme } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, useColorScheme, useWindowDimensions } from 'react-native';
 import {
   Camera,
   GeoJSONSource,
@@ -12,9 +12,12 @@ import { resolveMapStyle, colors } from '@tuur/ui';
 import { cellDegForZoom, clusterByGrid, type LatLng } from '@tuur/shared';
 import { config } from '../config';
 import { HeartPin, pinSize } from './HeartPin';
-import { ClusterMarker, LocateButton, SpotMarker } from './MapControls';
+import { ClusterMarker, LocateButton, SpotMarker, UserPositionMarker } from './MapControls';
 import { LOCATE_ZOOM, ROUTE_DONE_COLOR, type TuurMapProps } from './mapTypes';
 import { useTranslation } from 'react-i18next';
+import { useReduceMotion } from '../motion';
+import { MapRouteLegend } from './MapRouteLegend';
+import { navigationCenter } from './mapNavigation';
 
 const line = (pts: LatLng[] | undefined) => ({
   type: 'Feature' as const,
@@ -23,9 +26,9 @@ const line = (pts: LatLng[] | undefined) => ({
 });
 
 /**
- * MapLibre map with the light tuur style: red route (current leg highlighted while navigating), heart-pin
- * markers with category glyphs, explored spots and the own position. The camera never follows by itself; the
- * locate button brings it back.
+ * MapLibre map with the light tuur style: red route (current leg highlighted while navigating), stop capsules
+ * markers with category glyphs, explored spots and the own position. In navigation, native camera animations
+ * follow the walker with a little room for the next turn. Panning suspends following until locate is pressed.
  */
 export function TuurMap({
   center,
@@ -35,23 +38,36 @@ export function TuurMap({
   route,
   routeDone,
   leg,
+  followUser = false,
+  showRouteLegend = false,
   spots = [],
   onSpotPress,
   onMapPress,
   fit,
   locateButton,
+  locateButtonOffset = 16,
+  recenterKey,
   bottomInset = 0,
   onStopPress,
   testID,
 }: TuurMapProps) {
   const { t } = useTranslation();
   const cameraRef = useRef<CameraRef>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const [mapHeight, setMapHeight] = useState(windowHeight);
+  const cameraBottom = Math.min(Math.max(0, bottomInset), Math.max(0, mapHeight - 220));
+  const reduceMotion = useReduceMotion();
+  const following = useRef(true);
   const appearance = useColorScheme() === 'dark' ? 'dark' : 'light';
   const style = useMemo(
     () =>
       resolveMapStyle(
         {
-          ...(config.mapStyleUrl ? { styleUrl: config.mapStyleUrl } : {}),
+          ...(config.offlineMapStyleUrl
+            ? { styleUrl: config.offlineMapStyleUrl }
+            : config.mapStyleUrl
+              ? { styleUrl: config.mapStyleUrl }
+              : {}),
           ...(config.maptilerKey ? { maptilerKey: config.maptilerKey } : {}),
         },
         appearance,
@@ -64,6 +80,30 @@ export function TuurMap({
   const routeGeo = useMemo(() => line(route), [route]);
   const doneGeo = useMemo(() => line(routeDone), [routeDone]);
   const legGeo = useMemo(() => line(leg), [leg]);
+  // Native annotations stack in insertion order: the active capsule should stay readable at crowded stops.
+  const orderedStops = useMemo(
+    () => [...stops].sort((a, b) => Number(a.state === 'current') - Number(b.state === 'current')),
+    [stops],
+  );
+  const followCenter = user ? navigationCenter(user, leg) : undefined;
+  const followLat = followCenter?.lat;
+  const followLng = followCenter?.lng;
+
+  useEffect(() => {
+    if (
+      !followUser ||
+      !following.current ||
+      followLat === undefined ||
+      followLng === undefined ||
+      fit?.length
+    )
+      return;
+    cameraRef.current?.easeTo({
+      center: [followLng, followLat],
+      padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
+      duration: reduceMotion ? 0 : 300,
+    });
+  }, [followUser, followLat, followLng, cameraBottom, reduceMotion, fit?.length]);
 
   useEffect(() => {
     if (!fit?.length) return;
@@ -71,26 +111,47 @@ export function TuurMap({
     const lngs = fit.map((p) => p.lng);
     cameraRef.current?.fitBounds(
       [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)],
-      { padding: { top: 90, left: 48, right: 48, bottom: 48 + bottomInset }, duration: 600 },
+      {
+        padding: { top: 90, left: 48, right: 48, bottom: 48 + cameraBottom },
+        duration: reduceMotion ? 0 : 300,
+      },
     );
-  }, [fit, bottomInset]);
+  }, [fit, cameraBottom, reduceMotion]);
 
   // Center on the user once when the position first arrives; afterwards the map stays where the user pans it.
   const centered = useRef(false);
   const hasUser = Boolean(user);
   useEffect(() => {
-    if (!hasUser || centered.current || fit?.length) return;
+    if (!hasUser || centered.current || fit?.length || followUser) return;
     centered.current = true;
-    if (user) cameraRef.current?.easeTo({ center: [user.lng, user.lat], duration: 400 });
+    if (user) cameraRef.current?.easeTo({ center: [user.lng, user.lat], duration: reduceMotion ? 0 : 300 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasUser]);
 
-  const locate = () => {
-    if (user) cameraRef.current?.easeTo({ center: [user.lng, user.lat], zoom: LOCATE_ZOOM, duration: 600 });
-  };
+  const locateTarget = (followUser ? followCenter : user) ?? center;
+  const locateLat = locateTarget.lat;
+  const locateLng = locateTarget.lng;
+  const locate = useCallback(() => {
+    following.current = true;
+    cameraRef.current?.easeTo({
+      center: [locateLng, locateLat],
+      zoom: LOCATE_ZOOM,
+      bearing: 0,
+      pitch: 0,
+      padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
+      duration: reduceMotion ? 0 : 300,
+    });
+  }, [locateLng, locateLat, cameraBottom, reduceMotion]);
+
+  const previousRecenterKey = useRef(recenterKey);
+  useEffect(() => {
+    if (previousRecenterKey.current === recenterKey) return;
+    previousRecenterKey.current = recenterKey;
+    locate();
+  }, [recenterKey, locate]);
 
   return (
-    <View style={{ flex: 1 }} testID={testID}>
+    <View style={{ flex: 1 }} testID={testID} onLayout={(e) => setMapHeight(e.nativeEvent.layout.height)}>
       <Map
         style={{ flex: 1 }}
         mapStyle={style as never}
@@ -98,22 +159,19 @@ export function TuurMap({
         attribution
         compass={false}
         {...(onMapPress ? { onPress: () => onMapPress() } : {})}
+        onRegionWillChange={(e) => {
+          if (e.nativeEvent.userInteraction) following.current = false;
+        }}
         onRegionDidChange={(e) => setMapZoom(e.nativeEvent.zoom)}
       >
         <Camera
           ref={cameraRef}
-          initialViewState={{ center: [(user ?? center).lng, (user ?? center).lat], zoom }}
+          initialViewState={{
+            center: [(user ?? center).lng, (user ?? center).lat],
+            zoom: followUser ? Math.max(zoom, 16) : zoom,
+            padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
+          }}
         />
-        {routeDone && routeDone.length > 1 ? (
-          <GeoJSONSource id="route-done" data={doneGeo}>
-            <Layer
-              id="route-done-line"
-              type="line"
-              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{ 'line-color': ROUTE_DONE_COLOR, 'line-width': 4 }}
-            />
-          </GeoJSONSource>
-        ) : null}
         {route && route.length > 1 ? (
           <GeoJSONSource id="route" data={routeGeo}>
             <Layer
@@ -129,8 +187,26 @@ export function TuurMap({
               paint={{
                 'line-color': colors.brand.red,
                 'line-width': navigating ? 4 : 5,
-                'line-opacity': navigating ? 0.45 : 1,
+                'line-opacity': navigating ? 0.65 : 1,
+                ...(navigating || showRouteLegend ? { 'line-dasharray': [1.5, 2] } : {}),
+                'line-opacity-transition': { duration: reduceMotion ? 0 : 200, delay: 0 },
               }}
+            />
+          </GeoJSONSource>
+        ) : null}
+        {routeDone && routeDone.length > 1 ? (
+          <GeoJSONSource id="route-done" data={doneGeo}>
+            <Layer
+              id="route-done-casing"
+              type="line"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': '#FFFFFF', 'line-width': 8 }}
+            />
+            <Layer
+              id="route-done-line"
+              type="line"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': ROUTE_DONE_COLOR, 'line-width': 4 }}
             />
           </GeoJSONSource>
         ) : null}
@@ -171,7 +247,7 @@ export function TuurMap({
                 cameraRef.current?.easeTo({
                   center: [c.location.lng, c.location.lat],
                   zoom: mapZoom + 2,
-                  duration: 450,
+                  duration: reduceMotion ? 0 : 300,
                 })
               }
             >
@@ -179,12 +255,12 @@ export function TuurMap({
             </ViewAnnotation>
           ),
         )}
-        {stops.map((s) => (
+        {orderedStops.map((s) => (
           <ViewAnnotation
             key={s.id}
             id={`stop-${s.id}`}
             lngLat={[s.location.lng, s.location.lat]}
-            anchor="bottom"
+            anchor="center"
             onPress={() => onStopPress?.(s.id)}
           >
             <HeartPin
@@ -199,36 +275,21 @@ export function TuurMap({
         ))}
         {user ? (
           <ViewAnnotation id="me" lngLat={[user.lng, user.lat]} anchor="center">
-            <View
-              accessible
-              accessibilityLabel={t('map.position')}
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                backgroundColor: '#FFFFFF',
-                alignItems: 'center',
-                justifyContent: 'center',
-                shadowColor: '#000',
-                shadowOpacity: 0.25,
-                shadowRadius: 4,
-                elevation: 4,
-              }}
-            >
-              <View
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  backgroundColor: colors.ink.primary,
-                  transform: [{ rotate: `${user.heading ?? 0}deg` }],
-                }}
-              />
-            </View>
+            <UserPositionMarker heading={user.heading} label={t('map.position')} />
           </ViewAnnotation>
         ) : null}
       </Map>
-      {user && locateButton !== false ? <LocateButton onPress={locate} bottom={bottomInset + 16} /> : null}
+      {showRouteLegend ? (
+        <MapRouteLegend
+          walked={Boolean(routeDone && routeDone.length > 1)}
+          next={navigating}
+          ahead={Boolean(route && route.length > 1)}
+          bottom={bottomInset + 20}
+        />
+      ) : null}
+      {user && locateButton !== false ? (
+        <LocateButton onPress={locate} bottom={bottomInset + locateButtonOffset} />
+      ) : null}
     </View>
   );
 }

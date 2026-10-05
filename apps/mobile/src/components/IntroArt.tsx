@@ -130,20 +130,15 @@ function StoryArt() {
               position: 'absolute',
               right: 10,
               bottom: 10,
-              flexDirection: 'row',
               alignItems: 'center',
-              gap: 6,
-              height: 34,
-              paddingLeft: 10,
-              paddingRight: 14,
-              borderRadius: 17,
+              justifyContent: 'center',
+              height: 44,
+              width: 44,
+              borderRadius: 22,
               backgroundColor: sys.accent,
             }}
           >
             <Icon name="play" size={13} color={sys.onAccent} />
-            <Text variant="footnote" color={sys.onAccent} style={{ fontWeight: '600' }}>
-              {t('home.listen')}
-            </Text>
           </View>
         </View>
         <View style={{ padding: 12, gap: 2 }}>

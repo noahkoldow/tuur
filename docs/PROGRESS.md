@@ -1,5 +1,14 @@
 # Progress
 
+## Preview deployment and readiness audit (2026-10-03)
+
+- Expo Go follow-up: no development server was running, so the old project entry was unreachable. Replaced the Windows-incompatible `go` shell command with `scripts/start-expo-go.mjs`; it starts the existing demo mode with a tunnel by default and supports `--lan`. Tunnel attempts failed (`remote gone away`, then timeout); a local-network preview was started successfully and its iOS manifest verified (SDK 57, account `noehxpo`). Restart instructions and iPhone account requirements are in [TESTING_IOS.md](TESTING_IOS.md#expo-go-vorschau-starten-aktualisiert-2026-10-03). A local development preview requires this computer to remain running.
+- Published the current mobile web UI to [EAS Hosting preview](https://tuur--preview.expo.app), immutable deployment [otibffikg5](https://tuur--otibffikg5.expo.app), in the existing `@noehxpo/tuur` project. This is a demo preview with unlocked UI flows, schematic maps and browser speech; no native OTA update or store submission was made.
+- Remote EAS state supersedes the older signing blocker below: iOS production builds 6 and 7 finished on 2026-09-30. Latest build 7: `a6a3d65c-292b-47f3-8c21-f7a24e84a502`. TestFlight submission and device acceptance remain unverified. OTA is not configured in the current app or listed builds.
+- Remote preview/production EAS environments list only the iOS Firebase secret file. Firebase Cloud Functions and Secret Manager APIs return disabled-API errors in `tuur-prod`; backend release prerequisites remain incomplete.
+- All workspace lints and 264 unit tests across mobile/shared/UI/Functions pass; mobile/Functions/shared/UI typechecks, the Functions bundle and Expo web export pass. The separate Next.js portal build/typecheck remains unverified because local dependencies are incomplete. Java is unavailable for local integration tests; no native device run was performed.
+- **Production is blocked.** The source audit found offline tour-start, existing social-account sign-in, consumable refund, web App Check, mock-provider defaults, concurrent AI budget, ad-consent refresh and group data-deletion issues. Priorities, source references, verification limits and the preview redeploy command are in [RELEASE.md](RELEASE.md#readiness-audit--2026-10-03). Earlier phase-completion and review-score statements below describe historical work and are not current release approval.
+
 ## Release execution (2026-09-30)
 
 - Created Firebase project `tuur-prod` in the authenticated Google account and registered iOS (`com.tuurapp`), Android (`app.tuur.guide`) and web clients; `.firebaserc` and `.env.example` now target it.

@@ -5,47 +5,40 @@ import {
   EntitlementSchema,
   MAX_INVITES_PER_TOUR,
   REWARDED_DAILY_LIMIT_DEFAULT,
-  RevenueCatEventSchema,
   SESSION_DURATION_MS,
   SUBSCRIPTION_TOUR_STARTS_PER_MONTH,
   decideAccess,
+  decideDownloadAccess,
   decideInvite,
   decideRedeem,
   decideReward,
   decideSpend,
+  downloadTourMode,
   isSubscriber,
-  planRevenueCatEvent,
   type AccessContext,
   type Entitlement,
   type InviteDoc,
   type ProductMap,
+  type Tour,
   type Wallet,
 } from '@tuur/shared';
 import { z } from 'zod';
 import { dayKey } from '../util/usage';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 
-export class BillingError extends Error {
-  constructor(
-    readonly code:
-      | 'permission-denied'
-      | 'failed-precondition'
-      | 'not-found'
-      | 'invalid-argument'
-      | 'resource-exhausted'
-      | 'already-exists',
-    message: string,
-    readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-  }
-}
+import { BillingError } from './errors';
+export { BillingError } from './errors';
+import { consumePurchaseUnit } from './purchaseLedger';
+import type { RevenueCatReader } from './revenuecat';
+export { processRevenueCatEvent } from './webhook';
 
 export interface BillingDeps {
   db: Firestore;
   now: () => number;
-  /** Accept RevenueCat SANDBOX events (emulator/dev only). */
+  /** Accept RevenueCat SANDBOX events (emulator or explicitly isolated beta project only). */
   allowSandbox?: boolean;
+  revenuecat?: RevenueCatReader;
+  findFirebaseUids?: (ids: string[]) => Promise<string[]>;
 }
 
 const ents = (db: Firestore, uid: string) => db.collection('users').doc(uid).collection('entitlements');
@@ -55,11 +48,19 @@ const ledger = (db: Firestore, uid: string) => db.collection('users').doc(uid).c
 
 const utcMonthKey = (now: number) => new Date(now).toISOString().slice(0, 7);
 
-export const ClaimTourStartSchema = z.object({
-  tourId: z.string().min(1).max(200),
-  sessionId: z.string().uuid(),
-  mode: z.enum(['tour', 'planned']),
-});
+export const ClaimTourStartSchema = z
+  .object({
+    tourId: z.string().min(1).max(200),
+    sessionId: z.string().min(1).max(200),
+    mode: z.enum(['tour', 'planned']),
+  })
+  .refine(
+    (r) =>
+      r.mode === 'planned'
+        ? r.sessionId === r.tourId.replace(/^planned_/, '')
+        : z.string().uuid().safeParse(r.sessionId).success,
+    'Invalid tour start session',
+  );
 
 /** Server-side standard-tour start check and monthly subscription quota, serialized in one transaction. */
 export async function claimTourStart(
@@ -95,7 +96,7 @@ export async function claimTourStart(
       if (
         !plannedSessionSnap?.exists ||
         plannedSessionSnap.get('kind') !== 'planned' ||
-        Number(plannedSessionSnap.get('expiresAt')) <= now
+        !(Number(plannedSessionSnap.get('expiresAt')) > now)
       )
         throw new BillingError('not-found', 'Planned route is no longer available');
     } else if (!tourSnap?.exists || tourSnap.get('locked') === true) {
@@ -125,7 +126,7 @@ export async function claimTourStart(
           e.type === 'tour' &&
           e.tourId === tourId &&
           (e.expiresAt === null || e.expiresAt > now) &&
-          (!tourFree || (e.source === 'free' && e.placeId === placeId)),
+          (!tourFree || e.source === 'credit' || (e.source === 'free' && e.placeId === placeId)),
       );
     if (!subscriber && (planned ? !allowedBySession : !tourEntitled))
       throw new BillingError('permission-denied', 'Tour is locked', {
@@ -196,6 +197,7 @@ export interface AccessRequest {
   poiIds: string[];
   /** Tile of the first POI, used to derive the place for dynamic sessions server-side. */
   tile?: string | undefined;
+  download?: boolean | undefined;
 }
 
 export async function authorizeContent(
@@ -207,12 +209,38 @@ export async function authorizeContent(
   const now = deps.now();
   const all = await loadEntitlements(db, uid);
   const ctx: AccessContext = {};
+  if (req.download && (!req.tourId || (req.mode && req.mode !== 'tour' && req.mode !== 'planned')))
+    throw new BillingError('permission-denied', 'Only fixed itineraries can be downloaded', {
+      reason: 'download_not_supported',
+    });
   if (req.mode && req.mode !== 'tour') {
     ctx.mode = req.mode;
-    const area = req.tile ? await db.collection('areas').doc(req.tile).get() : undefined;
-    const placeId = area?.get('placeId') as string | undefined;
+    const planned =
+      req.mode === 'planned' && req.tourId
+        ? await db
+            .collection('users')
+            .doc(uid)
+            .collection('sessions')
+            .doc(req.tourId.replace(/^planned_/, ''))
+            .get()
+        : undefined;
+    if (planned) {
+      if (
+        !req.tourId?.startsWith('planned_') ||
+        !planned.exists ||
+        planned.get('kind') !== 'planned' ||
+        !(Number(planned.get('expiresAt')) > now)
+      )
+        throw new BillingError('not-found', 'Planned route is no longer available');
+      const stops = (planned.get('stops') as { poiId: string }[] | undefined) ?? [];
+      if (!req.poiIds.every((id) => stops.some((s) => s.poiId === id)))
+        throw new BillingError('permission-denied', 'Stop is not part of this planned route');
+      ctx.tourId = req.tourId;
+    }
+    const area = !planned && req.tile ? await db.collection('areas').doc(req.tile).get() : undefined;
+    const placeId = (planned ?? area)?.get('placeId') as string | undefined;
     if (placeId) ctx.placeId = placeId;
-    if (req.tourId && isSubscriber(all, now)) {
+    if (!req.download && req.tourId && isSubscriber(all, now)) {
       const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
       const sessions = usage.get('sessions') as Record<string, string> | undefined;
       if (!Object.values(sessions ?? {}).includes(req.tourId))
@@ -225,6 +253,10 @@ export async function authorizeContent(
     const stops = (tour.get('stops') as { poiId: string }[] | undefined) ?? [];
     if (!tour.exists || tour.get('locked') === true)
       throw new BillingError('not-found', 'Tour not available');
+    if (req.download && downloadTourMode({ ...(tour.data() as Tour), id: req.tourId }) !== 'tour')
+      throw new BillingError('permission-denied', 'This route cannot be downloaded', {
+        reason: 'download_not_supported',
+      });
     // A tour context only counts for the tour's own stops (no free riding on a free or bought tour id).
     if (!req.poiIds.every((id) => stops.some((s) => s.poiId === id)))
       throw new BillingError('permission-denied', 'Stop is not part of this tour');
@@ -233,9 +265,17 @@ export async function authorizeContent(
     ctx.placeId = String(tour.get('placeId') ?? '');
     ctx.mode = 'tour';
   }
+  if (req.download) {
+    const download = decideDownloadAccess(all, ctx, now);
+    if (!download.allowed)
+      throw new BillingError('permission-denied', 'Downloads require Premium or paid tour access', {
+        reason: download.reason,
+      });
+    return { reason: download.reason };
+  }
   const d = decideAccess(all, ctx, now);
   if (!d.allowed) throw new BillingError('permission-denied', 'Content is locked', { reason: d.reason });
-  if (ctx.mode === 'tour' && ctx.tourId && isSubscriber(all, now)) {
+  if (!req.download && ctx.mode === 'tour' && ctx.tourId && isSubscriber(all, now)) {
     const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
     const sessions = usage.get('sessions') as Record<string, string> | undefined;
     if (!Object.values(sessions ?? {}).includes(ctx.tourId))
@@ -249,11 +289,15 @@ export async function authorizeContent(
 // ---------------------------------------------------------------------------------------------------------------
 // Credits
 
-export const SpendRequestSchema = z.object({
-  kind: z.enum(['tour', 'session']),
-  tourId: z.string().max(200).optional(),
-  placeId: z.string().max(200).optional(),
-});
+export const SpendRequestSchema = z
+  .object({
+    kind: z.enum(['tour', 'session']),
+    tourId: z.string().max(200).optional(),
+    placeId: z.string().max(200).optional(),
+    /** Explicit paid tour purchase for downloads, including upgrades from reward/invite/free access. */
+    paidOnly: z.boolean().optional(),
+  })
+  .refine((request) => !request.paidOnly || request.kind === 'tour', 'Paid-only purchases require a tour');
 
 export async function spendCredit(
   deps: BillingDeps,
@@ -262,14 +306,14 @@ export async function spendCredit(
 ): Promise<{ used: 'reward' | 'paid'; wallet: Wallet; entitlementId: string }> {
   const parsed = SpendRequestSchema.safeParse(raw);
   if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid request');
-  const { kind, tourId, placeId } = parsed.data;
+  const { kind, tourId, placeId, paidOnly = false } = parsed.data;
   if (kind === 'tour' && !tourId) throw new BillingError('invalid-argument', 'tourId required');
   if (kind === 'session' && !placeId) throw new BillingError('invalid-argument', 'placeId required');
   const { db } = deps;
   if (kind === 'tour') {
     const t = await db.collection('tours').doc(tourId!).get();
     if (!t.exists || t.get('locked') === true) throw new BillingError('not-found', 'Tour not available');
-    if (t.get('free') === true)
+    if (t.get('free') === true && !paidOnly)
       throw new BillingError('failed-precondition', 'This tour is free', { reason: 'free' });
   } else {
     const p = await db.collection('places').doc(placeId!).get();
@@ -283,16 +327,23 @@ export async function spendCredit(
     const alreadyUnlocked =
       kind === 'tour'
         ? all.some(
-            (e) => e.type === 'tour' && e.tourId === tourId && (e.expiresAt === null || e.expiresAt > now),
+            (e) =>
+              e.type === 'tour' &&
+              e.tourId === tourId &&
+              (e.expiresAt === null || e.expiresAt > now) &&
+              (!paidOnly || e.source === 'credit'),
           )
         : all.some((e) => e.type === 'session' && e.placeId === placeId && e.expiresAt > now);
-    const d = decideSpend(wallet, kind, alreadyUnlocked, isSubscriber(all, now));
+    const d = decideSpend(wallet, kind, alreadyUnlocked, isSubscriber(all, now), paidOnly);
     if (!d.ok)
       throw new BillingError(
         d.reason === 'insufficient' ? 'failed-precondition' : 'already-exists',
         `Cannot spend credit: ${d.reason}`,
         { reason: d.reason },
       );
+    const consume =
+      d.use === 'paid' ? await consumePurchaseUnit(tx, db, uid, 'credit', wallet.balance, now) : () => {};
+    consume();
     tx.set(walletRef(db, uid), d.wallet);
     tx.set(
       ents(db, uid).doc(entId),
@@ -438,80 +489,6 @@ export function verifyBearer(header: string | undefined, secret: string): boolea
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
-/** Idempotent: every RevenueCat event id is processed at most once (ledger `revenuecatEvents`). */
-export async function processRevenueCatEvent(
-  deps: BillingDeps,
-  body: unknown,
-): Promise<{ status: 'processed' | 'duplicate' | 'ignored'; ops: string[] }> {
-  const parsed = z.object({ event: RevenueCatEventSchema }).safeParse(body);
-  if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid webhook payload');
-  const event = parsed.data.event;
-  const { db } = deps;
-  // sandbox purchases never grant production entitlements
-  if (event.environment === 'SANDBOX' && !deps.allowSandbox) return { status: 'ignored' as const, ops: [] };
-  const { products } = await loadBillingConfig(db);
-  const now = deps.now();
-  const ops = planRevenueCatEvent(event, products, now);
-  const eventRef = db.collection('revenuecatEvents').doc(event.id.replace(/[^A-Za-z0-9_-]/g, '_'));
-  return db.runTransaction(async (tx) => {
-    const seen = await tx.get(eventRef);
-    if (seen.exists) return { status: 'duplicate' as const, ops: [] };
-    const uid = event.app_user_id;
-    const eventTs = event.event_timestamp_ms ?? now;
-    // all reads first (Firestore transactions), then the writes
-    const isLedgerOp = (o: { op: string }) =>
-      o.op === 'addCredits' || o.op === 'removeCredits' || o.op === 'addSeats' || o.op === 'removeSeats';
-    const hasCredits = ops.some(isLedgerOp);
-    let wallet: Wallet | undefined = hasCredits ? await readWallet(tx, db, uid) : undefined;
-    const subRef = ents(db, uid).doc('subscription');
-    const cur = ops.some((o) => o.op === 'setSubscription') ? await tx.get(subRef) : undefined;
-    // one ledger entry per store transaction and direction: a replayed REFUND/PURCHASE under a new event id is a no-op
-    const ledgerId = (op: { op: string; ref: string }) =>
-      `${op.op}_${op.ref}`.replace(/[^A-Za-z0-9_-]/g, '_');
-    const seenLedger = new Set<string>();
-    for (const op of ops)
-      if (
-        op.op === 'addCredits' ||
-        op.op === 'removeCredits' ||
-        op.op === 'addSeats' ||
-        op.op === 'removeSeats'
-      )
-        if ((await tx.get(ledger(db, uid).doc(ledgerId(op)))).exists) seenLedger.add(ledgerId(op));
-    for (const op of ops) {
-      if (op.op === 'setSubscription') {
-        // ignore out-of-order events that are older than what we already know (RevenueCat's own event time)
-        if (cur?.exists && Number(cur.get('eventTs') ?? 0) > eventTs) continue;
-        tx.set(subRef, { ...op.entitlement, eventTs });
-      } else if (op.op === 'addCredits' || op.op === 'removeCredits') {
-        if (seenLedger.has(ledgerId(op))) continue;
-        wallet = {
-          ...wallet!,
-          balance: Math.max(0, wallet!.balance + (op.op === 'addCredits' ? op.amount : -op.amount)),
-        };
-        tx.set(ledger(db, uid).doc(ledgerId(op)), {
-          delta: op.op === 'addCredits' ? op.amount : -op.amount,
-          kind: 'purchase',
-          ref: op.ref,
-          ts: now,
-        });
-      } else if (op.op === 'addSeats' || op.op === 'removeSeats') {
-        if (seenLedger.has(ledgerId(op))) continue;
-        const delta = op.op === 'addSeats' ? op.amount : -op.amount;
-        wallet = { ...wallet!, seatBalance: Math.max(0, (wallet!.seatBalance ?? 0) + delta) };
-        tx.set(ledger(db, uid).doc(ledgerId(op)), { delta, kind: 'seat_purchase', ref: op.ref, ts: now });
-      }
-    }
-    if (wallet && hasCredits) tx.set(walletRef(db, uid), wallet);
-    tx.set(eventRef, { type: event.type, uid, processedAt: now, ops: ops.map((o) => o.op) });
-    const acting = ops.filter((o) => o.op !== 'ignore');
-    return {
-      status: acting.length ? ('processed' as const) : ('ignored' as const),
-      ops: ops.map((o) => o.op),
-    };
-  });
-}
-
-// ---------------------------------------------------------------------------------------------------------------
 // Rewarded ads (server-side verification)
 
 const NONCE_TTL_MS = 30 * 60_000;

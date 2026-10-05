@@ -1,7 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_CLAIM_POLICY, tileWithNeighbors, tilesAround, type ClaimPolicy } from '@tuur/shared';
 import { FieldValue } from 'firebase-admin/firestore';
-import { claimArea, markAreaFailed } from './store';
+import { claimArea, deferAreaForQuota, markAreaFailed } from './store';
+import { RateLimitError } from '../util/rateLimit';
 
 /** Global safety net against tile-farming with many throw-away accounts (per UTC day). */
 export const MAX_TILE_CLAIMS_PER_DAY = 3000;
@@ -61,7 +62,9 @@ export async function ensureAreas(
         await deps.enqueueIngest(tile);
         started.push(tile);
       } catch (e) {
-        await markAreaFailed(deps.db, tile, `enqueue failed: ${(e as Error).message}`, deps.now());
+        // Emulator ingest runs inline and must preserve the same retryable quota state as Cloud Tasks.
+        if (e instanceof RateLimitError) await deferAreaForQuota(deps.db, tile, e.retryAfterMs, deps.now());
+        else await markAreaFailed(deps.db, tile, `enqueue failed: ${(e as Error).message}`, deps.now());
         skipped.push(tile);
       }
     }),

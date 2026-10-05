@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { PixelRatio, Pressable, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Linking, PixelRatio, Pressable, View, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { haversineMatrix, rankRoamStarts, type Poi } from '@tuur/shared';
 import { Banner } from '../src/components/Banner';
 import { Button, IconButton } from '../src/components/Button';
 import { Icon } from '../src/components/Icon';
+import { PlacePhoto } from '../src/components/PlacePhoto';
 import { ListGroup, ListRow } from '../src/components/ListGroup';
 import { Sheet } from '../src/components/Sheet';
 import { interestOf } from '../src/components/StopCards';
+import { CategoryBadge } from '../src/components/category-badge';
 import { INTEREST_ICON } from '../src/components/icons';
 import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
@@ -23,6 +24,7 @@ import { requestBackground } from '../src/location/real';
 import { useBackend } from '../src/backend';
 import { useSessionGate } from '../src/billing/useSessionGate';
 import { haptics } from '../src/motion';
+import { roamEntryState } from '../src/navigation/roamEntry';
 import { useSettings } from '../src/state/settings';
 import { metrics, sys } from '../src/theme';
 
@@ -37,57 +39,114 @@ export default function Roam() {
   const { height: screenH } = useWindowDimensions();
   const backend = useBackend();
   const { language, interests, frequency, simulator } = useSettings();
-  const { position } = usePosition();
+  const { position, permission, request } = usePosition();
   const gate = useSessionGate('roam', position);
-  const { pool, ready } = usePoiPool(position, 1);
+  const requireAccess = gate.require;
+  const { pois, ready, error: areaError, reload } = usePoiPool(position, 2);
   const [picking, setPicking] = useState(false);
+  const [recenterKey, recenterMap] = useReducer((key: number) => key + 1, 0);
   const [selected, setSelected] = useState<string | undefined>();
   const [busy, setBusy] = useState<string | undefined>();
   const [startError, setStartError] = useState<false | 'denied' | 'failed'>(false);
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [locationError, setLocationError] = useState(false);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const [attempt, retryAttempt] = useReducer((n: number) => n + 1, 0);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const starts = useMemo(
-    () => (ready && position ? rankRoamStarts(position, pool.all(), interests) : []),
-    [ready, position, pool, interests],
+    () => (ready && position ? rankRoamStarts(position, pois, interests) : []),
+    [ready, position, pois, interests],
   );
   const best = starts[0];
   // Coming from the explore map ("take me there"): start right away with that spot as the first stop.
   const { start: startParam } = useLocalSearchParams<{ start?: string }>();
-  const autoStarted = useRef(false);
-  useEffect(() => {
-    if (!startParam || autoStarted.current || !ready || !position) return;
-    const poi = pool.all().find((p) => p.id === startParam);
-    if (!poi) return;
-    autoStarted.current = true;
-    void start(poi, poi.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startParam, ready, position, pool]);
+  const [dismissedStart, setDismissedStart] = useState<string>();
+  const requestedId = startParam !== dismissedStart ? startParam : undefined;
+  const requestedPlace = pois.find((p) => p.id === requestedId);
+  const autoStarted = useRef<string | undefined>(undefined);
 
-  const start = async (first: Poi | undefined, key: string) => {
-    if (!position || !gate.require()) return;
-    setBusy(key);
-    setStartError(false);
-    try {
-      let foregroundOnly = false;
-      if (!simulator && backend.kind === 'firebase') {
-        const perm = await requestBackground();
-        if (perm === 'denied') return setStartError('denied');
-        foregroundOnly = perm === 'foreground';
+  const start = useCallback(
+    async (first: Poi | undefined, key: string) => {
+      if (inFlight.current || !position || !requireAccess()) return;
+      inFlight.current = true;
+      setBusy(key);
+      setStartError(false);
+      try {
+        let foregroundOnly = false;
+        if (!simulator && backend.kind === 'firebase') {
+          const perm = await requestBackground();
+          if (perm === 'denied') return setStartError('denied');
+          foregroundOnly = perm === 'foreground';
+        }
+        await startRoamSession({
+          lang: language,
+          start: position,
+          frequency,
+          interests,
+          simulate: simulator,
+          ...(first ? { first } : {}),
+          ...(foregroundOnly ? { foregroundOnly } : {}),
+          ...(interests[0] ? { interest: interests[0] } : {}),
+        });
+        haptics.start();
+        if (mounted.current) router.replace('/play');
+      } catch {
+        setStartError('failed');
+      } finally {
+        inFlight.current = false;
+        setBusy(undefined);
       }
-      await startRoamSession({
-        lang: language,
-        start: position,
-        frequency,
-        interests,
-        simulate: simulator,
-        ...(first ? { first } : {}),
-        ...(foregroundOnly ? { foregroundOnly } : {}),
-        ...(interests[0] ? { interest: interests[0] } : {}),
-      });
-      haptics.start();
-      router.replace('/play');
+    },
+    [position, requireAccess, simulator, backend.kind, language, frequency, interests, router],
+  );
+
+  useEffect(() => {
+    setLoadingTimedOut(false);
+    if (!position || (ready && (gate.unlocked || gate.placeId))) return;
+    const timer = setTimeout(() => setLoadingTimedOut(true), 45_000);
+    return () => clearTimeout(timer);
+  }, [position, ready, gate.unlocked, gate.placeId, attempt]);
+
+  const entry = roamEntryState({
+    hasPosition: Boolean(position),
+    ready,
+    hasPlace: Boolean(requestedPlace),
+    failed: Boolean(startError || areaError || gate.error || loadingTimedOut),
+    unlocked: gate.unlocked,
+    accessReady: Boolean(gate.placeId),
+    starting: Boolean(busy),
+  });
+  useEffect(() => {
+    if (!requestedId || !requestedPlace || entry !== 'ready' || autoStarted.current === requestedId) return;
+    autoStarted.current = requestedId;
+    void start(requestedPlace, requestedId);
+  }, [requestedId, requestedPlace, entry, start, attempt]);
+
+  const retry = () => {
+    autoStarted.current = undefined;
+    setStartError(false);
+    setLoadingTimedOut(false);
+    retryAttempt();
+    reload();
+    gate.reload();
+  };
+  const enableLocation = async () => {
+    setLocationBusy(true);
+    setLocationError(false);
+    try {
+      if (permission === 'denied') await Linking.openSettings();
+      else await request();
     } catch {
-      setStartError('failed');
+      setLocationError(true);
     } finally {
-      setBusy(undefined);
+      setLocationBusy(false);
     }
   };
 
@@ -101,6 +160,7 @@ export default function Roam() {
     Math.round((tip.visible ? 420 : 320) * Math.min(1.6, Math.max(1, PixelRatio.getFontScale()))) +
     insets.bottom;
   const expanded = Math.round(screenH * 0.72);
+  const [mapSheetHeight, setMapSheetHeight] = useState(collapsed);
 
   return (
     <View style={{ flex: 1, backgroundColor: sys.grouped }}>
@@ -108,7 +168,8 @@ export default function Roam() {
         center={position ?? { lat: 52.52, lng: 13.405 }}
         zoom={15}
         user={position ?? undefined}
-        bottomInset={(picking ? expanded : collapsed) - 40}
+        bottomInset={mapSheetHeight}
+        recenterKey={recenterKey}
         stops={starts.map((p, i) => ({
           id: p.id,
           location: p.location,
@@ -131,6 +192,8 @@ export default function Roam() {
         snapPoints={[collapsed, expanded]}
         index={picking ? 1 : 0}
         onIndexChange={(i) => setPicking(i === 1)}
+        onVisibleHeightChange={setMapSheetHeight}
+        onCollapse={recenterMap}
         handleLabel={t('roam.startTitle')}
         header={
           <View
@@ -149,71 +212,131 @@ export default function Roam() {
         }
       >
         <View style={{ gap: 16, paddingTop: 4 }}>
-          {startError ? (
-            <Banner
-              tone="error"
-              text={startError === 'denied' ? t('errors.locationDenied') : t('errors.startFailed')}
-            />
-          ) : null}
-          {ready && !best ? <Banner icon="compass" text={t('roam.noStarts')} /> : null}
-
-          {startParam && !startError ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}>
-              <SpinningMark size={28} label={t('roam.findingStart')} />
-              <Text variant="subheadline">{t('roam.findingStart')}</Text>
-            </View>
-          ) : !picking ? (
-            <>
-              <View style={{ gap: 8 }}>
-                <Button
-                  icon="navigation"
-                  label={t('roam.startNow')}
-                  loading={busy === 'now' || !ready}
-                  disabled={!position}
-                  accessibilityHint={t('roam.startNowHint')}
-                  onPress={() => void start(best, 'now')}
-                />
-                <Text variant="footnote" align="center">
-                  {!ready
-                    ? t('roam.findingStart')
-                    : best
-                      ? `${best.name} · ${t('common.minutes', { count: minutesTo(best) })}`
-                      : t('roam.startNowHint')}
-                </Text>
-              </View>
-              <ListGroup>
-                <ListRow
-                  icon="map-pin"
-                  label={t('roam.pickStart')}
-                  hint={t('roam.pickStartHint')}
-                  onPress={starts.length ? () => setPicking(true) : undefined}
-                />
-              </ListGroup>
-              <Button
-                variant="ghost"
-                icon="compass"
-                label={t('roam.walkFree')}
-                loading={busy === 'free'}
-                disabled={!position}
-                onPress={() => void start(undefined, 'free')}
+          {!position ? (
+            <View style={{ gap: 12 }}>
+              <Banner
+                icon="map-pin"
+                text={t(permission === 'denied' ? 'permissions.locationDenied' : 'home.noLocation')}
               />
-              <TuuSays pose="walk" tipId="roam.intro" text={t('tuu.roamIntro')} size={56} />
-            </>
+              {locationError ? <Banner tone="error" text={t('errors.locationUnavailable')} /> : null}
+              <Button
+                label={t(permission === 'denied' ? 'common.settings' : 'home.enableLocation')}
+                loading={locationBusy}
+                onPress={() => void enableLocation()}
+              />
+            </View>
+          ) : requestedId ? (
+            entry === 'error' || entry === 'missing' ? (
+              <View style={{ gap: 12 }}>
+                <Banner
+                  tone="warning"
+                  text={t(
+                    entry === 'missing'
+                      ? 'roam.startMissing'
+                      : startError === 'denied'
+                        ? 'errors.locationDenied'
+                        : startError
+                          ? 'errors.startFailed'
+                          : 'curation.areaFailed',
+                  )}
+                />
+                <Button label={t('common.retry')} onPress={retry} />
+                <Button
+                  variant="secondary"
+                  label={t('roam.chooseAnother')}
+                  onPress={() => setDismissedStart(requestedId)}
+                />
+              </View>
+            ) : entry === 'locked' ? (
+              <View style={{ gap: 12 }}>
+                <Text variant="headline">{requestedPlace?.name}</Text>
+                <Banner icon="lock" text={t('paywall.subtitleSession')} />
+                <Button label={t('paywall.titleSession')} onPress={() => void requireAccess()} />
+                <Button
+                  variant="ghost"
+                  label={t('roam.chooseAnother')}
+                  onPress={() => setDismissedStart(requestedId)}
+                />
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 }}>
+                <SpinningMark size={28} label={t('roam.findingStart')} />
+                <Text variant="subheadline">{t('roam.findingStart')}</Text>
+              </View>
+            )
           ) : (
             <>
-              <ListGroup>
-                {starts.map((p) => (
-                  <StartRow
-                    key={p.id}
-                    poi={p}
-                    minutes={minutesTo(p)}
-                    busy={busy === p.id}
-                    selected={p.id === selected}
-                    onPress={() => void start(p, p.id)}
+              {startError || areaError || gate.error || loadingTimedOut ? (
+                <View style={{ gap: 12 }}>
+                  <Banner
+                    tone="error"
+                    text={t(
+                      startError === 'denied'
+                        ? 'errors.locationDenied'
+                        : startError
+                          ? 'errors.startFailed'
+                          : 'curation.areaFailed',
+                    )}
                   />
-                ))}
-              </ListGroup>
-              <Button variant="ghost" label={t('common.back')} onPress={() => setPicking(false)} />
+                  <Button variant="tinted" label={t('common.retry')} onPress={retry} />
+                </View>
+              ) : null}
+              {ready && !best && !areaError ? <Banner icon="compass" text={t('roam.noStarts')} /> : null}
+              {!picking ? (
+                <>
+                  <View style={{ gap: 8 }}>
+                    <Button
+                      icon="navigation"
+                      label={t('roam.startNow')}
+                      loading={busy === 'now' || (!ready && !areaError && !loadingTimedOut)}
+                      disabled={Boolean(busy) || !ready || (!gate.unlocked && !gate.placeId)}
+                      accessibilityHint={t('roam.startNowHint')}
+                      onPress={() => void start(best, 'now')}
+                    />
+                    <Text variant="footnote" align="center">
+                      {!ready
+                        ? t('roam.findingStart')
+                        : best
+                          ? `${best.name} · ${t('common.minutes', { count: minutesTo(best) })}`
+                          : t('roam.startNowHint')}
+                    </Text>
+                  </View>
+                  <ListGroup>
+                    <ListRow
+                      icon="map-pin"
+                      label={t('roam.pickStart')}
+                      hint={t('roam.pickStartHint')}
+                      onPress={starts.length ? () => setPicking(true) : undefined}
+                    />
+                  </ListGroup>
+                  <Button
+                    variant="ghost"
+                    icon="compass"
+                    label={t('roam.walkFree')}
+                    loading={busy === 'free'}
+                    disabled={Boolean(busy) || (!gate.unlocked && !gate.placeId)}
+                    onPress={() => void start(undefined, 'free')}
+                  />
+                  <TuuSays pose="walk" tipId="roam.intro" text={t('tuu.roamIntro')} size={56} />
+                </>
+              ) : (
+                <>
+                  <ListGroup>
+                    {starts.map((p) => (
+                      <StartRow
+                        key={p.id}
+                        poi={p}
+                        minutes={minutesTo(p)}
+                        busy={busy === p.id}
+                        disabled={Boolean(busy)}
+                        selected={p.id === selected}
+                        onPress={() => void start(p, p.id)}
+                      />
+                    ))}
+                  </ListGroup>
+                  <Button variant="ghost" label={t('common.back')} onPress={() => setPicking(false)} />
+                </>
+              )}
             </>
           )}
         </View>
@@ -226,12 +349,14 @@ function StartRow({
   poi,
   minutes,
   busy,
+  disabled,
   selected,
   onPress,
 }: {
   poi: Poi;
   minutes: number;
   busy: boolean;
+  disabled: boolean;
   selected?: boolean;
   onPress: () => void;
 }) {
@@ -239,62 +364,49 @@ function StartRow({
   const interest = interestOf(poi);
   const img = poi.imageRefs[0];
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${poi.name}, ${t('common.minutes', { count: minutes })}`}
-      accessibilityState={{ selected: Boolean(selected), busy }}
-      onPress={onPress}
-      disabled={busy}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        minHeight: 64,
-        paddingHorizontal: metrics.margin,
-        paddingVertical: 10,
-        backgroundColor: pressed || selected ? sys.fill : 'transparent',
-      })}
-    >
-      {img ? (
-        <Image
-          source={{ uri: img.thumbUrl ?? img.url }}
-          style={{ width: 48, height: 48, borderRadius: 10 }}
-          contentFit="cover"
-          accessibilityIgnoresInvertColors
-        />
-      ) : (
-        <View
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 10,
-            backgroundColor: sys.accentTint,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon
-            name={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
-            size={24}
-            color={sys.accentText}
-          />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: metrics.margin }}>
+      <PlacePhoto
+        image={img}
+        name={poi.name}
+        icon={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
+        style={{ flex: 0, width: 72, height: 72, borderRadius: 10 }}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={[
+          poi.name,
+          interest ? t(`interests.${interest}`) : undefined,
+          t('common.minutes', { count: minutes }),
+        ]
+          .filter(Boolean)
+          .join(', ')}
+        accessibilityState={{ selected: Boolean(selected), busy, disabled }}
+        onPress={onPress}
+        disabled={disabled}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          flex: 1,
+          alignItems: 'center',
+          gap: 12,
+          minHeight: 64,
+          paddingRight: metrics.margin,
+          paddingVertical: 10,
+          backgroundColor: pressed || selected ? sys.fill : 'transparent',
+        })}
+      >
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text variant="body" numberOfLines={2}>
+            {poi.name}
+          </Text>
+          {interest ? <CategoryBadge interest={interest} /> : null}
+          <Text variant="footnote">{t('common.minutes', { count: minutes })}</Text>
         </View>
-      )}
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text variant="body" numberOfLines={2}>
-          {poi.name}
-        </Text>
-        <Text variant="footnote">
-          {[interest ? t(`interests.${interest}`) : undefined, t('common.minutes', { count: minutes })]
-            .filter(Boolean)
-            .join(' · ')}
-        </Text>
-      </View>
-      {busy ? (
-        <SpinningMark size={24} label={poi.name} />
-      ) : (
-        <Icon name="chevron-right" size={14} color={sys.labelTertiary} weight="semibold" />
-      )}
-    </Pressable>
+        {busy ? (
+          <SpinningMark size={24} label={poi.name} />
+        ) : (
+          <Icon name="chevron-right" size={14} color={sys.labelTertiary} weight="semibold" />
+        )}
+      </Pressable>
+    </View>
   );
 }

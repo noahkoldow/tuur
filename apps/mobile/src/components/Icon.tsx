@@ -15,6 +15,8 @@ const SF: Record<string, string> = {
   'chevron-up': 'chevron.up',
   'chevron-right': 'chevron.right',
   x: 'xmark',
+  'more-horizontal': 'ellipsis',
+  coffee: 'cup.and.saucer',
   check: 'checkmark',
   'check-circle': 'checkmark.circle.fill',
   'plus-circle': 'plus.circle.fill',

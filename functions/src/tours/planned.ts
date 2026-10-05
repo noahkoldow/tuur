@@ -16,7 +16,8 @@ import {
 import { CachedRoutingProvider } from '../providers/routing';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
-import { logUsage, spentToday } from '../util/usage';
+import { spentToday } from '../util/usage';
+import { budgetedRouting } from '../providers/budgeted';
 import { TourError, conceptInput, kindOf, makeConcept, type TourDeps } from './service';
 
 /**
@@ -44,6 +45,8 @@ export async function composePlannedRoute(
   }
   if (new Set(req.stops).size !== req.stops.length)
     throw new TourError('invalid-argument', 'Duplicate stops');
+  if (req.requiredStopIds?.some((id) => !req.stops.includes(id)))
+    throw new TourError('invalid-argument', 'A required stop is missing from the route');
 
   try {
     await consumeRateLimit(deps.db, `route_user_${uid}`, 20, 3600_000, deps.now());
@@ -57,7 +60,11 @@ export async function composePlannedRoute(
   const budget = budgetDecision(cfg, await spentToday(deps.db, tile, deps.now()));
   if (!budget.allowed) throw new TourError('unavailable', 'Generation is paused', { reason: budget.reason });
 
-  const routing = new CachedRoutingProvider(deps.routing, deps.db, deps.now);
+  const routing = new CachedRoutingProvider(
+    budgetedRouting(deps.routing, deps.db, cfg, deps.now, tile),
+    deps.db,
+    deps.now,
+  );
   const startPt: LatLng = req.start ?? pois[0]!.location;
   const endPt: LatLng = req.end ?? (req.roundTrip ? startPt : pois[pois.length - 1]!.location);
   const points = [startPt, ...pois.map((p) => p.location), endPt];
@@ -68,7 +75,13 @@ export async function composePlannedRoute(
   const withOpenEnd = open ? zeroEnd(m.minutes) : m.minutes;
   // Without a start position the tour begins at its first stop: nothing to walk to reach it.
   const minutes = req.start ? withOpenEnd : withOpenEnd.map((row, i) => (i === 0 ? row.map(() => 0) : row));
-  const fit = fitToBudget(pois, { minutes, meters: m.meters }, req.budgetMinutes, req.interests);
+  const fit = fitToBudget(
+    pois,
+    { minutes, meters: m.meters },
+    req.budgetMinutes,
+    req.interests,
+    req.requiredStopIds,
+  );
   const kept = fit.order.map((id) => pois.find((p) => p.id === id)!);
   if (kept.length === 0 || fit.totalMinutes > req.budgetMinutes + 0.5)
     throw new TourError('failed-precondition', 'No stops fit the time budget');
@@ -95,13 +108,6 @@ export async function composePlannedRoute(
     dirPoints.length > 1
       ? await routing.directions(dirPoints, req.profile)
       : { path: dirPoints.map((p) => [p.lat, p.lng] as [number, number]), meters: 0, minutes: 0 };
-  if (routing.upstreamCalls)
-    await logUsage(
-      deps.db,
-      cfg.pricing,
-      { kind: 'routing', usage: { routingCalls: routing.upstreamCalls }, tile, ok: true },
-      deps.now(),
-    );
 
   // walking minutes per stop (from the previous point)
   const idxOf = new Map(pois.map((p, i) => [p.id, i + 1]));
@@ -182,6 +188,7 @@ export async function composePlannedRoute(
     texts: { [req.lang]: text },
     createdAt: now,
     updatedAt: now,
+    expiresAt: now + 24 * 3600_000,
   });
   await sessionRef.set({
     ...tour,

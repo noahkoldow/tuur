@@ -53,7 +53,8 @@ export class RealLocationSource implements LocationSource {
           distanceInterval: 3,
           pausesUpdatesAutomatically: false,
           showsBackgroundLocationIndicator: true,
-          activityType: Location.ActivityType.Fitness,
+          // A tour can mix walking, cycling and car/public transport.
+          activityType: Location.ActivityType.Other,
           foregroundService: {
             notificationTitle: i18n.t('app.name'),
             notificationBody: i18n.t('player.notification'),

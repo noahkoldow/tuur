@@ -1,8 +1,11 @@
 import { config } from '../config';
 import { createDemoBackend } from './demoBackend';
+import { createFirebaseJsBackend } from './firebaseJsBackend';
 import type { Backend } from './types';
 
-/** Web is only a preview of the app UI; it always runs on the demo backend. */
+/** A configured browser/Expo Go can use the same protected backend as the installed app. */
 export function createBackend(): Backend {
-  return createDemoBackend({ enforceAccess: config.paywall });
+  return config.backend === 'demo'
+    ? createDemoBackend({ enforceAccess: config.paywall })
+    : createFirebaseJsBackend();
 }

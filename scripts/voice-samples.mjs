@@ -117,6 +117,35 @@ async function openai(c) {
 
 async function gemini(c) {
   const model = process.env.GEMINI_TTS_MODEL ?? 'gemini-3.8-flash-tts';
+  if (/^gemini-3\.(?:[8-9]|\d{2,})-/.test(model)) {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              { type: 'text', text: TEXT_DE, annotations: [{ type: 'speech_metadata', style: style(c) }] },
+            ],
+          },
+        ],
+        response_format: { type: 'audio', mime_type: 'audio/l16', sample_rate: 24000 },
+        generation_config: { speech_config: [{ voice: c.voice }] },
+        store: false,
+      }),
+    });
+    if (!res.ok) throw new Error(`Gemini returned HTTP ${res.status}`);
+    const body = await res.json();
+    const audio = body.steps
+      ?.flatMap((step) => step.content ?? [])
+      .find((part) => part.type === 'audio' && part.data);
+    if (!audio?.data || (audio.mime_type && !/^audio\/l16/i.test(audio.mime_type)))
+      throw new Error('Gemini returned no PCM audio');
+    return { data: wav(Buffer.from(audio.data, 'base64')), ext: 'wav' };
+  }
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {

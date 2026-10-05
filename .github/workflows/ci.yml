@@ -22,4 +22,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: node --test scripts/check-release.test.mjs
       - run: pnpm --filter @tuur/functions test:integration

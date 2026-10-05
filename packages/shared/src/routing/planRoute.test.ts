@@ -11,6 +11,65 @@ const berlin = buildPois(REGION_FIXTURES[0]!.raw, { now: NOW }).pois;
 const start = { lat: 52.5163, lng: 13.3777 };
 
 describe('planCustomRoute', () => {
+  it('keeps an explicitly chosen place even with other interests and a lower score', () => {
+    const chosen = { ...berlin.find((p) => p.name === 'Brandenburger Tor')!, score: 1 };
+    const route = planCustomRoute({
+      start,
+      budgetMinutes: 180,
+      profile: 'foot-walking',
+      interests: ['nature'],
+      pois: berlin.map((p) => (p.id === chosen.id ? chosen : p)),
+      requiredStopIds: [chosen.id],
+    });
+    expect(route?.stops.some((p) => p.id === chosen.id)).toBe(true);
+    expect(route!.totalMinutes).toBeLessThanOrEqual(180.1);
+  });
+
+  it('does not silently replace a pick that cannot fit the time budget', () => {
+    const chosen = { ...berlin.find((p) => p.name === 'Brandenburger Tor')!, dwellMinutes: 90 };
+    expect(
+      planCustomRoute({
+        start,
+        budgetMinutes: 30,
+        profile: 'foot-walking',
+        interests: [],
+        pois: [chosen],
+        requiredStopIds: [chosen.id],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('respects removed places and never inserts an unavailable pick', () => {
+    const excluded = berlin[0]!;
+    const route = planCustomRoute({
+      start,
+      budgetMinutes: 90,
+      profile: 'foot-walking',
+      interests: [],
+      pois: berlin,
+      excludedStopIds: [excluded.id],
+    });
+    expect(route?.stops.every((p) => p.id !== excluded.id)).toBe(true);
+    expect(
+      planCustomRoute({
+        start,
+        budgetMinutes: 90,
+        profile: 'foot-walking',
+        interests: [],
+        pois: berlin,
+        requiredStopIds: ['missing-place'],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('protects manual stops when real routing times require trimming the route', () => {
+    const stops = berlin.slice(0, 3).map((p) => ({ ...p, dwellMinutes: 20 }));
+    const matrix = haversineMatrix([start, ...stops.map((p) => p.location), start], 'foot-walking');
+    const fit = fitToBudget(stops, matrix, 35, [], [stops[0]!.id]);
+    expect(fit.order).toContain(stops[0]!.id);
+    expect(fit.dropped).not.toContain(stops[0]!.id);
+  });
+
   it('keeps the time budget for many budgets, profiles and destinations', () => {
     for (const budget of [30, 45, 60, 90, 120, 180]) {
       for (const profile of ['foot-walking', 'cycling-regular'] as const) {

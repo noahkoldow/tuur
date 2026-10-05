@@ -4,7 +4,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const runtimeDeps = Object.fromEntries(
-  Object.entries(pkg.dependencies).filter(([k]) => !k.startsWith('@tuur/')),
+  // lamejs exposes an IIFE with no exports to require(). Bundle its ESM import into our CJS output.
+  Object.entries(pkg.dependencies).filter(([k]) => !k.startsWith('@tuur/') && k !== '@breezystack/lamejs'),
 );
 const options = {
   entryPoints: ['src/index.ts'],

@@ -200,14 +200,17 @@ describe('configuration', () => {
     const cfg = await saveAiConfig(deps(), 'a', {
       killSwitch: true,
       models: { narration: 'gemini-test' },
-      dailyBudgetUsd: 5,
+      dailyBudgetUsd: 2,
     });
     expect(cfg.killSwitch).toBe(true);
+    expect(cfg.dailyBudgetUsd).toBe(2);
     expect(cfg.models).toEqual({ ...DEFAULT_AI_CONFIG.models, narration: 'gemini-test' });
     expect((await loadAiConfig(db, clock + 1)).killSwitch).toBe(true);
     await saveAiConfig(deps(), 'a', { killSwitch: false });
     expect((await loadAiConfig(db, clock + 200_000)).models.narration).toBe('gemini-test');
     await expect(saveAiConfig(deps(), 'a', { dailyBudgetUsd: -1 })).rejects.toBeInstanceOf(AdminError);
+    await expect(saveAiConfig(deps(), 'a', { dailyBudgetUsd: 3.01 })).rejects.toBeInstanceOf(AdminError);
+    expect((await db.collection('config').doc('ai').get()).get('dailyBudgetUsd')).toBe(2);
     await expect(saveAiConfig(deps(), 'a', { models: { narration: '' } })).rejects.toBeInstanceOf(AdminError);
     await expect(saveAiConfig(deps(), 'a', { unknownField: 1 })).rejects.toBeInstanceOf(AdminError);
   });

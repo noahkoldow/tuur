@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   REGION_FIXTURES,
   decodePolyline,
   destinationPoint,
   encodeGeohash,
   type GuideCommand,
+  type GuideStop,
   type LatLng,
 } from '@tuur/shared';
 import { SimulatedAudioEngine } from '../audio/simulatedEngine';
@@ -121,6 +122,193 @@ describe('GuideRuntime end to end (demo backend + simulated GPS + simulated audi
     expect(runtime.getSnapshot().phase).toBe('paused');
     runtime.resume();
     expect(runtime.getSnapshot().phase).not.toBe('paused');
+    await runtime.dispose();
+  });
+});
+
+describe('continuing a planned tour in Explore', () => {
+  const first: GuideStop = { id: 'first', name: 'First place', location: berlin.center };
+  const next: GuideStop = {
+    id: 'next',
+    name: 'Next place',
+    location: destinationPoint(berlin.center, 90, 240),
+  };
+  const last: GuideStop = {
+    id: 'last',
+    name: 'Last place',
+    location: destinationPoint(berlin.center, 90, 900),
+  };
+
+  async function setup() {
+    const backend = createDemoBackend({ latencyMs: 0 });
+    const narration = vi.spyOn(backend, 'getNarration').mockImplementation(async ({ poiId }) => ({
+      key: `${poiId}:story`,
+      title: poiId,
+      text: 'First paragraph. Second paragraph.',
+      paragraphs: [
+        { text: 'First paragraph.', startMs: 0, durationMs: 30_000 },
+        { text: 'Second paragraph.', startMs: 30_000, durationMs: 30_000 },
+      ],
+      keyFacts: [],
+      audioPath: `demo:${poiId}`,
+      audioDurationMs: 60_000,
+      images: [],
+      cached: true,
+      aiGenerated: true,
+    }));
+    const transition = vi.spyOn(backend, 'getTransition').mockResolvedValue({
+      key: 'handover',
+      text: 'Walk to the next place.',
+      audioPath: 'demo:handover',
+      audioDurationMs: 10_000,
+    });
+    const clock = new FakeClock();
+    const audio = new SimulatedAudioEngine(clock);
+    const play = vi.spyOn(audio, 'play');
+    const stop = vi.spyOn(audio, 'stop');
+    const unsubscribe = vi.fn();
+    const source = { subscribe: vi.fn(async () => unsubscribe) };
+    const runtime = new GuideRuntime({
+      backend,
+      audio,
+      clock,
+      lang: 'en',
+      access: { mode: 'planned', tourId: 'planned-tour' },
+    });
+    await runtime.start([first, next, last], source);
+    return { runtime, clock, audio, play, stop, source, unsubscribe, narration, transition };
+  }
+
+  it('preserves current audio and GPS while releasing the rest of the itinerary', async () => {
+    const { runtime, clock, audio, play, stop, source, unsubscribe, transition } = await setup();
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.advance(5_000);
+    expect(audio.isPlaying()).toBe(true);
+    const position = audio.positionMs();
+    const story = runtime.getSnapshot().narration;
+
+    runtime.explore();
+
+    expect(runtime.getState().route.map((s) => s.id)).toEqual([first.id]);
+    expect(runtime.getState()).toMatchObject({ open: true, finished: false, index: 0 });
+    expect(runtime.getSnapshot().narration).toEqual(story);
+    expect(audio.positionMs()).toBe(position);
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(stop).not.toHaveBeenCalled();
+    expect(source.subscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).not.toHaveBeenCalled();
+
+    await clock.advance(60_000);
+    expect(runtime.getState().narrated).toEqual([first.id]);
+    expect(runtime.getState().visited).toEqual([first.id]);
+    expect(runtime.getState().finished).toBe(false);
+    expect(runtime.getSnapshot().awaitingRoute).toBe(true);
+    expect(transition).not.toHaveBeenCalled();
+    await runtime.dispose();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops queued stories and handovers for removed stops without losing the visited stop', async () => {
+    const { runtime, clock, audio, play, transition } = await setup();
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.flush();
+    await clock.advance(5_000);
+    runtime.onFix({ ...next.location, ts: clock.now(), accuracy: 5, speed: 1.3 });
+    await clock.flush();
+    expect(runtime.getState().pending?.poiId).toBe(next.id);
+    expect(runtime.getState().visited).toEqual([first.id]);
+    expect(audio.isPlaying()).toBe(true);
+
+    runtime.explore();
+
+    expect(runtime.getState().route.map((s) => s.id)).toEqual([first.id]);
+    expect(runtime.getState().pending).toBeUndefined();
+    expect(runtime.getState().pendingTransition).toBeUndefined();
+    expect(runtime.getState().visited).toEqual([first.id]);
+    await clock.advance(65_000);
+    expect(play.mock.calls.map(([item]) => item.poiId)).toEqual([first.id]);
+    expect(transition).not.toHaveBeenCalled();
+    expect(runtime.getState().finished).toBe(false);
+    await runtime.dispose();
+  });
+
+  it('records an explored stop before departure and keeps it current when continuing in Explore', async () => {
+    const { runtime, clock } = await setup();
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.advance(5_000);
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 1.3 });
+    await clock.advance(5_000);
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 1.3 });
+    expect(runtime.getState().travel.mode).toBe('walking');
+    await clock.advance(55_000);
+    expect(runtime.getState().playback).toBeUndefined();
+    expect(runtime.getState().narrated).toEqual([first.id]);
+    expect(runtime.getState().visited).toEqual([first.id]);
+    expect(runtime.getSnapshot().stops[0]?.state).toBe('current');
+
+    runtime.explore();
+
+    expect(runtime.getState().route.map((stop) => stop.id)).toEqual([first.id]);
+    await clock.advance(1_000);
+    runtime.onFix({ ...destinationPoint(first.location, 270, 80), ts: clock.now(), accuracy: 5, speed: 1.3 });
+    expect(runtime.getState().visited).toEqual([first.id]);
+    expect(runtime.getSnapshot().awaitingRoute).toBe(true);
+    await runtime.dispose();
+  });
+
+  it('preserves pause and skipped history, then sends new narration requests with Explore access', async () => {
+    const { runtime, clock, narration, source, unsubscribe } = await setup();
+    runtime.skip();
+    runtime.pause();
+    runtime.setAccess({ mode: 'roam' });
+    runtime.explore();
+    expect(runtime.getSnapshot().phase).toBe('paused');
+    expect(runtime.getSnapshot().target).toBeUndefined();
+    expect(runtime.getState().skipped).toEqual([first.id]);
+    expect(runtime.getState().route.map((s) => s.id)).toEqual([first.id]);
+
+    const chosen = {
+      id: 'chosen',
+      name: 'Chosen place',
+      location: destinationPoint(berlin.center, 270, 200),
+    };
+    runtime.retarget(chosen);
+    runtime.onFix({ ...chosen.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    runtime.resume();
+    await clock.flush();
+    expect(narration).toHaveBeenCalledWith(
+      expect.objectContaining({ poiId: chosen.id, access: { mode: 'roam' } }),
+    );
+    expect(runtime.getState().route.map((s) => s.id)).toEqual([first.id, chosen.id]);
+    expect(runtime.getState().skipped).toEqual([first.id]);
+    expect(source.subscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('releases a future destination even when the old tour handover is already playing', async () => {
+    const { runtime, clock, audio, stop } = await setup();
+    runtime.setRoute([first, last]);
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.advance(5_000);
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 1.3 });
+    await clock.advance(5_000);
+    runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 1.3 });
+    await clock.advance(55_000);
+    runtime.onFix({ ...destinationPoint(first.location, 90, 80), ts: clock.now(), accuracy: 5, speed: 1.3 });
+    await clock.flush();
+    expect(runtime.getState().playback).toMatchObject({ kind: 'transition', poiId: last.id });
+    expect(audio.isPlaying()).toBe(true);
+
+    runtime.explore();
+
+    expect(runtime.getState().route.map((stop) => stop.id)).toEqual([first.id]);
+    expect(runtime.getSnapshot().target).toBeUndefined();
+    expect(stop).not.toHaveBeenCalled();
+    await clock.advance(15_000);
+    expect(runtime.getState().playback).toBeUndefined();
+    expect(runtime.getState().visited).toEqual([first.id]);
+    expect(runtime.getState().finished).toBe(false);
     await runtime.dispose();
   });
 });

@@ -24,11 +24,20 @@
     },
     "production": {
       "extends": "base",
+      "environment": "production",
       "autoIncrement": true,
       "env": { "EXPO_PUBLIC_USE_EMULATORS": "false" }
+    },
+    "testflight": {
+      "extends": "production",
+      "environment": "preview",
+      "distribution": "store"
     }
   },
   "submit": {
+    "testflight": {
+      "ios": { "ascAppId": "6817677603" }
+    },
     "production": {
       "ios": { "ascAppId": "6817677603" },
       "android": { "track": "internal", "releaseStatus": "draft" }

@@ -1,8 +1,12 @@
 import { Children, Fragment, isValidElement } from 'react';
 import { Pressable, View } from 'react-native';
+import type { Interest } from '@tuur/shared';
+import { useTranslation } from 'react-i18next';
 import { haptics } from '../motion';
-import { metrics, sys } from '../theme';
+import { categoryColors, metrics, sys } from '../theme';
 import { Icon } from './Icon';
+import { INTEREST_ICON } from './icons';
+import { CategoryBadge } from './category-badge';
 import { Text } from './Text';
 
 const ICON_COL = 22;
@@ -75,6 +79,7 @@ export function ListRow({
   trailing,
   destructive,
   external,
+  interest,
 }: {
   icon?: string;
   label: string;
@@ -85,7 +90,9 @@ export function ListRow({
   destructive?: boolean;
   /** Opens outside the app (system settings): shows an external-link glyph instead of the chevron. */
   external?: boolean;
+  interest?: Interest | undefined;
 }) {
+  const { t } = useTranslation();
   const tint = destructive ? sys.error : sys.label;
   const body = (
     <>
@@ -99,6 +106,7 @@ export function ListRow({
           {label}
         </Text>
         {hint ? <Text variant="footnote">{hint}</Text> : null}
+        {interest ? <CategoryBadge interest={interest} /> : null}
       </View>
       {value ? (
         <Text variant="body" color={sys.labelSecondary} style={{ flexShrink: 1, textAlign: 'right' }}>
@@ -133,7 +141,9 @@ export function ListRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={hint ? `${label}. ${hint}` : label}
+      accessibilityLabel={[label, hint, interest ? t(`interests.${interest}`) : undefined]
+        .filter(Boolean)
+        .join('. ')}
       onPress={onPress}
       style={({ pressed }) => [style, pressed ? { backgroundColor: sys.fill } : null]}
     >
@@ -146,6 +156,7 @@ export interface Choice {
   id: string;
   label: string;
   detail?: string;
+  interest?: Interest;
 }
 
 /**
@@ -177,6 +188,7 @@ export function ChoiceRows({
     .filter((c) => selected.includes(c.id))
     .map((c) => c.label)
     .join(', ');
+  const selectedInterests = choices.filter((c) => c.interest && selected.includes(c.id));
   return (
     <View>
       <Pressable
@@ -204,8 +216,15 @@ export function ChoiceRows({
         <View style={{ flex: 1, gap: 2 }}>
           <Text variant="body">{label}</Text>
           {hint ? <Text variant="footnote">{hint}</Text> : null}
+          {selectedInterests.length ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 6 }}>
+              {selectedInterests.map((choice) => (
+                <CategoryBadge key={choice.id} interest={choice.interest!} />
+              ))}
+            </View>
+          ) : null}
         </View>
-        {value ? (
+        {value && !selectedInterests.length ? (
           <Text variant="body" color={sys.labelSecondary} numberOfLines={1} style={{ flexShrink: 1 }}>
             {value}
           </Text>
@@ -220,6 +239,7 @@ export function ChoiceRows({
       {open
         ? choices.map((c) => {
             const on = selected.includes(c.id);
+            const tone = c.interest ? categoryColors[c.interest] : undefined;
             return (
               <Pressable
                 key={c.id}
@@ -245,15 +265,25 @@ export function ChoiceRows({
                     paddingLeft: metrics.margin + ICON_COL + GAP,
                     borderTopWidth: 0.5,
                     borderTopColor: sys.separator,
+                    backgroundColor: on && tone ? tone.background : undefined,
                   },
                   pressed ? { backgroundColor: sys.fill } : null,
                 ]}
               >
+                {c.interest ? (
+                  <View style={{ width: ICON_COL, alignItems: 'center' }}>
+                    <Icon name={INTEREST_ICON[c.interest]} size={20} color={tone!.foreground} />
+                  </View>
+                ) : null}
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text variant="body">{c.label}</Text>
+                  <Text variant="body" color={tone?.foreground ?? sys.label}>
+                    {c.label}
+                  </Text>
                   {c.detail ? <Text variant="footnote">{c.detail}</Text> : null}
                 </View>
-                {on ? <Icon name="check" size={18} color={sys.accent} weight="semibold" /> : null}
+                {on ? (
+                  <Icon name="check" size={18} color={tone?.foreground ?? sys.accent} weight="semibold" />
+                ) : null}
               </Pressable>
             );
           })

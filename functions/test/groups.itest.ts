@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { REGION_FIXTURES, buildPois, encodePolyline, type Tour } from '@tuur/shared';
 import { addGroupSeat, createGroup, hasGroupAccess, joinGroup, leaveGroup } from '../src/groups/service';
 import { clearFirestore, testDb } from './helpers';
+import { processRevenueCatEvent } from '../src/billing/entitlements';
+import { purchaseKey } from '../src/billing/purchaseLedger';
 
 const db = testDb();
 let clock = 1_800_000_000_000;
@@ -59,6 +61,24 @@ beforeEach(async () => {
 });
 
 describe('live group tours', () => {
+  it('revokes a subscription-backed group when the host loses the subscription', async () => {
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
+    await joinGroup(deps(), 'friend', { token });
+    await db.collection('groups').doc(group.id).update({ hostSubscriber: true });
+    const subscription = db.collection('users').doc('host').collection('entitlements').doc('subscription');
+    await subscription.set({
+      type: 'subscription',
+      active: true,
+      productId: 'tuur_sub_monthly',
+      expiresAt: clock + 10000,
+      updatedAt: clock,
+    });
+    const request = { poiIds: [stops[0]!.id] };
+    expect(await hasGroupAccess(deps(), 'friend', group.id, request)).toBe(true);
+    await subscription.update({ active: false });
+    expect(await hasGroupAccess(deps(), 'friend', group.id, request)).toBe(false);
+  });
+
   it('lets two friends ride along for free, refuses the third and only while the group is live', async () => {
     const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
     expect(group.capacity).toBe(3);
@@ -93,7 +113,17 @@ describe('live group tours', () => {
     await expect(addGroupSeat(deps(), 'host', { groupId: group.id })).rejects.toMatchObject({
       reason: 'no_seat_credit',
     });
-    await db.collection('users').doc('host').collection('credits').doc('wallet').set({ seatBalance: 1 });
+    await processRevenueCatEvent(deps(), {
+      event: {
+        id: 'buy-seat',
+        type: 'NON_RENEWING_PURCHASE',
+        app_user_id: 'host',
+        product_id: 'tuur_group_seat',
+        transaction_id: 'seat-transaction',
+        store: 'APP_STORE',
+        environment: 'PRODUCTION',
+      },
+    });
     await expect(addGroupSeat(deps(), 'f1', { groupId: group.id })).rejects.toMatchObject({
       code: 'not-found',
     });
@@ -101,6 +131,14 @@ describe('live group tours', () => {
       capacity: 4,
       seatBalance: 0,
     });
+    expect(
+      (
+        await db
+          .collection('revenuecatPurchases')
+          .doc(purchaseKey('APP_STORE', 'PRODUCTION', 'seat-transaction'))
+          .get()
+      ).get('remaining'),
+    ).toBe(0);
     for (const f of ['f1', 'f2', 'f3']) await joinGroup(deps(), f, { token });
     clock += 13 * 3600_000;
     await expect(joinGroup(deps(), 'f4', { token })).rejects.toMatchObject({ reason: 'ended' });

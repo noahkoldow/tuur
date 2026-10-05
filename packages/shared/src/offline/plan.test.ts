@@ -6,6 +6,8 @@ import { encodePolyline } from '../routing/polyline';
 import type { Tour } from '../routing/tour';
 import {
   coversTour,
+  downloadTourMode,
+  offlineAccessValid,
   estimateDownloadBytes,
   formatBytes,
   missingItems,
@@ -52,6 +54,39 @@ const tour: Tour = {
 };
 
 describe('download plan', () => {
+  it('allows fixed ready-made and curated routes, but rejects live Explore and Crossroads sessions', () => {
+    expect(downloadTourMode(tour)).toBe('tour');
+    expect(downloadTourMode({ ...tour, id: 'planned_saved', source: 'planned', template: 'planned' })).toBe(
+      'planned',
+    );
+    for (const mode of ['roam', 'fork', 'explore', 'crossroads']) {
+      expect(downloadTourMode({ ...tour, id: `${mode}_session` })).toBeUndefined();
+      expect(downloadTourMode({ ...tour, template: mode })).toBeUndefined();
+    }
+  });
+
+  it('keeps completed curated access beyond online session expiry while respecting finite receipts', () => {
+    const planned: Tour = {
+      ...tour,
+      id: 'planned_saved',
+      source: 'planned',
+      template: 'planned',
+      expiresAt: 10,
+    };
+    const saved = {
+      tourId: planned.id,
+      tour: planned,
+      access: { tourId: planned.id, mode: 'planned' as const, grantedAt: 1, expiresAt: null },
+    };
+    expect(offlineAccessValid(saved, 1_000)).toBe(true);
+    expect(offlineAccessValid({ ...saved, access: { ...saved.access, expiresAt: 10 } }, 1_000)).toBe(false);
+    expect(offlineAccessValid({ ...saved, access: { ...saved.access, tourId: 'different' } }, 1_000)).toBe(
+      false,
+    );
+    expect(offlineAccessValid({ tourId: planned.id, tour: planned }, 1_000)).toBe(false);
+    expect(offlineAccessValid({ tourId: tour.id, tour }, 1_000)).toBe(true); // legacy ready-made download
+  });
+
   it('covers every stop with all tiers, all hops and the map tiles (spec 4.8)', () => {
     const items = planDownload(tour);
     const n = tour.stops.length;

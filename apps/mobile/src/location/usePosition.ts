@@ -18,9 +18,13 @@ export function usePosition() {
       setPosition(REGION_FIXTURES[0]!.center);
       return;
     }
-    const p = await getPermissionState();
-    setPermission(p);
-    if (p === 'foreground' || p === 'background') setPosition(await currentPosition());
+    try {
+      const p = await getPermissionState();
+      setPermission(p);
+      setPosition(p === 'foreground' || p === 'background' ? await currentPosition() : null);
+    } catch {
+      setPosition(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -32,7 +36,7 @@ export function usePosition() {
   const request = useCallback(async () => {
     const p = await requestForeground();
     setPermission(p);
-    if (p !== 'denied') setPosition(await currentPosition());
+    setPosition(p !== 'denied' ? await currentPosition() : null);
     return p;
   }, []);
 

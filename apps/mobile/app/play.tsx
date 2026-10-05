@@ -1,41 +1,51 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { ScrollView } from 'react-native';
-import { Alert, Animated, PixelRatio, Platform, View } from 'react-native';
+import { Alert, Animated, PixelRatio, Platform, View, useWindowDimensions } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
 import { bearingDegrees, navigationView, type PublicOffer } from '@tuur/shared';
-import { AiBadge } from '../src/components/AiBadge';
 import { Banner } from '../src/components/Banner';
 import { GroupBar } from '../src/components/GroupBar';
 import { Icon } from '../src/components/Icon';
-import { ListGroup, ListRow } from '../src/components/ListGroup';
 import { Button, IconButton, Row } from '../src/components/Button';
+import { MapActionControls } from '../src/components/MapActionControls';
+import { PauseFinder } from '../src/components/PauseFinder';
 import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
+import { OptionCards } from '../src/components/OptionCards';
 import { ProgressBar } from '../src/components/ProgressBar';
 import { Sheet } from '../src/components/Sheet';
 import { StopCards, interestOf } from '../src/components/StopCards';
+import { CategoryBadge } from '../src/components/category-badge';
 import { Transcript } from '../src/components/Transcript';
 import { TravelModeChip } from '../src/components/TravelModeChip';
 import { Text } from '../src/components/Text';
 import { TuuSays, useTip } from '../src/components/TuuSays';
 import { TuurMap } from '../src/components/TuurMap';
 import type { ForkSnapshot } from '../src/guide/modes';
-import { endSession, tourPath, useActiveSession, type ActiveSession } from '../src/guide/session';
+import {
+  endSession,
+  switchSessionToExplore,
+  tourPath,
+  useActiveSession,
+  type ActiveSession,
+} from '../src/guide/session';
+import { canUseSession, useEntitlementStore } from '../src/billing/entitlements';
 import { useStopPois } from '../src/hooks/useStopPois';
 import { endTourAndShowSummary, goHome, isEndingTour } from '../src/navigation';
 import { haptics } from '../src/motion';
 import { formatKm } from '../src/format';
 import { useSettings } from '../src/state/settings';
+import { useHistory } from '../src/state/history';
 import { colors, metrics, radii, sys } from '../src/theme';
 
 const NO_FORK: ForkSnapshot = { options: [], loading: false };
 const noopSubscribe = () => () => undefined;
 
-/** Tour screen (spec 11): map on top, player sheet below (title, image carousel, red progress, transcript). */
+/** Tour screen: compact playback header above the stop photos, secondary controls and transcript. */
 export default function Play() {
   const session = useActiveSession();
   if (!session) return isEndingTour() ? null : <Redirect href="/home" />;
@@ -55,17 +65,31 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const router = useRouter();
   const backend = useBackend();
   const insets = useSafeAreaInsets();
-  const lang = useSettings((s) => s.language);
+  const { height: screenH } = useWindowDimensions();
+  const entitlements = useEntitlementStore();
+  const walked = useHistory((s) => s.records.find((r) => r.id === session.recordId)?.track);
+  const settingsLanguage = useSettings((s) => s.language);
+  const lang = session.recovery?.lang ?? settingsLanguage;
   const highlightWords = useSettings((s) => s.highlightWords);
   const [showText, setShowText] = useState(false);
   const sheetScroll = useRef<ScrollView>(null);
   const transcriptY = useRef(0);
   const userScrolledAt = useRef(0);
   const [sheet, setSheet] = useState(1);
+  const [selectedStopId, setSelectedStopId] = useState<string>();
+  const [recenterKey, recenterMap] = useReducer((key: number) => key + 1, 0);
+  const [pauseFinderOpen, setPauseFinderOpen] = useState(false);
   // snap heights follow the text size so the header and controls are never cut off
   const scale = Math.min(1.5, Math.max(1, PixelRatio.getFontScale()));
-  const snaps = [Math.round(300 * scale), Math.round(560 * scale), 780];
+  const snaps = [
+    Math.round(180 * scale) + insets.bottom,
+    Math.min(screenH * 0.68, 560 * scale),
+    screenH * 0.92,
+  ];
   const [reported, setReported] = useState(false);
+  const [mapSheetHeight, setMapSheetHeight] = useState(snaps[1]!);
+  const [reporting, setReporting] = useState(false);
+  const [reportError, setReportError] = useState(false);
   const [offers, setOffers] = useState<PublicOffer[]>([]);
   const sponsored = Boolean(ui.narration?.sponsored);
   const partnerPoiId = ui.narration?.kind === 'stop' ? ui.narration.poiId : undefined;
@@ -88,7 +112,8 @@ function PlayInner({ session }: { session: ActiveSession }) {
     };
   }, [backend, sponsored, partnerPoiId, ui.narration?.key]);
   const path = useMemo(() => (tour ? tourPath(tour) : ui.stops.map((s) => s.location)), [tour, ui.stops]);
-  const pois = useStopPois(ui.stops);
+  const storyStops = useMemo(() => ui.stops.filter((stop) => !stop.navigationOnly), [ui.stops]);
+  const pois = useStopPois(storyStops);
   const targetIndex = ui.target ? ui.stops.findIndex((s) => s.id === ui.target?.id) : -1;
   // Navigation: walked part muted, the way from the user to the next stop prominent, the rest lighter.
   const nav = useMemo(
@@ -120,7 +145,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
         : ui.target
           ? ui.target.name
           : session.mode === 'roam'
-            ? t('roam.exploringAhead')
+            ? 'Tuu'
             : modeTitle;
 
   // Leaving the player keeps the tour running (home shows "continue"); ending it opens the summary.
@@ -137,27 +162,46 @@ function PlayInner({ session }: { session: ActiveSession }) {
   };
 
   const report = async () => {
-    if (!n) return;
-    await backend.reportNarration({ narrationKey: n.key, reason: 'wrong_fact' }).catch(() => undefined);
-    setReported(true);
+    if (!n || reporting) return;
+    setReporting(true);
+    setReportError(false);
+    try {
+      await backend.reportNarration({ narrationKey: n.key, reason: 'wrong_fact' });
+      setReported(true);
+    } catch {
+      setReportError(true);
+    } finally {
+      setReporting(false);
+    }
+  };
+  useEffect(() => {
+    setReported(false);
+    setReportError(false);
+  }, [n?.key]);
+  const exploreInstead = () => {
+    if (!canUseSession(entitlements, 'roam', tour?.placeId)) {
+      if (tour?.placeId)
+        router.push({
+          pathname: '/paywall',
+          params: { kind: 'session', placeId: tour.placeId, mode: 'roam' },
+        });
+      return;
+    }
+    if (switchSessionToExplore()) haptics.select();
   };
 
   const noticeText =
-    ui.notice === 'vehicle_paused'
-      ? undefined
-      : ui.notice === 'vehicle_resumed'
-        ? t('player.vehicleResumed')
-        : ui.notice === 'unavailable'
-          ? t('player.unavailable')
-          : ui.notice === 'locked'
-            ? t('errors.locked')
-            : ui.notice === 'generation_paused'
-              ? t('errors.paused')
-              : ui.notice === 'rate_limited'
-                ? t('errors.rateLimited')
-                : ui.notice === 'offline'
-                  ? t('errors.network')
-                  : undefined;
+    ui.notice === 'unavailable'
+      ? t('player.unavailable')
+      : ui.notice === 'locked'
+        ? t('errors.locked')
+        : ui.notice === 'generation_paused'
+          ? t('errors.paused')
+          : ui.notice === 'rate_limited'
+            ? t('errors.rateLimited')
+            : ui.notice === 'offline'
+              ? t('errors.network')
+              : undefined;
 
   const targetStop = ui.target ? ui.stops.find((s) => s.id === ui.target?.id) : undefined;
   // Without a GPS heading (standing, slow walking) a relative arrow would point anywhere: hide it then.
@@ -179,21 +223,15 @@ function PlayInner({ session }: { session: ActiveSession }) {
     }).start();
   }, [arrowDeg, arrow]);
   const arrived = ui.target?.distanceM !== undefined && ui.target.distanceM < 25;
-  // a short success tick on arrival, a warning when a vehicle pauses the tour
+  // A short success tick on arrival.
   useEffect(() => {
     if (arrived) haptics.success();
   }, [arrived, ui.target?.id]);
-  useEffect(() => {
-    if (ui.notice === 'vehicle_paused') haptics.warning();
-  }, [ui.notice]);
-  // One Tuu bubble at a time: vehicle pause > first-time controls tip > arrival > reading hint while narrating.
+  // One Tuu bubble at a time: first-time controls tip > arrival > reading hint while narrating.
   const controlsTip = useTip('play.controls');
   const listenTip = useTip('play.listen');
-  const vehiclePaused = ui.notice === 'vehicle_paused';
   const tuuBubble =
-    ui.phase === 'finished' ? null : vehiclePaused ? (
-      <TuuSays pose="relax" size={64} text={t('player.vehiclePaused')} />
-    ) : controlsTip.visible ? (
+    ui.phase === 'finished' ? null : controlsTip.visible ? (
       <TuuSays
         pose={n && ui.phase === 'narrating' ? 'listen' : 'present'}
         size={64}
@@ -211,27 +249,44 @@ function PlayInner({ session }: { session: ActiveSession }) {
       : ui.target.distanceM >= 1000
         ? `${formatKm(ui.target.distanceM, lang)} km`
         : `${ui.target.distanceM >= 100 ? Math.round(ui.target.distanceM / 10) * 10 : ui.target.distanceM} m`;
+  const distanceDescription = t('player.straightLineDistance', { distance: distanceLabel });
+  const headerPoiId = n?.kind === 'stop' ? n.poiId : ui.target?.id;
+  const headerInterest = headerPoiId ? interestOf(pois.get(headerPoiId)) : undefined;
 
   const header = (
-    <View style={{ paddingHorizontal: metrics.margin, paddingBottom: 12, gap: 12 }}>
-      <Row gap={10}>
+    <View style={{ paddingHorizontal: metrics.margin, paddingBottom: 12, gap: 8 }}>
+      <Row gap={12}>
         <Text
           variant="title2"
           numberOfLines={2}
           accessibilityRole="header"
           accessibilityLiveRegion="polite"
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 0 }}
         >
           {title}
         </Text>
+        <IconButton
+          icon={ui.phase === 'paused' ? 'play' : 'pause'}
+          label={ui.phase === 'paused' ? t('player.play') : t('player.pause')}
+          onPress={() => {
+            haptics.tap();
+            if (ui.phase === 'paused') runtime.resume();
+            else runtime.pause();
+          }}
+          size={56}
+          primary
+        />
       </Row>
+      {headerInterest && ui.phase !== 'finished' ? <CategoryBadge interest={headerInterest} /> : null}
       {ui.target?.distanceM !== undefined && ui.phase !== 'finished' && !(n && ui.phase === 'narrating') ? (
         <View
           accessible
           accessibilityLabel={
-            arrived ? t('cards.here') : `${t('player.nextStop', { name: ui.target.name })}, ${distanceLabel}`
+            arrived
+              ? t('cards.here')
+              : `${t('player.nextStop', { name: ui.target.name })}, ${distanceDescription}`
           }
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
         >
           {arrived ? (
             <View
@@ -267,65 +322,48 @@ function PlayInner({ session }: { session: ActiveSession }) {
                     ],
                   }}
                 >
-                  <Icon name="navigation-variant" size={32} color={sys.accentText} weight="semibold" />
+                  <Icon name="navigation-variant" size={24} color={sys.accentText} weight="semibold" />
                 </Animated.View>
               ) : null}
-              {/* distance is the most useful outdoor cue: large and high-contrast */}
-              <Text variant="display">{distanceLabel}</Text>
+              <Text variant="title3" style={{ flexShrink: 1 }}>
+                {distanceDescription}
+              </Text>
             </>
           )}
         </View>
       ) : null}
-      {n ? <AiBadge /> : null}
       <ProgressBar value={progress} />
-      <Row gap={16} style={{ justifyContent: 'center' }}>
-        <IconButton
-          icon="skip-back"
-          label={t('player.previous')}
-          onPress={() => {
-            haptics.tap();
-            runtime.previous();
-          }}
-        />
-        <IconButton
-          icon={ui.phase === 'paused' ? 'play' : 'pause'}
-          label={ui.phase === 'paused' ? t('player.play') : t('player.pause')}
-          onPress={() => {
-            haptics.tap();
-            if (ui.phase === 'paused') runtime.resume();
-            else runtime.pause();
-          }}
-          size={72}
-          primary
-        />
-        <IconButton
-          icon="skip-forward"
-          label={t('player.next')}
-          onPress={() => {
-            haptics.tap();
-            runtime.skip();
-          }}
-        />
-      </Row>
     </View>
   );
 
   const center = ui.user ?? tour?.stops[0]?.location ?? ui.stops[0]?.location ?? { lat: 52.52, lng: 13.405 };
   // Cards follow the stop being narrated, otherwise the one the listener is walking to.
-  const cardId = n?.kind === 'stop' ? n.poiId : ui.target?.id;
-  const cardStop = cardId ? ui.stops.find((s) => s.id === cardId) : undefined;
+  const inspectedStop = storyStops.find((stop) => stop.id === selectedStopId);
+  const cardId = inspectedStop?.id ?? (n?.kind === 'stop' ? n.poiId : ui.target?.id);
+  const cardStop = cardId ? storyStops.find((s) => s.id === cardId) : undefined;
   const cardPoi = cardId ? pois.get(cardId) : undefined;
 
   return (
     <View style={{ flex: 1, backgroundColor: sys.grouped }}>
       <TuurMap
         center={center}
-        route={nav.leg.length > 1 ? nav.ahead : path}
-        routeDone={nav.leg.length > 1 ? nav.done : []}
+        route={ui.target ? nav.ahead : []}
+        routeDone={walked ?? []}
         leg={nav.leg}
+        followUser={ui.phase !== 'finished'}
+        showRouteLegend
         user={ui.user}
         {...(ui.user ? {} : { fit: path })}
-        bottomInset={snaps[Math.min(sheet, 1)]! - 40}
+        bottomInset={mapSheetHeight}
+        locateButton={false}
+        recenterKey={recenterKey}
+        onMapPress={() => setSheet(0)}
+        onStopPress={(id) => {
+          if (!storyStops.some((stop) => stop.id === id)) return;
+          setSelectedStopId(id);
+          setSheet(1);
+          sheetScroll.current?.scrollTo({ y: 0, animated: false });
+        }}
         stops={ui.stops.map((s, i) => ({
           id: s.id,
           location: s.location,
@@ -351,7 +389,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
         }}
       >
         <IconButton icon="chevron-down" label={t('player.minimize')} onPress={() => goHome(router)} onMap />
-        <View style={{ alignItems: 'flex-end', gap: 8 }}>
+        <View style={{ alignItems: 'flex-end', gap: 8, maxWidth: '80%' }}>
           <TravelModeChip mode={ui.travelMode} />
           {simulator ? (
             <Button
@@ -368,12 +406,105 @@ function PlayInner({ session }: { session: ActiveSession }) {
         snapPoints={snaps}
         index={sheet}
         onIndexChange={setSheet}
-        handleLabel={t('player.transcript')}
+        onVisibleHeightChange={setMapSheetHeight}
+        onCollapse={recenterMap}
+        handleLabel={t(sheet === 2 ? 'sheet.collapse' : 'sheet.expand')}
         header={header}
+        decoration={<Mascot pose="map" size={100} entrance={false} />}
+        floatingAction={
+          ui.user ? (
+            <MapActionControls
+              onLocate={recenterMap}
+              onFindPause={() => setPauseFinderOpen(true)}
+              tourPaused={ui.phase === 'paused'}
+              onToggleTourPause={
+                ui.phase === 'finished'
+                  ? undefined
+                  : () => (ui.phase === 'paused' ? runtime.resume() : runtime.pause())
+              }
+            />
+          ) : null
+        }
+        bottomInset={insets.bottom}
         scrollRef={sheetScroll}
         onUserScroll={() => (userScrolledAt.current = Date.now())}
       >
         <View style={{ gap: 14 }}>
+          {inspectedStop ? (
+            <View style={{ alignItems: 'flex-end' }}>
+              <IconButton
+                icon="x"
+                label={t('player.closePlace')}
+                onPress={() => setSelectedStopId(undefined)}
+              />
+            </View>
+          ) : null}
+          {cardStop && (ui.phase !== 'finished' || inspectedStop) ? (
+            <View style={{ marginHorizontal: -metrics.margin }}>
+              <StopCards
+                poi={cardPoi}
+                name={cardStop.name}
+                distanceM={cardStop.id === ui.target?.id ? ui.target.distanceM : undefined}
+                keyFacts={n?.kind === 'stop' && n.poiId === cardStop.id ? n.keyFacts : undefined}
+                images={n?.kind === 'stop' && n.poiId === cardStop.id ? n.images : undefined}
+                lang={lang}
+              />
+            </View>
+          ) : null}
+          <Row gap={32} style={{ justifyContent: 'center' }}>
+            <IconButton
+              icon="skip-back"
+              label={t('player.previous')}
+              onPress={() => {
+                haptics.tap();
+                runtime.previous();
+              }}
+            />
+            <IconButton
+              icon="skip-forward"
+              label={t('player.next')}
+              onPress={() => {
+                haptics.tap();
+                runtime.skip();
+              }}
+            />
+          </Row>
+          <Row gap={8} style={{ flexWrap: 'wrap' }}>
+            {ui.phase !== 'finished' ? (
+              <Button
+                variant="ghost"
+                size="regular"
+                icon="x"
+                label={t('player.endTour')}
+                onPress={confirmFinish}
+                style={{ flex: 1 }}
+              />
+            ) : null}
+            {n ? (
+              <Button
+                variant="ghost"
+                size="regular"
+                icon="flag"
+                label={reported ? t('player.reported') : t('player.reportIssue')}
+                disabled={reported}
+                loading={reporting}
+                onPress={() => void report()}
+                style={{ flex: 1 }}
+              />
+            ) : null}
+          </Row>
+          {reportError ? <Banner tone="error" text={t('player.reportFailed')} /> : null}
+          {session.mode === 'planned' && !session.groupId && !session.guest && ui.phase !== 'finished' ? (
+            <View style={{ gap: 8 }}>
+              <Button
+                variant="tinted"
+                icon="compass"
+                label={t('player.exploreInstead')}
+                onPress={exploreInstead}
+              />
+              <Text variant="footnote">{t('player.exploreHint')}</Text>
+            </View>
+          ) : null}
           {ui.phase === 'finished' ? (
             <View style={{ alignItems: 'center', gap: 12, paddingVertical: 8 }}>
               <Mascot pose="celebrate" size={136} />
@@ -389,26 +520,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
             </View>
           ) : null}
           {tuuBubble}
-          {cardStop && ui.phase !== 'finished' ? (
-            <View style={{ marginHorizontal: -metrics.margin }}>
-              <StopCards
-                poi={cardPoi}
-                name={cardStop.name}
-                distanceM={cardStop.id === ui.target?.id ? ui.target.distanceM : undefined}
-                keyFacts={n?.kind === 'stop' && n.poiId === cardStop.id ? n.keyFacts : undefined}
-                lang={lang}
-              />
-            </View>
-          ) : null}
           {ui.phase !== 'finished' ? <GroupBar session={session} /> : null}
           {session.foregroundOnly ? <Banner icon="smartphone" text={t('player.foregroundOnly')} /> : null}
-          {noticeText ? (
-            <Banner
-              tone={ui.notice === 'vehicle_paused' ? 'warning' : 'info'}
-              text={noticeText}
-              icon={ui.notice === 'vehicle_paused' ? 'truck' : undefined}
-            />
-          ) : null}
+          {noticeText ? <Banner text={noticeText} /> : null}
+          {ui.travelMode === 'vehicle' ? <Banner icon="car" text={t('travel.vehicleHint')} /> : null}
 
           {fork && (forkState.options.length > 0 || ui.awaitingRoute) ? (
             <View style={{ gap: 10 }}>
@@ -421,7 +536,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
               {forkState.options.length === 0 ? (
                 <Banner text={t('fork.none')} />
               ) : (
-                <Row gap={12} style={{ alignItems: 'stretch' }}>
+                <OptionCards>
                   {forkState.options.map((o) => (
                     <OptionCard
                       key={o.poi.id}
@@ -431,7 +546,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
                       onPress={() => fork.choose(o.poi.id)}
                     />
                   ))}
-                </Row>
+                </OptionCards>
               )}
             </View>
           ) : null}
@@ -505,20 +620,14 @@ function PlayInner({ session }: { session: ActiveSession }) {
               {n.grounding?.searchEntryPointHtml ? <Text variant="caption">Google Search</Text> : null}
             </>
           ) : null}
-          <ListGroup>
-            {n ? (
-              <ListRow
-                icon="flag"
-                label={reported ? t('player.reported') : t('player.reportIssue')}
-                onPress={reported ? undefined : () => void report()}
-              />
-            ) : null}
-            {ui.phase !== 'finished' ? (
-              <ListRow icon="x" label={t('player.endTour')} destructive onPress={confirmFinish} />
-            ) : null}
-          </ListGroup>
         </View>
       </Sheet>
+      <PauseFinder
+        open={pauseFinderOpen}
+        onClose={() => setPauseFinderOpen(false)}
+        position={ui.user}
+        runtime={ui.phase === 'finished' ? undefined : runtime}
+      />
     </View>
   );
 }

@@ -10,8 +10,11 @@ import {
 import { z } from 'zod';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
-import { logUsage, spentToday } from '../util/usage';
+import { spentToday } from '../util/usage';
+import { budgetedLlm } from '../providers/budgeted';
 import { NarrationError, type NarrationDeps } from './service';
+
+export type TeaserDeps = Pick<NarrationDeps, 'db' | 'llm' | 'sources' | 'now' | 'authorize' | 'config'>;
 
 export const GetTeaserRequestSchema = z.object({
   poiId: z.string().min(1).max(120),
@@ -29,7 +32,7 @@ export const GetTeaserRequestSchema = z.object({
  * same deterministic checks as narrations (no invented numbers, no markup) and cached per place and language.
  */
 export async function getTeaser(
-  deps: NarrationDeps,
+  deps: TeaserDeps,
   uid: string,
   raw: unknown,
 ): Promise<{ text: string; cached: boolean }> {
@@ -60,13 +63,12 @@ export async function getTeaser(
 
   const bundle = await deps.sources.gather(poi, [lang, ...sourceLangsFor('XX')]);
   const sources = sourceText(bundle);
-  const t = await deps.llm.teaser({ model: cfg.models.lite, lang, name: poi.name, sources });
-  await logUsage(
-    deps.db,
-    cfg.pricing,
-    { kind: 'teaser', model: cfg.models.lite, usage: t.usage, tile: poi.tile, ok: true },
-    deps.now(),
-  );
+  const t = await budgetedLlm(deps.llm, deps.db, cfg, deps.now, { tile: poi.tile }).teaser({
+    model: cfg.models.lite,
+    lang,
+    name: poi.name,
+    sources,
+  });
   const text = t.text.trim();
   if (
     !text ||

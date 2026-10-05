@@ -13,6 +13,7 @@ const berlin = REGION_FIXTURES[0]!;
 
 async function setup() {
   const backend = createDemoBackend({ latencyMs: 0, enforceAccess: true });
+  await backend.auth.signInWithEmail('test@example.com', 'password', true);
   const tile = encodeGeohash(berlin.center.lat, berlin.center.lng, 6);
   await backend.ensureArea(tile);
   for (let i = 0; i < 50; i++) {
@@ -43,7 +44,10 @@ describe('gating and unlocking (demo backend mirrors the server rules)', () => {
     const { backend, free, paid, state } = await setup();
     // the free tour of a city is claimed once (verified phone + rewarded ad, server rule since the release work)
     await expect(narration(backend, free.id, free.stops[0]!.poiId)).rejects.toMatchObject({ code: 'locked' });
-    await backend.auth.confirmPhoneVerification(await backend.auth.requestPhoneVerification('+49'), '000000');
+    await backend.auth.confirmPhoneVerification(
+      await backend.auth.requestPhoneVerification('+491701234567'),
+      '000000',
+    );
     await backend.createRewardNonce({ tourId: free.id });
     await expect(narration(backend, free.id, free.stops[0]!.poiId)).resolves.toBeTruthy();
     const err = await narration(backend, paid.id, paid.stops[0]!.poiId).catch((e: unknown) => e);

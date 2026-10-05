@@ -1,18 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { Animated, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
-import type { Poi } from '@tuur/shared';
+import { placeProminence, type Poi } from '@tuur/shared';
+import { formatKm } from '../format';
 import { useReduceMotion } from '../motion';
 import { metrics, sys } from '../theme';
 import { Icon } from './Icon';
-import { ImageCredit } from './ImageCredit';
+import { CategoryBadge } from './category-badge';
+import { PlacePhoto } from './PlacePhoto';
 import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 import { INTEREST_ICON } from './icons';
 import { interestOf } from './StopCards';
+import { placeSummary } from './placeDetails';
+import { PhotoInfo } from './photo-info';
 
-export const PLACE_CARD_WIDTH = 232;
+export const PLACE_CARD_WIDTH = 320;
 
 /**
  * A place with a photo and a play badge: tap it and tuur walks you there and tells its story. This is what makes the
@@ -22,96 +25,123 @@ export function PlaceCard({
   poi,
   minutes,
   onPress,
+  navigate = false,
+  disabled = false,
+  width = PLACE_CARD_WIDTH,
+  distanceM,
 }: {
   poi: Poi;
   minutes?: number | undefined;
   onPress: () => void;
+  navigate?: boolean;
+  disabled?: boolean;
+  width?: number;
+  distanceM?: number;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage ?? i18n.language;
   const interest = interestOf(poi);
   const img = poi.imageRefs[0];
-  const meta = [
-    interest ? t(`interests.${interest}`) : undefined,
-    minutes === undefined ? undefined : t('common.minutes', { count: minutes }),
-  ]
+  const summary = placeSummary(poi, lang);
+  const prominence = placeProminence(poi);
+  const prominenceLabel = t(`home.placeProminence.${prominence}`);
+  const walk = minutes === undefined ? undefined : t('home.placeWalk', { count: minutes });
+  const distance =
+    distanceM === undefined
+      ? undefined
+      : t('home.placeDistance', {
+          distance:
+            distanceM >= 1000
+              ? `${formatKm(distanceM, lang)} km`
+              : `${Math.max(0, Math.round(distanceM / 10) * 10)} m`,
+        });
+  const visit = t('home.placeVisit', { count: Math.max(1, Math.round(poi.dwellMinutes)) });
+  const meta = [prominenceLabel, interest ? t(`interests.${interest}`) : undefined, walk, distance, visit]
     .filter(Boolean)
-    .join(' · ');
+    .join('. ');
   return (
-    <PressableScale
-      scaleTo={0.98}
-      accessibilityRole="button"
-      accessibilityLabel={`${poi.name}. ${meta}`}
-      accessibilityHint={t('home.listenHint')}
-      onPress={onPress}
+    <View
       style={{
-        width: PLACE_CARD_WIDTH,
+        width,
         borderRadius: metrics.radius.card,
         borderCurve: 'continuous',
         backgroundColor: sys.elevated,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: sys.separator,
       }}
     >
-      <View style={{ height: 144, backgroundColor: sys.accentTint }}>
-        {img ? (
-          <Image
-            source={{ uri: img.thumbUrl ?? img.url }}
-            style={{ flex: 1 }}
-            contentFit="cover"
-            transition={250}
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 36 }}>
-            <Icon
-              name={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
-              size={48}
-              color={sys.accentText}
-            />
-          </View>
-        )}
-        {img ? (
-          <View
-            style={{
-              position: 'absolute',
-              top: 8,
-              left: 8,
-              maxWidth: '62%',
-              paddingHorizontal: 6,
-              borderRadius: 8,
-              backgroundColor: 'rgba(255,255,255,0.92)',
-            }}
-          >
-            <ImageCredit image={img} />
-          </View>
-        ) : null}
+      <PressableScale
+        scaleTo={0.98}
+        accessibilityRole="button"
+        accessibilityLabel={`${poi.name}. ${meta}${summary ? `. ${summary.text}` : ''}`}
+        accessibilityHint={t(navigate ? 'home.roamTargetHint' : 'home.listenHint')}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
+        onPress={onPress}
+        style={{ minHeight: 232, justifyContent: 'flex-end', paddingTop: 72 }}
+      >
+        <PlacePhoto
+          image={img}
+          name={poi.name}
+          icon={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
+          showInfo={false}
+          style={{ position: 'absolute', inset: 0 }}
+        />
         <View
           style={{
-            position: 'absolute',
-            right: 10,
-            bottom: 10,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            height: 36,
-            paddingLeft: 10,
-            paddingRight: 14,
-            borderRadius: 18,
-            backgroundColor: sys.accent,
+            padding: 14,
+            gap: 7,
+            backgroundColor: 'rgba(17,17,17,0.76)',
           }}
         >
-          <Icon name="play" size={14} color={sys.onAccent} />
-          <Text variant="subheadline" color={sys.onAccent} style={{ fontWeight: '600' }}>
-            {t('home.listen')}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+            {interest ? <CategoryBadge interest={interest} /> : null}
+            <Icon name={prominence === 'landmark' ? 'star' : 'map-pin'} size={13} color="#FFFFFF" />
+            <Text variant="caption" color="#FFFFFF" style={{ fontWeight: '600' }}>
+              {prominenceLabel}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text variant="headline" color="#FFFFFF" numberOfLines={2}>
+                {poi.name}
+              </Text>
+              <Text variant="caption" color="#FFFFFF">
+                {[walk, distance, visit].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: disabled ? sys.elevated : sys.accent,
+              }}
+            >
+              <Icon
+                name={navigate ? 'navigation' : 'play'}
+                size={18}
+                color={disabled ? sys.labelSecondary : sys.onAccent}
+              />
+            </View>
+          </View>
+          {summary ? (
+            <Text variant="subheadline" color="#FFFFFF" numberOfLines={2}>
+              {summary.text}
+            </Text>
+          ) : null}
+          {poi.partnerId ? (
+            <Text variant="caption" color="#FFFFFF">
+              {t('partner.adLabel')}
+            </Text>
+          ) : null}
         </View>
-      </View>
-      <View style={{ padding: 12, gap: 2 }}>
-        <Text variant="headline" numberOfLines={2} style={{ minHeight: 44 }}>
-          {poi.name}
-        </Text>
-        <Text variant="footnote">{meta}</Text>
-      </View>
-    </PressableScale>
+      </PressableScale>
+      <PhotoInfo image={img} name={poi.name} summary={summary} />
+    </View>
   );
 }
 
@@ -143,8 +173,8 @@ export function PlaceCardSkeleton() {
         overflow: 'hidden',
       }}
     >
-      <View style={{ height: 144, backgroundColor: sys.fill }} />
-      <View style={{ padding: 12, gap: 8 }}>
+      <View style={{ height: 150, backgroundColor: sys.fill }} />
+      <View style={{ padding: 14, gap: 8, minHeight: 82 }}>
         <View style={bar('80%')} />
         <View style={bar('55%')} />
       </View>

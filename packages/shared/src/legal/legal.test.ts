@@ -35,7 +35,7 @@ describe('legal documents', () => {
       'Firebase',
       'Gemini',
       'RevenueCat',
-      'MapTiler',
+      'OpenFreeMap',
       'OpenRouteService',
       'AdMob',
       'Stripe',

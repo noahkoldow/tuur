@@ -40,10 +40,32 @@ describe('commons images', () => {
     expect(parseCommonsImages(page('Fair use')).size).toBe(0);
     expect(isFreeLicense('Public domain')).toBe(true);
     expect(isFreeLicense('All rights reserved')).toBe(false);
+    expect(parseCommonsImages(page('CC BY-NC 4.0')).size).toBe(0);
+    expect(parseCommonsImages(page('CC BY-ND 4.0')).size).toBe(0);
+    expect(isFreeLicense('CC-BY-SA 4.0')).toBe(true);
+    const missingAuthor = page('CC BY-SA 4.0');
+    missingAuthor.query.pages['1'].imageinfo[0]!.extmetadata.Artist.value = '';
+    expect(parseCommonsImages(missingAuthor).size).toBe(0);
+  });
+
+  it('resolves renamed and underscore-normalized Commons files to their attribution', () => {
+    const response = page('CC BY-SA 4.0');
+    const images = parseCommonsImages({
+      query: {
+        ...response.query,
+        normalized: [{ from: 'File:Old_Dom.jpg', to: 'File:Old Dom.jpg' }],
+        redirects: [{ from: 'File:Old Dom.jpg', to: 'File:Dom.jpg' }],
+      },
+    });
+    expect(images.get('File:Old Dom.jpg')).toEqual(images.get('File:Dom.jpg'));
+    expect(images.get('File:Old_Dom.jpg')?.sourceUrl).toBe('https://commons.wikimedia.org/wiki/File:Dom.jpg');
   });
 
   it('builds a titles query', () => {
     expect(buildCommonsQuery(['File:A.jpg', 'File:B.jpg'])).toContain('titles=File%3AA.jpg%7CFile%3AB.jpg');
+    const params = new URLSearchParams(buildCommonsQuery(['File:Old_Dom.jpg', 'File:Old Dom.jpg']));
+    expect(params.get('titles')).toBe('File:Old Dom.jpg');
+    expect(params.get('redirects')).toBe('1');
   });
 });
 
@@ -58,6 +80,7 @@ describe('wikipedia generator', () => {
               length: 12000,
               coordinates: [{ lat: 1, lon: 2 }],
               pageprops: { wikibase_item: 'Q7' },
+              pageimage: 'Dom_exterior.jpg',
             },
             '2': {
               title: 'Dom (Begriffsklärung)',
@@ -70,6 +93,7 @@ describe('wikipedia generator', () => {
       },
       'de',
     );
+    expect(out[0]?.imageFile).toBe('File:Dom exterior.jpg');
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ wikidataId: 'Q7', wikipedia: [{ lang: 'de', length: 12000 }] });
   });

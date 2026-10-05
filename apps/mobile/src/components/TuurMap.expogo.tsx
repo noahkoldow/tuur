@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, View, useWindowDimensions } from 'react-native';
 import MapView, { Marker, Polyline, type MapStyleElement } from 'react-native-maps';
 import { useTranslation } from 'react-i18next';
 import { colors } from '@tuur/ui';
 import { HeartPin, pinSize } from './HeartPin';
 import { cellDegForZoom, clusterByGrid } from '@tuur/shared';
-import { ClusterMarker, LocateButton, SpotMarker } from './MapControls';
+import { ClusterMarker, LocateButton, SpotMarker, UserPositionMarker } from './MapControls';
 import { LOCATE_ZOOM, ROUTE_DONE_COLOR, type TuurMapProps } from './mapTypes';
+import { useReduceMotion } from '../motion';
+import { MapRouteLegend } from './MapRouteLegend';
+import { navigationCenter } from './mapNavigation';
 
 /** Light, muted Google style for Android so the red route dominates (spec 2.2); iOS uses Apple's muted map type. */
 const LIGHT_STYLE: MapStyleElement[] = [
@@ -22,6 +25,8 @@ const LIGHT_STYLE: MapStyleElement[] = [
 ];
 
 const toCoord = (p: { lat: number; lng: number }) => ({ latitude: p.lat, longitude: p.lng });
+// Apple Maps ignores zoom; a fixed camera altitude restores a walking-scale view there too.
+const LOCATE_ALTITUDE = 1200;
 
 /**
  * Expo Go preview of the map (MapLibre is not part of Expo Go): the same props rendered with react-native-maps,
@@ -35,51 +40,105 @@ export function TuurMap({
   route,
   routeDone,
   leg,
+  followUser = false,
+  showRouteLegend = false,
   spots = [],
   onSpotPress,
   onMapPress,
   fit,
   locateButton,
+  locateButtonOffset = 16,
+  recenterKey,
   bottomInset = 0,
   onStopPress,
   testID,
 }: TuurMapProps) {
   const { t } = useTranslation();
   const ref = useRef<MapView>(null);
-  const delta = 360 / 2 ** zoom;
+  const fitTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const [mapHeight, setMapHeight] = useState(windowHeight);
+  const cameraBottom = Math.min(Math.max(0, bottomInset), Math.max(0, mapHeight - 220));
+  const following = useRef(true);
+  const reduceMotion = useReduceMotion();
+  const delta = 360 / 2 ** (followUser ? Math.max(zoom, 16) : zoom);
   const navigating = Boolean(leg && leg.length > 1);
   const [mapZoom, setMapZoom] = useState(zoom);
   const clusters = useMemo(() => clusterByGrid(spots, cellDegForZoom(mapZoom)), [spots, mapZoom]);
+  const followCenter = user ? navigationCenter(user, leg) : undefined;
+  const followLat = followCenter?.lat;
+  const followLng = followCenter?.lng;
+
+  useEffect(() => {
+    if (
+      !followUser ||
+      !following.current ||
+      followLat === undefined ||
+      followLng === undefined ||
+      fit?.length
+    )
+      return;
+    const center = { latitude: followLat, longitude: followLng };
+    if (reduceMotion) ref.current?.setCamera({ center });
+    else ref.current?.animateCamera({ center }, { duration: 300 });
+  }, [followUser, followLat, followLng, reduceMotion, fit?.length]);
 
   useEffect(() => {
     if (!fit?.length) return;
-    const id = setTimeout(
-      () =>
-        ref.current?.fitToCoordinates(fit.map(toCoord), {
-          edgePadding: { top: 120, left: 48, right: 48, bottom: 48 + bottomInset },
-          animated: true,
-        }),
-      250,
-    );
-    return () => clearTimeout(id);
-  }, [fit, bottomInset]);
+    fitTimeout.current = setTimeout(() => {
+      fitTimeout.current = null;
+      ref.current?.fitToCoordinates(fit.map(toCoord), {
+        edgePadding: { top: 120, left: 48, right: 48, bottom: 48 + cameraBottom },
+        animated: !reduceMotion,
+      });
+    }, 250);
+    return () => {
+      if (fitTimeout.current !== null) clearTimeout(fitTimeout.current);
+      fitTimeout.current = null;
+    };
+  }, [fit, cameraBottom, reduceMotion]);
 
   // Center on the user once when the position first arrives; afterwards the map stays where the user pans it.
   const centered = useRef(false);
   const hasUser = Boolean(user);
   useEffect(() => {
-    if (!hasUser || centered.current || fit?.length) return;
+    if (!hasUser || centered.current || fit?.length || followUser) return;
     centered.current = true;
-    if (user) ref.current?.animateCamera({ center: toCoord(user) }, { duration: 400 });
+    if (user) {
+      if (reduceMotion) ref.current?.setCamera({ center: toCoord(user) });
+      else ref.current?.animateCamera({ center: toCoord(user) }, { duration: 300 });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasUser]);
 
-  const locate = () => {
-    if (user) ref.current?.animateCamera({ center: toCoord(user), zoom: LOCATE_ZOOM }, { duration: 600 });
-  };
+  const locateTarget = (followUser ? followCenter : user) ?? center;
+  const locateLat = locateTarget.lat;
+  const locateLng = locateTarget.lng;
+  const locate = useCallback(() => {
+    following.current = true;
+    // A pending initial/inset fit must not undo the user's explicit reset.
+    if (fitTimeout.current !== null) clearTimeout(fitTimeout.current);
+    fitTimeout.current = null;
+    const camera = {
+      center: { latitude: locateLat, longitude: locateLng },
+      zoom: LOCATE_ZOOM,
+      altitude: LOCATE_ALTITUDE,
+      heading: 0,
+      pitch: 0,
+    };
+    if (reduceMotion) ref.current?.setCamera(camera);
+    else ref.current?.animateCamera(camera, { duration: 300 });
+  }, [locateLat, locateLng, reduceMotion]);
+
+  const previousRecenterKey = useRef(recenterKey);
+  useEffect(() => {
+    if (previousRecenterKey.current === recenterKey) return;
+    previousRecenterKey.current = recenterKey;
+    locate();
+  }, [recenterKey, locate]);
 
   return (
-    <View style={{ flex: 1 }} testID={testID}>
+    <View style={{ flex: 1 }} testID={testID} onLayout={(e) => setMapHeight(e.nativeEvent.layout.height)}>
       <MapView
         ref={ref}
         style={{ flex: 1 }}
@@ -91,13 +150,19 @@ export function TuurMap({
         showsCompass={false}
         toolbarEnabled={false}
         pitchEnabled={false}
-        mapPadding={{ top: 0, left: 0, right: 0, bottom: bottomInset }}
+        mapPadding={{ top: 0, left: 0, right: 0, bottom: cameraBottom }}
         onRegionChangeComplete={(r) => setMapZoom(Math.log2(360 / Math.max(r.longitudeDelta, 1e-6)))}
+        onPanDrag={() => {
+          following.current = false;
+        }}
+        onTouchStart={() => {
+          following.current = false;
+        }}
+        onRegionChangeStart={(_, details) => {
+          if (details.isGesture) following.current = false;
+        }}
         {...(onMapPress ? { onPress: (e) => e.nativeEvent.action !== 'marker-press' && onMapPress() } : {})}
       >
-        {routeDone && routeDone.length > 1 ? (
-          <Polyline coordinates={routeDone.map(toCoord)} strokeColor={ROUTE_DONE_COLOR} strokeWidth={4} />
-        ) : null}
         {route && route.length > 1 ? (
           <>
             <Polyline
@@ -108,10 +173,27 @@ export function TuurMap({
             />
             <Polyline
               coordinates={route.map(toCoord)}
-              strokeColor={navigating ? 'rgba(237,5,22,0.45)' : colors.brand.red}
+              strokeColor={navigating ? 'rgba(237,5,22,0.65)' : colors.brand.red}
               strokeWidth={navigating ? 4 : 4.5}
+              {...(navigating || showRouteLegend ? { lineDashPattern: [6, 8] } : {})}
               lineCap="round"
               lineJoin="round"
+            />
+          </>
+        ) : null}
+        {routeDone && routeDone.length > 1 ? (
+          <>
+            <Polyline
+              coordinates={routeDone.map(toCoord)}
+              strokeColor="#FFFFFF"
+              strokeWidth={8}
+              lineCap="round"
+            />
+            <Polyline
+              coordinates={routeDone.map(toCoord)}
+              strokeColor={ROUTE_DONE_COLOR}
+              strokeWidth={4}
+              lineCap="round"
             />
           </>
         ) : null}
@@ -134,7 +216,12 @@ export function TuurMap({
               coordinate={toCoord(c.location)}
               anchor={{ x: 0.5, y: 0.5 }}
               onPress={() => onSpotPress?.(c.members[0]!.id)}
-              accessibilityLabel={c.members[0]!.name}
+              accessibilityLabel={[
+                c.members[0]!.name,
+                c.members[0]!.interest ? t(`interests.${c.members[0]!.interest}`) : undefined,
+              ]
+                .filter(Boolean)
+                .join(', ')}
               zIndex={c.members[0]!.hot ? 5 : 2}
             >
               <SpotMarker spot={c.members[0]!} />
@@ -149,7 +236,7 @@ export function TuurMap({
               onPress={() =>
                 ref.current?.animateCamera(
                   { center: toCoord(c.location), zoom: mapZoom + 2 },
-                  { duration: 450 },
+                  { duration: reduceMotion ? 0 : 300 },
                 )
               }
             >
@@ -161,9 +248,16 @@ export function TuurMap({
           <Marker
             key={s.id}
             coordinate={toCoord(s.location)}
-            anchor={{ x: 0.5, y: 1 }}
+            anchor={{ x: 0.5, y: 0.5 }}
             onPress={() => onStopPress?.(s.id)}
-            accessibilityLabel={`${s.number}`}
+            accessibilityLabel={[
+              s.number,
+              t(s.state === 'current' ? 'map.next' : s.state === 'visited' ? 'map.walked' : 'map.ahead'),
+              s.interest ? t(`interests.${s.interest}`) : undefined,
+              s.partner ? t('common.partner') : undefined,
+            ]
+              .filter((part) => part !== undefined)
+              .join(', ')}
             zIndex={s.state === 'current' ? 10 : 1}
           >
             <HeartPin
@@ -178,35 +272,21 @@ export function TuurMap({
         ))}
         {user ? (
           <Marker coordinate={toCoord(user)} anchor={{ x: 0.5, y: 0.5 }} zIndex={20}>
-            <UserDot heading={user.heading} label={t('map.position')} />
+            <UserPositionMarker heading={user.heading} label={t('map.position')} />
           </Marker>
         ) : null}
       </MapView>
-      {user && locateButton !== false ? <LocateButton onPress={locate} bottom={bottomInset + 16} /> : null}
-    </View>
-  );
-}
-
-function UserDot({ heading, label }: { heading?: number | undefined; label: string }) {
-  return (
-    <View
-      accessible
-      accessibilityLabel={label}
-      style={{
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 4,
-        transform: [{ rotate: `${heading ?? 0}deg` }],
-      }}
-    >
-      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: colors.ink.primary }} />
+      {showRouteLegend ? (
+        <MapRouteLegend
+          walked={Boolean(routeDone && routeDone.length > 1)}
+          next={navigating}
+          ahead={Boolean(route && route.length > 1)}
+          bottom={bottomInset + 20}
+        />
+      ) : null}
+      {user && locateButton !== false ? (
+        <LocateButton onPress={locate} bottom={bottomInset + locateButtonOffset} />
+      ) : null}
     </View>
   );
 }

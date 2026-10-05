@@ -5,6 +5,7 @@ node_modules
 # build output only (a bare "lib" also ignored apps/web/src/lib, whose sources were then never committed)
 functions/lib/
 dist
+dist-check
 *.log
 .env
 .env.local

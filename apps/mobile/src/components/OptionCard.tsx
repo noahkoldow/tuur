@@ -1,11 +1,14 @@
 import { View } from 'react-native';
-import { Image } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import type { Poi } from '@tuur/shared';
 import { metrics, sys } from '../theme';
-import { Icon } from './Icon';
+import { PlacePhoto } from './PlacePhoto';
+import { PhotoInfo } from './photo-info';
 import { PressableScale } from './PressableScale';
 import { Text } from './Text';
+import { interestOf } from './StopCards';
+import { CategoryBadge } from './category-badge';
+import { INTEREST_ICON } from './icons';
 
 /** Crossroads option (spec 5.3): name, image, walking time and a teaser sentence. */
 export function OptionCard({
@@ -13,66 +16,76 @@ export function OptionCard({
   walkMinutes,
   teaser,
   onPress,
+  disabled = false,
 }: {
   poi: Poi;
   walkMinutes: number;
   teaser?: string | undefined;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const img = poi.imageRefs[0];
+  const interest = interestOf(poi);
   return (
-    <PressableScale
-      scaleTo={0.98}
-      accessibilityRole="button"
-      accessibilityLabel={`${poi.partnerId ? `${t('partner.label')}: ` : ''}${poi.name}. ${t('fork.walk', { minutes: Math.round(walkMinutes) })}. ${teaser ?? ''}`}
-      accessibilityHint={t('fork.go')}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flex: 1,
-        minWidth: 150,
+    <View
+      style={{
+        flexGrow: 1,
+        flexShrink: 1,
+        minWidth: 0,
         borderRadius: metrics.radius.card,
         borderCurve: 'continuous',
-        backgroundColor: pressed ? sys.fill : sys.elevated,
+        backgroundColor: sys.elevated,
         overflow: 'hidden',
-      })}
+      }}
     >
-      <View
-        style={{
-          height: 104,
-          backgroundColor: sys.fill,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+      <PressableScale
+        scaleTo={0.98}
+        accessibilityRole="button"
+        accessibilityLabel={`${poi.partnerId ? `${t('partner.label')}: ` : ''}${poi.name}. ${interest ? `${t(`interests.${interest}`)}. ` : ''}${t('fork.walk', { minutes: Math.round(walkMinutes) })}. ${teaser ?? ''}`}
+        accessibilityHint={t('fork.go')}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
+        onPress={onPress}
+        style={({ pressed }) => ({
+          borderRadius: metrics.radius.card,
+          borderCurve: 'continuous',
+          backgroundColor: pressed ? sys.fill : sys.elevated,
+          overflow: 'hidden',
+          minHeight: 204,
+          justifyContent: 'flex-end',
+          paddingTop: 68,
+        })}
       >
-        {img ? (
-          <Image
-            source={{ uri: img.thumbUrl ?? img.url }}
-            style={{ width: '100%', height: 104 }}
-            contentFit="cover"
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <Icon name="map-pin" size={28} color={sys.labelTertiary} />
-        )}
-      </View>
-      <View style={{ padding: 12, gap: 4 }}>
-        <Text variant="headline" numberOfLines={3}>
-          {poi.name}
-        </Text>
-        <Text variant="footnote">{t('fork.walk', { minutes: Math.round(walkMinutes) })}</Text>
-        {poi.partnerId ? (
-          <Text
-            variant="footnote"
-            color={sys.accentText}
-          >{`${t('partner.adLabel')} · ${t('partner.label')}`}</Text>
-        ) : null}
-        {teaser ? (
-          <Text variant="subheadline" numberOfLines={4} color={sys.label}>
-            {teaser}
+        <PlacePhoto
+          image={img}
+          name={poi.name}
+          icon={interest ? INTEREST_ICON[interest] : 'map-pin'}
+          showInfo={false}
+          style={{ position: 'absolute', inset: 0 }}
+        />
+        <View style={{ padding: 12, gap: 4, backgroundColor: 'rgba(17,17,17,0.76)' }}>
+          {interest ? <CategoryBadge interest={interest} /> : null}
+          <Text variant="headline" color="#FFFFFF" numberOfLines={2}>
+            {poi.name}
           </Text>
-        ) : null}
-      </View>
-    </PressableScale>
+          <Text variant="footnote" color="#FFFFFF">
+            {t('fork.walk', { minutes: Math.round(walkMinutes) })}
+          </Text>
+          {poi.partnerId ? (
+            <Text
+              variant="footnote"
+              color="#FFFFFF"
+            >{`${t('partner.adLabel')} · ${t('partner.label')}`}</Text>
+          ) : null}
+          {teaser ? (
+            <Text variant="subheadline" color="#FFFFFF" numberOfLines={2}>
+              {teaser}
+            </Text>
+          ) : null}
+        </View>
+      </PressableScale>
+      <PhotoInfo image={img} name={poi.name} />
+    </View>
   );
 }

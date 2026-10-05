@@ -1,5 +1,7 @@
 import type { LatLng } from '../geo/geohash';
 import type { WikipediaRef } from '../schemas';
+import { normalizeCommonsFile } from './images';
+import { localContextKind } from './localContext';
 
 /** A POI candidate as delivered by one upstream source, before merge/enrichment. */
 export interface RawPoi {
@@ -27,6 +29,7 @@ interface OverpassElement {
   lat?: number;
   lon?: number;
   center?: { lat: number; lon: number };
+  geometry?: ({ lat: number; lon: number } | null)[];
   tags?: Record<string, string>;
 }
 
@@ -38,8 +41,14 @@ export function parseOverpass(json: unknown): RawPoi[] {
   for (const el of elements) {
     const tags = el.tags ?? {};
     const name = tags['name'] ?? tags['name:en'];
-    const lat = el.lat ?? el.center?.lat;
-    const lng = el.lon ?? el.center?.lon;
+    // A street's bbox center may be inside a building or across a river. Use a real point on the way.
+    const geometry = el.geometry?.filter((point): point is { lat: number; lon: number } => point !== null);
+    const streetPoint =
+      localContextKind(tags) === 'street' && geometry?.length
+        ? geometry[Math.floor(geometry.length / 2)]
+        : undefined;
+    const lat = el.lat ?? streetPoint?.lat ?? el.center?.lat;
+    const lng = el.lon ?? streetPoint?.lon ?? el.center?.lon;
     if (!name || lat === undefined || lng === undefined) continue;
     const names: Record<string, string> = {};
     for (const [k, v] of Object.entries(tags)) {
@@ -62,7 +71,7 @@ export function parseOverpass(json: unknown): RawPoi[] {
       osmTags: tags,
       ...(tags['wikidata'] ? { wikidataId: tags['wikidata'] } : {}),
       ...(wikipedia.length ? { wikipedia } : {}),
-      ...(commons?.startsWith('File:') ? { imageFile: commons } : {}),
+      ...(commons?.startsWith('File:') ? { imageFile: normalizeCommonsFile(commons) } : {}),
     });
   }
   return out;
@@ -75,13 +84,20 @@ export function buildOverpassQuery(b: { south: number; west: number; north: numb
     'nwr["tourism"~"^(attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium)$"]',
     'nwr["historic"]',
     'nwr["heritage"]',
-    'nwr["amenity"~"^(place_of_worship|theatre|arts_centre|marketplace|fountain|townhall|library|university|pub|bar|nightclub|biergarten)$"]',
+    'nwr["amenity"~"^(place_of_worship|theatre|arts_centre|marketplace|fountain|townhall|library|university|restaurant|cafe|food_court|ice_cream|pub|bar|nightclub|biergarten)$"]',
     'nwr["man_made"~"^(tower|lighthouse|windmill|watermill|obelisk)$"]',
     'nwr["leisure"~"^(park|garden|nature_reserve)$"]["name"]',
     'nwr["natural"~"^(peak|waterfall|spring|cave_entrance|beach)$"]',
     'nwr["building"~"^(cathedral|church|chapel|castle|palace|monastery|temple|mosque|synagogue)$"]',
   ];
-  return `[out:json][timeout:60];(${filters.map((f) => `${f}["name"](${bb});`).join('')});out center tags 2000;`;
+  const localFilters = [
+    'way["highway"~"^(residential|living_street|pedestrian|footway|path|cycleway|unclassified|tertiary|secondary)$"]["access"!~"^(private|no|customers|permit)$"]["foot"!="no"]',
+    'node["place"~"^(neighbourhood|quarter|suburb|hamlet|village|locality|square)$"]',
+    'nwr["tourism"="information"]["information"~"^(board|map)$"]',
+    'node["natural"="tree"]',
+  ];
+  // Separate bounded outputs keep a dense street network from crowding all sights out of the response.
+  return `[out:json][timeout:60];(${filters.map((f) => `${f}["name"](${bb});`).join('')})->.sights;.sights out center tags 1500;(${localFilters.map((f) => `${f}["name"](${bb});`).join('')})->.local;.local out body geom 500;`;
 }
 
 // ---------- Wikidata SPARQL ----------
@@ -127,7 +143,7 @@ export function parseWikidata(json: unknown): RawPoi[] {
       location: loc,
       wikidataId: id,
       sitelinks: Number(r.sitelinks?.value ?? 0),
-      ...(file ? { imageFile: `File:${file.replace(/_/g, ' ')}` } : {}),
+      ...(file ? { imageFile: normalizeCommonsFile(file) } : {}),
       ...(r.classLabel?.value ? { instanceOf: [r.classLabel.value] } : {}),
     });
   }
@@ -197,6 +213,7 @@ interface GeneratorPage {
   title: string;
   length?: number;
   fullurl?: string;
+  pageimage?: string;
   coordinates?: { lat: number; lon: number }[];
   pageprops?: { wikibase_item?: string; disambiguation?: string };
 }
@@ -214,6 +231,9 @@ export function parseWikipediaGenerator(json: unknown, lang: string): RawPoi[] {
       names: { [lang]: p.title },
       location: { lat: c.lat, lng: c.lon },
       ...(p.pageprops?.wikibase_item ? { wikidataId: p.pageprops.wikibase_item } : {}),
+      ...(p.pageimage && /\.(?:jpe?g|png|webp)$/i.test(p.pageimage)
+        ? { imageFile: normalizeCommonsFile(p.pageimage) }
+        : {}),
       wikipedia: [
         {
           lang,

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { Entitlement, Wallet } from '@tuur/shared';
 import { getBackend } from '../backend';
+import { accountStep } from '../auth/policy';
 import { createAds } from '../ads/create';
 import type { AdsProvider } from '../ads/types';
 import { createBilling } from './create';
@@ -33,23 +34,31 @@ export function useEntitlementSync() {
   useEffect(() => {
     const backend = getBackend();
     let off: (() => void) | undefined;
+    let generation = 0;
     const offAuth = backend.auth.onChange((u) => {
+      const current = ++generation;
       off?.();
       off = undefined;
-      if (!u) return void useEntitlementStore.setState({ loaded: false, entitlements: [] });
-      off = backend.watchEntitlements((s) =>
-        useEntitlementStore.setState({ loaded: true, entitlements: s.entitlements, wallet: s.wallet }),
-      );
+      useEntitlementStore.setState({
+        loaded: false,
+        entitlements: [],
+        wallet: { balance: 0, rewardBalance: 0 },
+      });
+      if (!u || accountStep(u) !== 'ready') return;
+      off = backend.watchEntitlements((s) => {
+        if (current === generation)
+          useEntitlementStore.setState({ loaded: true, entitlements: s.entitlements, wallet: s.wallet });
+      });
       void getBilling()
         .init(u.uid)
         .catch(() => undefined);
     });
-    void backend.auth.ensureSignedIn().catch(() => undefined);
     return () => {
+      generation++;
       off?.();
       offAuth();
     };
   }, []);
 }
 
-export { canStartTour, canUseSession, subscribed } from './access';
+export { canDownloadTour, canStartTour, canUseSession, subscribed } from './access';

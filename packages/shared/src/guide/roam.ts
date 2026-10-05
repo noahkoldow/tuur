@@ -9,6 +9,8 @@ import {
   type LatLng,
 } from '../geo/geohash';
 import { normalizeName } from '../poi/merge';
+import { rankNearbyPlaces } from '../poi/discovery';
+import { isLocalContextPoi } from '../poi/localContext';
 import type { Poi } from '../schemas';
 import { weightedScore } from '../routing/orienteering';
 
@@ -29,9 +31,9 @@ const NEAR_FIELD_M = 60;
 /** POIs farther than this from the line of travel are not "on the way" (roam does not navigate anywhere). */
 export const MAX_CROSS_TRACK_M = 110;
 
-/** How far ahead to look: depends on the speed (spec 5.4). Vehicles do not roam. */
+/** Look far enough ahead to prepare stories before walking, cycling or car/public-transport arrival. */
 export function corridorLengthM(mode: TravelMode, speedMps: number): number {
-  if (mode === 'vehicle') return 0;
+  if (mode === 'vehicle') return Math.max(1200, Math.min(4000, speedMps * 120));
   if (mode === 'cycling') return Math.max(800, Math.min(2500, speedMps * 150));
   return Math.max(300, Math.min(700, Math.max(speedMps, 1.2) * 240));
 }
@@ -80,8 +82,16 @@ export function pickRoamTarget(inp: RoamInput): Poi | undefined {
   const seen = new Set(inp.seenIds);
   const seenNames = new Set(inp.candidates.filter((p) => seen.has(p.id)).map((p) => normalizeName(p.name)));
   let best: { p: Poi; v: number } | undefined;
+  let local: { p: Poi; v: number } | undefined;
   for (const p of inp.candidates) {
-    if (seen.has(p.id) || p.hidden || !p.accessible || p.interests.length === 0 || p.score < cfg.minScore)
+    const isLocal = isLocalContextPoi(p);
+    if (
+      seen.has(p.id) ||
+      p.hidden ||
+      !p.accessible ||
+      p.interests.length === 0 ||
+      (!isLocal && p.score < cfg.minScore)
+    )
       continue;
     if (seenNames.has(normalizeName(p.name))) continue;
     const dist = distanceMeters(inp.pos, p.location);
@@ -106,8 +116,13 @@ export function pickRoamTarget(inp: RoamInput): Poi | undefined {
         ? 1
         : 1 + Math.cos((angleDiff(bearingDegrees(inp.pos, p.location), inp.heading) * Math.PI) / 180) * 0.3;
     const v = (weightedScore(c, inp.interests) * align) / (1 + dist / 250);
+    if (isLocal) {
+      if (dist <= 220 && (!local || v > local.v || (v === local.v && p.id < local.p.id))) local = { p, v };
+      continue;
+    }
     if (!best || v > best.v + 1e-9 || (Math.abs(v - best.v) <= 1e-9 && p.id < best.p.id)) best = { p, v };
   }
+  if (local && (!best || distanceMeters(inp.pos, best.p.location) >= 450)) return local.p;
   return best?.p;
 }
 
@@ -115,16 +130,8 @@ export function pickRoamTarget(inp: RoamInput): Poi | undefined {
 export const ROAM_START_MAX_M = 1500;
 
 /**
- * Start options for roam (spec 5.4, owner feedback 2026-09-30): the best nearby POIs ranked by interest-weighted
- * score per walking distance, so "just go" leads to a worthwhile first stop that is still close. Deterministic.
+ * Start options use the same significance-aware, deduplicated discovery as an active roam.
  */
 export function rankRoamStarts(pos: LatLng, candidates: Poi[], interests: Interest[], limit = 5): Poi[] {
-  return candidates
-    .filter((p) => p.accessible && !p.hidden)
-    .map((p) => ({ p, d: distanceMeters(pos, p.location) }))
-    .filter((x) => x.d <= ROAM_START_MAX_M)
-    .map((x) => ({ ...x, v: weightedScore(x.p, interests) / (1 + x.d / 300) }))
-    .sort((a, b) => b.v - a.v || a.d - b.d || a.p.id.localeCompare(b.p.id))
-    .slice(0, limit)
-    .map((x) => x.p);
+  return rankNearbyPlaces(pos, candidates, { interests, limit, maxDistanceM: ROAM_START_MAX_M });
 }

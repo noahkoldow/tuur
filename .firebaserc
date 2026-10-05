@@ -1,1 +1,6 @@
-{ "projects": { "default": "tuur-prod" } }
+{
+  "projects": {
+    "default": "tuur-prod",
+    "beta": "tuur-beta-noehxpo"
+  }
+}

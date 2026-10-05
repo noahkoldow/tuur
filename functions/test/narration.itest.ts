@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_AI_CONFIG,
+  createTourScript,
   buildPois,
   REGION_FIXTURES,
   type AiConfig,
@@ -37,6 +38,7 @@ class CountingLlm implements LlmProvider {
   calls = { narration: 0, facts: 0, transition: 0 };
   constructor(private readonly inner: MockLlmProvider) {}
   classifyInterests: LlmProvider['classifyInterests'] = (i) => this.inner.classifyInterests(i as never);
+  selectNearby: LlmProvider['selectNearby'] = (r) => this.inner.selectNearby(r);
   async generateNarration(r: Parameters<LlmProvider['generateNarration']>[0]) {
     this.calls.narration++;
     await new Promise((res) => setTimeout(res, 30));
@@ -95,7 +97,15 @@ beforeEach(async () => {
   await db.collection('pois').doc(poi.id).set(poi);
 });
 
-const req = { poiId: 'wd_Q82425', lang: 'de', lengthTier: 'medium', primaryInterest: 'history' };
+const req = {
+  poiId: 'wd_Q82425',
+  lang: 'de',
+  lengthTier: 'medium',
+  primaryInterest: 'history',
+  context: {
+    script: createTourScript({ lang: 'de', interests: ['history'], instanceId: 'personal-test-walk' }),
+  },
+};
 
 describe('getNarration', () => {
   it('generates once, then the second identical call hits the cache without model calls', async () => {
@@ -107,7 +117,7 @@ describe('getNarration', () => {
     expect(store.files.has(first.audioPath)).toBe(true);
     const callsAfterFirst = { ...llm.calls };
 
-    const second = await getNarration(deps, 'u2', req);
+    const second = await getNarration(deps, 'u1', req);
     expect(second.cached).toBe(true);
     expect(second.key).toBe(first.key);
     expect(llm.calls).toEqual(callsAfterFirst);
@@ -122,19 +132,19 @@ describe('getNarration', () => {
     expect(llm.calls.narration).toBe(3);
   });
 
-  it('renders another voice as audio only: the text is generated once and reused for every voice', async () => {
+  it('renders another voice as audio only inside the same personal walk', async () => {
     const { deps, store, llm } = mk();
     const mara = await getNarration(deps, 'u1', { ...req, voice: 'mara' });
     const calls = { ...llm.calls };
-    const jonas = await getNarration(deps, 'u2', { ...req, voice: 'jonas' });
+    const jonas = await getNarration(deps, 'u1', { ...req, voice: 'jonas' });
     expect(jonas.key).toBe(mara.key);
     expect(jonas.text).toBe(mara.text);
     expect(jonas.audioPath).not.toBe(mara.audioPath);
     expect(store.files.has(jonas.audioPath)).toBe(true);
     expect(llm.calls).toEqual(calls);
     // second request for the same voice is a plain cache hit; unknown voices fall back to the default
-    expect((await getNarration(deps, 'u3', { ...req, voice: 'jonas' })).audioPath).toBe(jonas.audioPath);
-    expect((await getNarration(deps, 'u3', { ...req, voice: 'nobody' })).audioPath).toBe(mara.audioPath);
+    expect((await getNarration(deps, 'u1', { ...req, voice: 'jonas' })).audioPath).toBe(jonas.audioPath);
+    expect((await getNarration(deps, 'u1', { ...req, voice: 'nobody' })).audioPath).toBe(mara.audioPath);
   });
 
   it('lays out paragraph timings on a monotonic timeline that matches the audio duration', async () => {
@@ -191,7 +201,7 @@ describe('getNarration', () => {
 
   it('runs 5 parallel requests for one key with a single generation (single flight)', async () => {
     const { deps, llm } = mk();
-    const results = await Promise.all(Array.from({ length: 5 }, (_, i) => getNarration(deps, `u${i}`, req)));
+    const results = await Promise.all(Array.from({ length: 5 }, () => getNarration(deps, 'u1', req)));
     expect(new Set(results.map((r) => r.key)).size).toBe(1);
     expect(llm.calls.narration).toBe(1);
   });
@@ -218,23 +228,41 @@ describe('getNarration', () => {
       details: { reason: 'kill_switch' },
     });
     expect((await getNarration(off.deps, 'u1', req)).cached).toBe(true);
+    expect(off.llm.calls.narration).toBe(0);
     const broke = mk({}, { dailyBudgetUsd: 0.0000001 });
-    await expect(getNarration(broke.deps, 'u1', { ...req, lang: 'fr' }))
-      .resolves.toBeDefined()
-      .catch(() => undefined);
+    await expect(getNarration(broke.deps, 'u1', { ...req, lang: 'en' })).rejects.toMatchObject({
+      code: 'unavailable',
+      details: { reason: 'daily_budget' },
+    });
+    expect(broke.llm.calls.narration).toBe(0);
+    expect((await getNarration(broke.deps, 'u1', req)).cached).toBe(true);
   });
 
   it('logs usage with cost per call and aggregates per day and area', async () => {
-    const { deps } = mk();
-    await getNarration(deps, 'u1', req);
+    const tts = new MockTtsProvider();
+    const synthesize = vi.spyOn(tts, 'synthesize');
+    const { deps, llm } = mk({ tts });
+    const narration = await getNarration(deps, 'u1', req);
+    expect(llm.calls.narration).toBe(1);
+    expect(llm.calls.facts).toBe(1);
+    expect(synthesize).toHaveBeenCalledTimes(narration.paragraphs.length);
     const logs = await db.collection('usageLogs').get();
     const kinds = logs.docs.map((d) => d.get('kind')).sort();
-    expect(kinds).toEqual(['factcheck', 'narration', 'tts']);
-    expect(logs.docs.every((d) => typeof d.get('costUsd') === 'number')).toBe(true);
+    expect(kinds).toEqual(['factcheck', 'narration', ...narration.paragraphs.map(() => 'tts')]);
+    expect(logs.docs.every((d) => Number.isFinite(d.get('costUsd')) && d.get('costUsd') > 0)).toBe(true);
     expect(logs.docs.some((d) => 'uid' in d.data())).toBe(false);
+    const totalCost = logs.docs.reduce((sum, d) => sum + Number(d.get('costUsd')), 0);
     const day = new Date(clock).toISOString().slice(0, 10);
-    expect(Number((await db.collection('usageDaily').doc(day).get()).get('calls'))).toBe(3);
-    expect((await db.collection('usageDailyAreas').doc(`${day}_${poi.tile}`).get()).exists).toBe(true);
+    const global = await db.collection('usageDaily').doc(day).get();
+    const area = await db.collection('usageDailyAreas').doc(`${day}_${poi.tile}`).get();
+    for (const aggregate of [global, area]) {
+      expect(aggregate.get('calls')).toBe(2 + narration.paragraphs.length);
+      expect(aggregate.get('costUsd')).toBeCloseTo(totalCost, 10);
+      expect(aggregate.get('reservedUsd')).toBeCloseTo(0, 10);
+    }
+    const reservations = await db.collection('usageReservations').get();
+    expect(reservations.size).toBe(logs.size);
+    expect(reservations.docs.every((d) => d.get('status') === 'settled')).toBe(true);
   });
 
   it('does not serve hidden POIs and validates input', async () => {
@@ -246,7 +274,7 @@ describe('getNarration', () => {
     });
   });
 
-  it('one report does not pull a narration; three distinct reporters do (audio removed, regenerated next time)', async () => {
+  it('only the owner can flag their private recording, which is then regenerated for that same walk', async () => {
     const { deps, store, llm } = mk();
     const first = await getNarration(deps, 'u1', req);
     await reportNarrationIssue(deps, 'u2', { narrationKey: first.key, reason: 'wrong_fact' });
@@ -255,26 +283,35 @@ describe('getNarration', () => {
     expect(store.files.has(first.audioPath)).toBe(true);
     // reports for keys that do not exist are ignored
     await reportNarrationIssue(deps, 'u9', { narrationKey: 'does__not__exist', reason: 'wrong_fact' });
-    expect((await db.collection('feedback').get()).size).toBe(1);
-    await reportNarrationIssue(deps, 'u4', { narrationKey: first.key, reason: 'wrong_fact' });
-    await reportNarrationIssue(deps, 'u5', { narrationKey: first.key, reason: 'offensive' });
+    expect((await db.collection('feedback').get()).size).toBe(0);
+    await reportNarrationIssue(deps, 'u1', { narrationKey: first.key, reason: 'wrong_fact' });
     expect((await db.collection('narrations').doc(first.key).get()).get('status')).toBe('pending_review');
     expect(store.files.has(first.audioPath)).toBe(false);
-    const again = await getNarration(deps, 'u3', req);
+    const again = await getNarration(deps, 'u1', req);
     expect(again.cached).toBe(false);
     expect(llm.calls.narration).toBe(2);
     expect((await db.collection('narrations').doc(first.key).get()).get('status')).toBe('ok');
   });
 
-  it('uses per-user storage for grounded output and never shares it', async () => {
-    const { deps } = mk({}, { groundingEnabled: true });
-    const a = await getNarration(deps, 'alice', req);
-    expect(a.audioPath).toContain('narrations-grounded/alice/');
+  it('refuses unbounded grounding before any model call, cost reservation or audio is produced', async () => {
+    const tts = new MockTtsProvider();
+    const synthesize = vi.spyOn(tts, 'synthesize');
+    const { deps, llm, store } = mk({ tts }, { groundingEnabled: true });
+    for (const uid of ['alice', 'alice', 'bob']) {
+      await expect(getNarration(deps, uid, req)).rejects.toMatchObject({
+        code: 'unavailable',
+        details: { reason: 'grounding_budget_unsupported' },
+      });
+      expect((await db.collection('users').doc(uid).collection('groundedNarrations').get()).size).toBe(0);
+    }
+    expect(llm.calls).toEqual({ narration: 0, facts: 0, transition: 0 });
+    expect(synthesize).not.toHaveBeenCalled();
+    expect(store.files.size).toBe(0);
     expect((await db.collection('narrations').get()).size).toBe(0);
-    const again = await getNarration(deps, 'alice', req);
-    expect(again.cached).toBe(true);
-    const other = await getNarration(deps, 'bob', req);
-    expect(other.cached).toBe(false);
+    expect((await db.collection('usageReservations').get()).size).toBe(0);
+    expect((await db.collection('usageLogs').get()).size).toBe(0);
+    expect((await db.collection('usageDaily').get()).size).toBe(0);
+    expect((await db.collection('usageDailyAreas').get()).size).toBe(0);
   });
 });
 
@@ -284,9 +321,15 @@ describe('getTransition', () => {
     const to = pois.find((p) => p.id === 'wd_Q154591')!;
     await db.collection('pois').doc(to.id).set(to);
     const { deps, llm } = mk();
-    const r = { fromPoiId: poi.id, toPoiId: to.id, lang: 'de', walkMinutes: 7 };
+    const r = {
+      fromPoiId: poi.id,
+      toPoiId: to.id,
+      lang: 'de',
+      walkMinutes: 7,
+      scriptInstanceId: 'personal-test-walk',
+    };
     const a = await getTransition(deps, 'u1', r);
-    const b = await getTransition(deps, 'u2', r);
+    const b = await getTransition(deps, 'u1', r);
     expect(a.cached).toBe(false);
     expect(b.cached).toBe(true);
     expect(llm.calls.transition).toBe(1);

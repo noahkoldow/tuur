@@ -2,6 +2,44 @@ import { z } from 'zod';
 import { LENGTH_TIERS, type LengthTier } from '../constants';
 import { expandBounds, type Bounds } from '../geo/geohash';
 import { TourSchema, type Tour } from '../routing/tour';
+import { TourScriptSchema } from '../narration/script';
+
+/** Only a fixed, named itinerary can be saved; a live Explore/Crossroads session has no complete route. */
+export function downloadTourMode(
+  tour: Pick<Tour, 'source' | 'template' | 'id'>,
+): 'tour' | 'planned' | undefined {
+  if (
+    /^(?:roam|fork|explore|crossroads)(?:_|$)/.test(tour.id) ||
+    ['roam', 'fork', 'explore', 'crossroads'].includes(tour.template)
+  )
+    return undefined;
+  if (tour.source === 'planned') return tour.id.startsWith('planned_') ? 'planned' : undefined;
+  return tour.source === 'auto' || tour.source === 'edited' ? 'tour' : undefined;
+}
+
+export const OfflineDownloadAccessSchema = z.object({
+  tourId: z.string(),
+  mode: z.enum(['tour', 'planned']),
+  grantedAt: z.number(),
+  /** null preserves a saved fixed itinerary; finite grants remain supported for expiring access. */
+  expiresAt: z.number().nullable(),
+});
+export type OfflineDownloadAccess = z.infer<typeof OfflineDownloadAccessSchema>;
+
+export function offlineAccessValid(
+  m: Pick<OfflineManifest, 'tour' | 'tourId' | 'access'>,
+  now = Date.now(),
+): boolean {
+  const mode = downloadTourMode(m.tour);
+  if (!mode || m.tour.id !== m.tourId) return false;
+  // Ready-made downloads created before receipts were introduced remain usable.
+  if (!m.access) return mode === 'tour';
+  return (
+    m.access.tourId === m.tourId &&
+    m.access.mode === mode &&
+    (m.access.expiresAt === null || m.access.expiresAt > now)
+  );
+}
 
 /** Offline download of a tour (spec 4.8): map tiles, all narration audios (all tiers), texts, images. */
 export type DownloadItemKind = 'narration' | 'transition' | 'image' | 'tiles';
@@ -113,6 +151,8 @@ export const OfflineManifestSchema = z.object({
   tourId: z.string(),
   lang: z.string(),
   tour: TourSchema,
+  script: TourScriptSchema.optional(),
+  access: OfflineDownloadAccessSchema.optional(),
   narrations: z.record(OfflineNarrationSchema),
   transitions: z.record(
     z.object({ key: z.string(), text: z.string(), audioFile: z.string(), audioDurationMs: z.number() }),

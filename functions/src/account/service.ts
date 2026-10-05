@@ -1,6 +1,8 @@
-import { FieldPath, type Firestore } from 'firebase-admin/firestore';
+import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { syncPartnerPoi, loadPartner, loadPartnerConfig } from '../partners/service';
 import type { PaymentsProvider } from '../partners/payments';
+import { closePurchaseAccount } from '../billing/purchaseLedger';
+import { deletePersonalNarrations } from '../narration/personalStore';
 
 export interface AccountAuth {
   getUser(uid: string): Promise<{
@@ -15,9 +17,10 @@ export interface AccountAuth {
 export interface AccountDeps {
   db: Firestore;
   auth: AccountAuth;
-  payments: PaymentsProvider;
+  /** Resolve only when a billed partner must cancel; ordinary account export/deletion does not require Stripe. */
+  payments: PaymentsProvider | (() => PaymentsProvider);
   now: () => number;
-  /** Removes stored files below a prefix (per-user grounded narrations). */
+  /** Removes stored files below a prefix (personal and grounded narrations). */
   deleteFiles?: (prefix: string) => Promise<void>;
 }
 
@@ -37,8 +40,12 @@ const RATE_LIMIT_PREFIXES = [
   'redeem_',
   'tours_user_',
   'teaser_user_',
+  'nearby_user_',
   'route_',
   'export_data_',
+  'group_create_',
+  'group_join_',
+  'partnerApply_',
 ];
 
 async function deleteByQuery(db: Firestore, q: FirebaseFirestore.Query): Promise<number> {
@@ -64,10 +71,25 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
   const { db } = deps;
   const summary: Record<string, number> = {};
 
+  // Removing a hosted group also revokes guests' access to its copied private route.
+  summary['groupsHosted'] = await deleteByQuery(db, db.collection('groups').where('hostUid', '==', uid));
+  let memberships = 0;
+  for (;;) {
+    const joined = await db.collection('groups').where('members', 'array-contains', uid).limit(300).get();
+    if (joined.empty) break;
+    const batch = db.batch();
+    joined.docs.forEach((d) => batch.update(d.ref, { members: FieldValue.arrayRemove(uid) }));
+    await batch.commit();
+    memberships += joined.size;
+  }
+  summary['groupMemberships'] = memberships;
+
   const partner = await loadPartner(db, uid);
   if (partner) {
-    if (partner.plan.stripeSubscriptionId)
-      await deps.payments.cancelSubscription(partner.plan.stripeSubscriptionId);
+    if (partner.plan.stripeSubscriptionId) {
+      const payments = typeof deps.payments === 'function' ? deps.payments() : deps.payments;
+      await payments.cancelSubscription(partner.plan.stripeSubscriptionId);
+    }
     if (partner.poiId) {
       const { cfg } = await loadPartnerConfig(db);
       await syncPartnerPoi(db, { ...partner, status: 'suspended' }, cfg, deps.now());
@@ -81,6 +103,8 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
     summary['partner'] = 1;
   }
 
+  await closePurchaseAccount(db, uid, deps.now());
+  summary['personalNarrations'] = await deletePersonalNarrations(db, uid, deps.deleteFiles);
   await db.recursiveDelete(db.collection('users').doc(uid));
   summary['invites'] = await deleteByQuery(db, db.collection('invites').where('ownerUid', '==', uid));
   const redeemedInvites = await db.collection('invites').where('redeemedBy', '==', uid).get();
@@ -102,17 +126,16 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
     db.collection('revenuecatEvents').where('uid', '==', uid),
   );
 
-  let limits = 0;
-  for (const prefix of RATE_LIMIT_PREFIXES) {
-    limits += await deleteByQuery(
-      db,
-      db
-        .collection('rateLimits')
-        .where(FieldPath.documentId(), '>=', `${prefix}${uid}`)
-        .where(FieldPath.documentId(), '<=', `${prefix}${uid}`),
-    );
-  }
-  summary['rateLimits'] = limits;
+  // Exact keys preserve accounts whose uid starts with this uid.
+  const limits = await Promise.all(
+    RATE_LIMIT_PREFIXES.map((prefix) =>
+      db.collection('rateLimits').doc(`${prefix}${uid}`.replace(/\//g, '_')).get(),
+    ),
+  );
+  const limitBatch = db.batch();
+  limits.filter((s) => s.exists).forEach((s) => limitBatch.delete(s.ref));
+  await limitBatch.commit();
+  summary['rateLimits'] = limits.filter((s) => s.exists).length;
 
   await deps.deleteFiles?.(`narrations-grounded/${uid}/`);
   await deps.auth.deleteUser(uid);
@@ -128,6 +151,23 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
   const userDoc = await db.collection('users').doc(uid).get();
   const partner = await loadPartner(db, uid);
   const invites = await list(db.collection('invites').where('ownerUid', '==', uid));
+  const groupInfo = (data: Record<string, unknown>, role: 'host' | 'member') => {
+    const tour = data['tour'] as { id?: string } | undefined;
+    return {
+      id: data['id'],
+      role,
+      tourId: tour?.id,
+      mode: data['mode'],
+      status: data['status'],
+      createdAt: data['createdAt'],
+      expiresAt: data['expiresAt'],
+      ...(role === 'host'
+        ? { tour: data['tour'], extraSeats: data['extraSeats'], hostSubscriber: data['hostSubscriber'] }
+        : {}),
+    };
+  };
+  const hostedGroups = await list(db.collection('groups').where('hostUid', '==', uid));
+  const joinedGroups = await list(db.collection('groups').where('members', 'array-contains', uid));
   return {
     generatedAt: deps.now(),
     account: user
@@ -143,7 +183,17 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
     entitlements: await list(db.collection('users').doc(uid).collection('entitlements')),
     wallet: (await db.collection('users').doc(uid).collection('credits').doc('wallet').get()).data() ?? null,
     creditLedger: await list(db.collection('users').doc(uid).collection('creditLedger')),
+    purchases: await list(db.collection('revenuecatPurchases').where('ownerUid', '==', uid)),
+    subscriptions: await list(db.collection('revenuecatSubscriptions').where('ownerUid', '==', uid)),
+    // Include participation without exposing invite hashes or other members' identities/private routes.
+    groups: [
+      ...hostedGroups.map((g) => groupInfo(g, 'host')),
+      ...joinedGroups
+        .filter((g) => (g as Record<string, unknown>)['hostUid'] !== uid)
+        .map((g) => groupInfo(g, 'member')),
+    ],
     consents: await list(db.collection('users').doc(uid).collection('consents')),
+    personalNarrations: await list(db.collection('narrations').where('ownerUid', '==', uid)),
     plannedRoutes: (await list(db.collection('users').doc(uid).collection('sessions'))).map((s) => ({
       id: s.id,
       kind: (s as Record<string, unknown>)['kind'],

@@ -14,6 +14,7 @@ import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import type { Offer } from '../src/billing/types';
 import {
+  canDownloadTour,
   canStartTour,
   canUseSession,
   getAds,
@@ -28,6 +29,7 @@ type Params = {
   tourId?: string;
   placeId?: string;
   mode?: 'planned' | 'fork' | 'roam';
+  intent?: 'download';
 };
 
 /**
@@ -35,7 +37,7 @@ type Params = {
  * and restore. Entitlements are only ever read from the server; this screen closes itself once access exists.
  */
 export default function Paywall() {
-  const { kind = 'tour', tourId, placeId, mode = 'planned' } = useLocalSearchParams<Params>();
+  const { kind = 'tour', tourId, placeId, mode = 'planned', intent } = useLocalSearchParams<Params>();
   const { t, i18n } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
@@ -46,8 +48,16 @@ export default function Paywall() {
   const [waitingReward, setWaitingReward] = useState(false);
   const [consent, setConsent] = useState(false);
 
-  const unlocked =
-    kind === 'tour' && tourId ? canStartTour(ent, tourId, false) : canUseSession(ent, mode, placeId);
+  const downloading = intent === 'download';
+  const unlocked = downloading
+    ? canDownloadTour(ent, {
+        ...(tourId ? { tourId } : {}),
+        ...(placeId ? { placeId } : {}),
+        mode: kind === 'tour' ? 'tour' : mode,
+      })
+    : kind === 'tour' && tourId
+      ? canStartTour(ent, tourId, false)
+      : canUseSession(ent, mode, placeId);
   const isSub = subscribed(ent);
 
   useEffect(() => {
@@ -88,11 +98,13 @@ export default function Paywall() {
     }
   };
 
-  const total = ent.wallet.balance + (kind === 'tour' ? ent.wallet.rewardBalance : 0);
+  const total = ent.wallet.balance + (kind === 'tour' && !downloading ? ent.wallet.rewardBalance : 0);
   const spend = () =>
     run('spend', async () => {
       await backend.spendCredit(
-        kind === 'tour' ? { kind: 'tour', tourId: tourId! } : { kind: 'session', placeId: placeId! },
+        kind === 'tour'
+          ? { kind: 'tour', tourId: tourId!, ...(downloading ? { paidOnly: true } : {}) }
+          : { kind: 'session', placeId: placeId! },
       );
     });
 
@@ -162,10 +174,18 @@ export default function Paywall() {
         <View style={{ gap: 8 }}>
           <Wordmark width={72} />
           <Text variant="title1" accessibilityRole="header">
-            {kind === 'tour' ? t('paywall.title') : t('paywall.titleSession')}
+            {downloading
+              ? t('paywall.titleDownload')
+              : kind === 'tour'
+                ? t('paywall.title')
+                : t('paywall.titleSession')}
           </Text>
           <Text variant="body" color={sys.labelSecondary}>
-            {kind === 'tour' ? t('paywall.subtitleTour') : t('paywall.subtitleSession')}
+            {downloading
+              ? t('paywall.subtitleDownload')
+              : kind === 'tour'
+                ? t('paywall.subtitleTour')
+                : t('paywall.subtitleSession')}
           </Text>
         </View>
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
@@ -174,7 +194,7 @@ export default function Paywall() {
         {total > 0 ? (
           <Card>
             <Text variant="headline">{t('paywall.balance', { count: total })}</Text>
-            {kind === 'tour' && ent.wallet.rewardBalance > 0 ? (
+            {kind === 'tour' && !downloading && ent.wallet.rewardBalance > 0 ? (
               <Text variant="footnote">
                 {t('paywall.balanceReward', { count: ent.wallet.rewardBalance })}
               </Text>
@@ -235,7 +255,7 @@ export default function Paywall() {
           </Card>
         ) : null}
 
-        {kind === 'tour' && !isSub ? (
+        {kind === 'tour' && !isSub && !downloading ? (
           <Card>
             <Button
               variant="secondary"

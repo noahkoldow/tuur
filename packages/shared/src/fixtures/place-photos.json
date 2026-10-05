@@ -1,0 +1,377 @@
+[
+  {
+    "article": "Brandenburg Gate",
+    "sourceIds": ["way/1", "Q82425"],
+    "image": {
+      "file": "File:Brandenburger Tor abends.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a6/Brandenburger_Tor_abends.jpg/960px-Brandenburger_Tor_abends.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a6/Brandenburger_Tor_abends.jpg/960px-Brandenburger_Tor_abends.jpg",
+      "author": "Thomas Wolf, www.foto-tw.de",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Brandenburger_Tor_abends.jpg"
+    }
+  },
+  {
+    "article": "Reichstag building",
+    "sourceIds": ["way/2", "Q4340"],
+    "image": {
+      "file": "File:Reichstag building Berlin view from west before sunset.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c7/Reichstag_building_Berlin_view_from_west_before_sunset.jpg/960px-Reichstag_building_Berlin_view_from_west_before_sunset.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c7/Reichstag_building_Berlin_view_from_west_before_sunset.jpg/960px-Reichstag_building_Berlin_view_from_west_before_sunset.jpg",
+      "author": "Jürgen Matern",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Reichstag_building_Berlin_view_from_west_before_sunset.jpg"
+    }
+  },
+  {
+    "article": "Memorial to the Murdered Jews of Europe",
+    "sourceIds": ["way/3", "Q151550"],
+    "image": {
+      "file": "File:Memorial to the Murdered Jews of Europeabove.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f3/Memorial_to_the_Murdered_Jews_of_Europeabove.jpg/960px-Memorial_to_the_Murdered_Jews_of_Europeabove.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f3/Memorial_to_the_Murdered_Jews_of_Europeabove.jpg/960px-Memorial_to_the_Murdered_Jews_of_Europeabove.jpg",
+      "author": "Alexander Blum",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Memorial_to_the_Murdered_Jews_of_Europeabove.jpg"
+    }
+  },
+  {
+    "article": "Pergamon Museum",
+    "sourceIds": ["way/4", "Q154591"],
+    "image": {
+      "file": "File:Pergamonmuseum Front.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/46/Pergamonmuseum_Front.jpg/960px-Pergamonmuseum_Front.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/46/Pergamonmuseum_Front.jpg/960px-Pergamonmuseum_Front.jpg",
+      "author": "Raimond Spekking",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Pergamonmuseum_Front.jpg"
+    }
+  },
+  {
+    "article": "Neues Museum",
+    "sourceIds": ["way/5"],
+    "image": {
+      "file": "File:Berlin Neues Museum 001.JPG",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/dd/Berlin_Neues_Museum_001.JPG/960px-Berlin_Neues_Museum_001.JPG",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/dd/Berlin_Neues_Museum_001.JPG/960px-Berlin_Neues_Museum_001.JPG",
+      "author": "Janericloebe",
+      "license": "Public domain",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_Neues_Museum_001.JPG"
+    }
+  },
+  {
+    "article": "Berlin Cathedral",
+    "sourceIds": ["way/6", "Q154548"],
+    "image": {
+      "file": "File:141227 Berliner Dom.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/84/141227_Berliner_Dom.jpg/960px-141227_Berliner_Dom.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/84/141227_Berliner_Dom.jpg/960px-141227_Berliner_Dom.jpg",
+      "author": "Ansgar Koreng",
+      "license": "CC BY 3.0 de",
+      "licenseUrl": "https://creativecommons.org/licenses/by/3.0/de/deed.en",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:141227_Berliner_Dom.jpg"
+    }
+  },
+  {
+    "article": "Checkpoint Charlie",
+    "sourceIds": ["node/7"],
+    "image": {
+      "file": "File:Berlin - Checkpoint Charlie 1963.jpg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/7/75/Berlin_-_Checkpoint_Charlie_1963.jpg",
+      "thumbUrl": "https://upload.wikimedia.org/wikipedia/commons/7/75/Berlin_-_Checkpoint_Charlie_1963.jpg",
+      "author": "Roger Wollstadt",
+      "license": "CC BY-SA 2.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_-_Checkpoint_Charlie_1963.jpg"
+    }
+  },
+  {
+    "article": "Gendarmenmarkt",
+    "sourceIds": ["node/8", "Q157525"],
+    "image": {
+      "file": "File:Gendarmenmarkt Panorama.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/24/Gendarmenmarkt_Panorama.jpg/960px-Gendarmenmarkt_Panorama.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/24/Gendarmenmarkt_Panorama.jpg/960px-Gendarmenmarkt_Panorama.jpg",
+      "author": "Marek Heise Fotografie, Berlin",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Gendarmenmarkt_Panorama.jpg"
+    }
+  },
+  {
+    "article": "Tiergarten (park)",
+    "sourceIds": ["way/9", "Q101777"],
+    "image": {
+      "file": "File:Berlin Tiergarten Siegessäule Luftansicht.jpg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/08/Berlin_Tiergarten_Siegess%C3%A4ule_Luftansicht.jpg",
+      "thumbUrl": "https://upload.wikimedia.org/wikipedia/commons/0/08/Berlin_Tiergarten_Siegess%C3%A4ule_Luftansicht.jpg",
+      "author": "beedubz",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "http://creativecommons.org/licenses/by-sa/3.0/",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_Tiergarten_Siegess%C3%A4ule_Luftansicht.jpg"
+    }
+  },
+  {
+    "article": "Neue Wache",
+    "sourceIds": ["way/16", "Q568432"],
+    "image": {
+      "file": "File:Neue Wache, Unter den Linden, Berlin-Mitte, Nacht (HDR).jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f7/Neue_Wache%2C_Unter_den_Linden%2C_Berlin-Mitte%2C_Nacht_%28HDR%29.jpg/960px-Neue_Wache%2C_Unter_den_Linden%2C_Berlin-Mitte%2C_Nacht_%28HDR%29.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f7/Neue_Wache%2C_Unter_den_Linden%2C_Berlin-Mitte%2C_Nacht_%28HDR%29.jpg/960px-Neue_Wache%2C_Unter_den_Linden%2C_Berlin-Mitte%2C_Nacht_%28HDR%29.jpg",
+      "author": "Ansgar Koreng",
+      "license": "CC BY 3.0 de",
+      "licenseUrl": "https://creativecommons.org/licenses/by/3.0/de/deed.en",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Neue_Wache,_Unter_den_Linden,_Berlin-Mitte,_Nacht_(HDR).jpg"
+    }
+  },
+  {
+    "article": "Bebelplatz",
+    "sourceIds": ["way/17"],
+    "image": {
+      "file": "File:Berlin Bebelplatz asv2018-05 img3.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/39/Berlin_Bebelplatz_asv2018-05_img3.jpg/960px-Berlin_Bebelplatz_asv2018-05_img3.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/39/Berlin_Bebelplatz_asv2018-05_img3.jpg/960px-Berlin_Bebelplatz_asv2018-05_img3.jpg",
+      "author": "A.Savin",
+      "license": "FAL",
+      "licenseUrl": "http://artlibre.org/licence/lal/en",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_Bebelplatz_asv2018-05_img3.jpg"
+    }
+  },
+  {
+    "article": "Berlin State Opera",
+    "sourceIds": ["way/18", "Q166492"],
+    "image": {
+      "file": "File:Berlin - Staatsoper Unter den Linden.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cd/Berlin_-_Staatsoper_Unter_den_Linden.jpg/960px-Berlin_-_Staatsoper_Unter_den_Linden.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cd/Berlin_-_Staatsoper_Unter_den_Linden.jpg/960px-Berlin_-_Staatsoper_Unter_den_Linden.jpg",
+      "author": "Marek Śliwecki",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_-_Staatsoper_Unter_den_Linden.jpg"
+    }
+  },
+  {
+    "article": "Humboldt Forum",
+    "sourceIds": ["way/19", "Q116336"],
+    "image": {
+      "file": "File:Humboldt Forum Foyer-002.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1f/Humboldt_Forum_Foyer-002.jpg/960px-Humboldt_Forum_Foyer-002.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1f/Humboldt_Forum_Foyer-002.jpg/960px-Humboldt_Forum_Foyer-002.jpg",
+      "author": "Fridolin freudenfett",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Humboldt_Forum_Foyer-002.jpg"
+    }
+  },
+  {
+    "article": "Zeughaus",
+    "sourceIds": ["way/20", "Q161080"],
+    "image": {
+      "file": "File:Zeughaus Berlin 2012.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f4/Zeughaus_Berlin_2012.jpg/960px-Zeughaus_Berlin_2012.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f4/Zeughaus_Berlin_2012.jpg/960px-Zeughaus_Berlin_2012.jpg",
+      "author": "Avda",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Zeughaus_Berlin_2012.jpg"
+    }
+  },
+  {
+    "article": "Friedrichswerder Church",
+    "sourceIds": ["node/21", "Q546510"],
+    "image": {
+      "file": "File:Berlin - Friedrichswerdersche Kirche - Innenansicht (9734).jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bb/Berlin_-_Friedrichswerdersche_Kirche_-_Innenansicht_%289734%29.jpg/960px-Berlin_-_Friedrichswerdersche_Kirche_-_Innenansicht_%289734%29.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bb/Berlin_-_Friedrichswerdersche_Kirche_-_Innenansicht_%289734%29.jpg/960px-Berlin_-_Friedrichswerdersche_Kirche_-_Innenansicht_%289734%29.jpg",
+      "author": "T meltzer",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Berlin_-_Friedrichswerdersche_Kirche_-_Innenansicht_(9734).jpg"
+    }
+  },
+  {
+    "article": "Plönlein",
+    "sourceIds": ["way/101"],
+    "image": {
+      "file": "File:Plönlein, Rothenburg ob der Tauber, Alemania, 2023-06-17, DD 36.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Pl%C3%B6nlein%2C_Rothenburg_ob_der_Tauber%2C_Alemania%2C_2023-06-17%2C_DD_36.jpg/960px-Pl%C3%B6nlein%2C_Rothenburg_ob_der_Tauber%2C_Alemania%2C_2023-06-17%2C_DD_36.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Pl%C3%B6nlein%2C_Rothenburg_ob_der_Tauber%2C_Alemania%2C_2023-06-17%2C_DD_36.jpg/960px-Pl%C3%B6nlein%2C_Rothenburg_ob_der_Tauber%2C_Alemania%2C_2023-06-17%2C_DD_36.jpg",
+      "author": "Diego Delso",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Pl%C3%B6nlein,_Rothenburg_ob_der_Tauber,_Alemania,_2023-06-17,_DD_36.jpg"
+    }
+  },
+  {
+    "article": "St. James's Church, Rothenburg ob der Tauber",
+    "sourceIds": ["way/102", "Q691456"],
+    "image": {
+      "file": "File:St. Jakob Kirche Rothenburg 2014.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/St._Jakob_Kirche_Rothenburg_2014.jpg/960px-St._Jakob_Kirche_Rothenburg_2014.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/St._Jakob_Kirche_Rothenburg_2014.jpg/960px-St._Jakob_Kirche_Rothenburg_2014.jpg",
+      "author": "Tuxyso",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:St._Jakob_Kirche_Rothenburg_2014.jpg"
+    }
+  },
+  {
+    "article": "Rathaus Rothenburg",
+    "sourceIds": ["way/103"],
+    "image": {
+      "file": "File:Rathaus & Marktplatz Rothenburg Tauber 029-vBh.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/73/Rathaus_%26_Marktplatz_Rothenburg_Tauber_029-vBh.jpg/960px-Rathaus_%26_Marktplatz_Rothenburg_Tauber_029-vBh.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/73/Rathaus_%26_Marktplatz_Rothenburg_Tauber_029-vBh.jpg/960px-Rathaus_%26_Marktplatz_Rothenburg_Tauber_029-vBh.jpg",
+      "author": "Pedelecs",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Rathaus_%26_Marktplatz_Rothenburg_Tauber_029-vBh.jpg"
+    }
+  },
+  {
+    "article": "Burggarten Rothenburg",
+    "sourceIds": ["way/105"],
+    "image": {
+      "file": "File:Rothenburg ob der Tauber, Burggarten (5).jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/67/Rothenburg_ob_der_Tauber%2C_Burggarten_%285%29.jpg/960px-Rothenburg_ob_der_Tauber%2C_Burggarten_%285%29.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/67/Rothenburg_ob_der_Tauber%2C_Burggarten_%285%29.jpg/960px-Rothenburg_ob_der_Tauber%2C_Burggarten_%285%29.jpg",
+      "author": "Palickap",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Rothenburg_ob_der_Tauber,_Burggarten_(5).jpg"
+    }
+  },
+  {
+    "article": "Mittelalterliches Kriminalmuseum",
+    "sourceIds": ["node/106"],
+    "image": {
+      "file": "File:50 000 Exponate aus 1000 Jahren Kriminalgeschichte zeigt das Kriminalmuseum Rothenburg ob der Tauber. 42.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/50_000_Exponate_aus_1000_Jahren_Kriminalgeschichte_zeigt_das_Kriminalmuseum_Rothenburg_ob_der_Tauber._42.jpg/960px-50_000_Exponate_aus_1000_Jahren_Kriminalgeschichte_zeigt_das_Kriminalmuseum_Rothenburg_ob_der_Tauber._42.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/50_000_Exponate_aus_1000_Jahren_Kriminalgeschichte_zeigt_das_Kriminalmuseum_Rothenburg_ob_der_Tauber._42.jpg/960px-50_000_Exponate_aus_1000_Jahren_Kriminalgeschichte_zeigt_das_Kriminalmuseum_Rothenburg_ob_der_Tauber._42.jpg",
+      "author": "Holger Uwe Schmitt",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:50_000_Exponate_aus_1000_Jahren_Kriminalgeschichte_zeigt_das_Kriminalmuseum_Rothenburg_ob_der_Tauber._42.jpg"
+    }
+  },
+  {
+    "article": "Yasaka Shrine",
+    "sourceIds": ["way/301", "Q1136528"],
+    "image": {
+      "file": "File:South Tower Gate of Yasaka Shrine in Kyoto, 20240820 1706 5167.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d6/South_Tower_Gate_of_Yasaka_Shrine_in_Kyoto%2C_20240820_1706_5167.jpg/960px-South_Tower_Gate_of_Yasaka_Shrine_in_Kyoto%2C_20240820_1706_5167.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d6/South_Tower_Gate_of_Yasaka_Shrine_in_Kyoto%2C_20240820_1706_5167.jpg/960px-South_Tower_Gate_of_Yasaka_Shrine_in_Kyoto%2C_20240820_1706_5167.jpg",
+      "author": "Jakub Hałun",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:South_Tower_Gate_of_Yasaka_Shrine_in_Kyoto,_20240820_1706_5167.jpg"
+    }
+  },
+  {
+    "article": "Kiyomizu-dera",
+    "sourceIds": ["way/302", "Q193706"],
+    "image": {
+      "file": "File:Kiyomizu.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3c/Kiyomizu.jpg/960px-Kiyomizu.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3c/Kiyomizu.jpg/960px-Kiyomizu.jpg",
+      "author": "Jordy Meow",
+      "license": "CC BY-SA 3.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Kiyomizu.jpg"
+    }
+  },
+  {
+    "article": "Maruyama Park",
+    "sourceIds": ["way/303", "Q11526873"],
+    "image": {
+      "file": "File:251213 Maruyama Park Kyoto Japan08s3.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2c/251213_Maruyama_Park_Kyoto_Japan08s3.jpg/960px-251213_Maruyama_Park_Kyoto_Japan08s3.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2c/251213_Maruyama_Park_Kyoto_Japan08s3.jpg/960px-251213_Maruyama_Park_Kyoto_Japan08s3.jpg",
+      "author": "663highland",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:251213_Maruyama_Park_Kyoto_Japan08s3.jpg"
+    }
+  },
+  {
+    "article": "Gion",
+    "sourceIds": ["way/304"],
+    "image": {
+      "file": "File:150124 Gion Kyoto Japan01s3.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/150124_Gion_Kyoto_Japan01s3.jpg/960px-150124_Gion_Kyoto_Japan01s3.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/23/150124_Gion_Kyoto_Japan01s3.jpg/960px-150124_Gion_Kyoto_Japan01s3.jpg",
+      "author": "663highland",
+      "license": "CC BY 2.5",
+      "licenseUrl": "https://creativecommons.org/licenses/by/2.5",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:150124_Gion_Kyoto_Japan01s3.jpg"
+    }
+  },
+  {
+    "article": "Kyoto Municipal Museum of Art",
+    "sourceIds": ["node/307"],
+    "image": {
+      "file": "File:Kyoto Municipal Museum of Art 1933 ⅱ.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/63/Kyoto_Municipal_Museum_of_Art_1933_%E2%85%B1.jpg/960px-Kyoto_Municipal_Museum_of_Art_1933_%E2%85%B1.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/63/Kyoto_Municipal_Museum_of_Art_1933_%E2%85%B1.jpg/960px-Kyoto_Municipal_Museum_of_Art_1933_%E2%85%B1.jpg",
+      "author": "Kakidai",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Kyoto_Municipal_Museum_of_Art_1933_%E2%85%B1.jpg"
+    }
+  },
+  {
+    "article": "Ninenzaka",
+    "sourceIds": ["way/309"],
+    "image": {
+      "file": "File:Pedestrian road with pavements and paper umbrellas, Higashiyama-ku, Kyoto, Japan, early morning.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/66/Pedestrian_road_with_pavements_and_paper_umbrellas%2C_Higashiyama-ku%2C_Kyoto%2C_Japan%2C_early_morning.jpg/960px-Pedestrian_road_with_pavements_and_paper_umbrellas%2C_Higashiyama-ku%2C_Kyoto%2C_Japan%2C_early_morning.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/66/Pedestrian_road_with_pavements_and_paper_umbrellas%2C_Higashiyama-ku%2C_Kyoto%2C_Japan%2C_early_morning.jpg/960px-Pedestrian_road_with_pavements_and_paper_umbrellas%2C_Higashiyama-ku%2C_Kyoto%2C_Japan%2C_early_morning.jpg",
+      "author": "Basile Morin",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Pedestrian_road_with_pavements_and_paper_umbrellas,_Higashiyama-ku,_Kyoto,_Japan,_early_morning.jpg"
+    }
+  },
+  {
+    "article": "Kōdai-ji",
+    "sourceIds": ["way/310", "Q1189396"],
+    "image": {
+      "file": "File:170923 Kodaiji Kyoto Japan09n.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/170923_Kodaiji_Kyoto_Japan09n.jpg/960px-170923_Kodaiji_Kyoto_Japan09n.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/170923_Kodaiji_Kyoto_Japan09n.jpg/960px-170923_Kodaiji_Kyoto_Japan09n.jpg",
+      "author": "663highland",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:170923_Kodaiji_Kyoto_Japan09n.jpg"
+    }
+  },
+  {
+    "article": "Hōkan-ji",
+    "sourceIds": ["way/311"],
+    "image": {
+      "file": "File:Yasaka-dori early morning with street lanterns and the Tower of Yasaka (Hokan-ji Temple), Kyoto, Japan.jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ed/Yasaka-dori_early_morning_with_street_lanterns_and_the_Tower_of_Yasaka_%28Hokan-ji_Temple%29%2C_Kyoto%2C_Japan.jpg/960px-Yasaka-dori_early_morning_with_street_lanterns_and_the_Tower_of_Yasaka_%28Hokan-ji_Temple%29%2C_Kyoto%2C_Japan.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ed/Yasaka-dori_early_morning_with_street_lanterns_and_the_Tower_of_Yasaka_%28Hokan-ji_Temple%29%2C_Kyoto%2C_Japan.jpg/960px-Yasaka-dori_early_morning_with_street_lanterns_and_the_Tower_of_Yasaka_%28Hokan-ji_Temple%29%2C_Kyoto%2C_Japan.jpg",
+      "author": "Basile Morin",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Yasaka-dori_early_morning_with_street_lanterns_and_the_Tower_of_Yasaka_(Hokan-ji_Temple),_Kyoto,_Japan.jpg"
+    }
+  },
+  {
+    "article": "Chion-in",
+    "sourceIds": ["way/312"],
+    "image": {
+      "file": "File:Chion-in (Mieido).jpg",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/15/Chion-in_%28Mieido%29.jpg/960px-Chion-in_%28Mieido%29.jpg",
+      "thumbUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/15/Chion-in_%28Mieido%29.jpg/960px-Chion-in_%28Mieido%29.jpg",
+      "author": "Lombroso",
+      "license": "Public domain",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Chion-in_(Mieido).jpg"
+    }
+  }
+]

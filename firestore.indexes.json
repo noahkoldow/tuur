@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "revenuecatPurchases",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid", "order": "ASCENDING" },
+        { "fieldPath": "remaining", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "partnerStats",
       "queryScope": "COLLECTION",
       "fields": [
@@ -76,6 +84,16 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "creditLedger",
+      "fieldPath": "ref",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
     {
       "collectionGroup": "rateLimits",
       "fieldPath": "expireAt",

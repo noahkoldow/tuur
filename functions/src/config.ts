@@ -2,7 +2,9 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { HttpPoiSources, MockPoiSources, type PoiSourceClient } from './providers/poiSources';
+import { OVERSPAN_ENDPOINT, reserveOverpassRequest } from './providers/overpass';
 import { MockGeocoder, NominatimGeocoder, type GeocodingProvider } from './providers/geocoding';
+import { PeliasGeocoder, reservePeliasRequest } from './providers/pelias';
 import { GeminiLlmProvider, MockLlmProvider, type LlmProvider } from './providers/llm';
 import {
   GeminiTtsProvider,
@@ -19,15 +21,19 @@ import {
 } from './providers/narrationSources';
 import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from './providers/routing';
 import type { NarrationDeps, ObjectStore } from './narration/service';
+import type { TeaserDeps } from './narration/teaser';
 import { BillingError, authorizeContent } from './billing/entitlements';
 import { hasGroupAccess } from './groups/service';
 import { NarrationError } from './narration/service';
 import { MockPayments, StripePayments, type PaymentsProvider } from './partners/payments';
 import type { PartnerDeps } from './partners/service';
+import { validateProvider } from './providers/environment';
 
 export const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 export const ORS_API_KEY = defineSecret('ORS_API_KEY');
-/** Optional: set to `unused` when OpenAI voices are not wanted (personas then use their Gemini fallback). */
+/** Optional: bind only to live POI ingestion when the paid Overspan endpoint is configured. */
+export const OVERPASS_API_KEY = defineSecret('OVERPASS_API_KEY');
+/** Bound only for explicit live TTS; Gemini-only deployments use each persona's Gemini fallback. */
 export const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY');
 export const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
 export const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
@@ -40,30 +46,58 @@ const TTS_PROVIDER = defineString('TUUR_TTS_PROVIDER', { default: 'mock' });
 const POI_PROVIDER = defineString('TUUR_POI_PROVIDER', { default: 'mock' });
 const GEOCODING_PROVIDER = defineString('TUUR_GEOCODING_PROVIDER', { default: 'mock' });
 
+// The CLI loads non-secret environment settings before function discovery. Keep unused providers
+// out of endpoint metadata so deployment does not require placeholder secrets or grant access to them.
+export const NARRATION_SECRETS = [
+  GEMINI_API_KEY,
+  ...(process.env['TUUR_TTS_PROVIDER'] === 'live' ? [OPENAI_API_KEY] : []),
+];
+export const ACCOUNT_SECRETS =
+  process.env['TUUR_PAYMENTS_PROVIDER'] === 'stripe' ? [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET] : [];
+
 export const db = () => getFirestore();
 
 export function poiSources(): PoiSourceClient {
-  return POI_PROVIDER.value() === 'live' ? new HttpPoiSources() : new MockPoiSources();
+  if (validateProvider('TUUR_POI_PROVIDER', POI_PROVIDER.value(), ['live']) !== 'live')
+    return new MockPoiSources();
+  const endpoint = process.env['OVERPASS_ENDPOINT'];
+  const apiKey = endpoint === OVERSPAN_ENDPOINT ? usableKey(OVERPASS_API_KEY.value()) : undefined;
+  return new HttpPoiSources(endpoint, undefined, {
+    ...(apiKey ? { apiKey } : {}),
+    reserveRequest: () => reserveOverpassRequest(db()),
+  });
 }
 export function geocoder(): GeocodingProvider {
-  return GEOCODING_PROVIDER.value() === 'nominatim' ? new NominatimGeocoder() : new MockGeocoder();
+  const provider = validateProvider('TUUR_GEOCODING_PROVIDER', GEOCODING_PROVIDER.value(), [
+    'nominatim',
+    'pelias',
+  ]);
+  if (provider === 'pelias') {
+    const key = usableKey(ORS_API_KEY.value());
+    if (!key) throw new Error('ORS_API_KEY is required when TUUR_GEOCODING_PROVIDER=pelias');
+    return new PeliasGeocoder(key, () => reservePeliasRequest(db()));
+  }
+  return provider === 'nominatim' ? new NominatimGeocoder() : new MockGeocoder();
 }
 export function llm(): LlmProvider {
-  return LLM_PROVIDER.value() === 'gemini'
-    ? new GeminiLlmProvider(GEMINI_API_KEY.value())
-    : new MockLlmProvider();
+  if (validateProvider('TUUR_LLM_PROVIDER', LLM_PROVIDER.value(), ['gemini']) === 'mock')
+    return new MockLlmProvider();
+  const key = usableKey(GEMINI_API_KEY.value());
+  if (!key) throw new Error('GEMINI_API_KEY is required when TUUR_LLM_PROVIDER=gemini');
+  return new GeminiLlmProvider(key);
 }
 const usableKey = (v: string) => (v && v !== 'unused' && v.length > 10 ? v : undefined);
 
-/** `TUUR_TTS_PROVIDER=live` (or legacy `gemini`) enables every provider that has a key; `mock` is silent audio. */
+/** `live` enables configured Gemini/OpenAI voices; `gemini` uses Gemini only; emulator `mock` is silent. */
 export function tts(): RoutedTtsProvider {
-  const mode = TTS_PROVIDER.value();
+  const mode = validateProvider('TUUR_TTS_PROVIDER', TTS_PROVIDER.value(), ['live', 'gemini']);
   if (mode !== 'live' && mode !== 'gemini') {
     const mock = new MockTtsProvider();
     return new RoutedTtsProvider({ gemini: mock, openai: mock });
   }
   const gemini = usableKey(GEMINI_API_KEY.value());
   const openai = mode === 'live' ? usableKey(OPENAI_API_KEY.value()) : undefined;
+  if (!gemini && !openai) throw new Error('A configured TTS provider key is required');
   return new RoutedTtsProvider({
     ...(gemini ? { gemini: new GeminiTtsProvider(gemini) } : {}),
     ...(openai ? { openai: new OpenAiTtsProvider(openai) } : {}),
@@ -73,7 +107,9 @@ export function encoder(): AudioEncoder {
   return new Mp3AudioEncoder();
 }
 export function narrationSources(): NarrationSourceProvider {
-  return POI_PROVIDER.value() === 'live' ? new HttpNarrationSources() : new MockNarrationSources();
+  return validateProvider('TUUR_POI_PROVIDER', POI_PROVIDER.value(), ['live']) === 'live'
+    ? new HttpNarrationSources()
+    : new MockNarrationSources();
 }
 
 export function objectStore(): ObjectStore {
@@ -107,51 +143,62 @@ export function objectStore(): ObjectStore {
   };
 }
 
-export function narrationDeps(): NarrationDeps {
+// Entitlements are checked before any content is served or generated. `system-pregen` is the internal warm-up
+// after tour creation (first stops only, cost brake spec 4.3) and never reaches clients.
+const authorizeNarration: NonNullable<NarrationDeps['authorize']> = async (uid, poi, access, opts) => {
+  if (uid === 'system-pregen') return;
+  // Live group guests ride on the host's tour (online only, never for downloads, D47).
+  if (
+    access?.groupId &&
+    (await hasGroupAccess({ db: db(), now: Date.now }, uid, access.groupId, {
+      poiIds: [poi.id],
+      ...(opts?.download ? { download: true } : {}),
+    }))
+  )
+    return;
+  try {
+    await authorizeContent({ db: db(), now: Date.now }, uid, {
+      tourId: access?.tourId,
+      mode: access?.mode,
+      poiIds: [poi.id],
+      tile: poi.tile,
+      download: opts?.download,
+    });
+  } catch (e) {
+    if (e instanceof BillingError) {
+      throw new NarrationError(
+        e.code === 'not-found' ? 'not-found' : 'permission-denied',
+        e.message,
+        e.details,
+      );
+    }
+    throw e;
+  }
+};
+
+/** Text-only teasers do not instantiate TTS, an encoder or an audio store. */
+export function teaserDeps(): TeaserDeps {
   return {
     db: db(),
     llm: llm(),
+    sources: narrationSources(),
+    now: Date.now,
+    authorize: authorizeNarration,
+  };
+}
+
+export function narrationDeps(): NarrationDeps {
+  return {
+    ...teaserDeps(),
     tts: tts(),
     encoder: encoder(),
-    sources: narrationSources(),
     store: objectStore(),
-    now: Date.now,
-    // Entitlements are checked before any content is served or generated. `system-pregen` is the internal warm-up
-    // after tour creation (first stops only, cost brake spec 4.3) and never reaches clients.
-    authorize: async (uid, poi, access, opts) => {
-      if (uid === 'system-pregen') return;
-      // Live group guests ride on the host's tour (online only, never for downloads, D47).
-      if (
-        access?.groupId &&
-        (await hasGroupAccess({ db: db(), now: Date.now }, uid, access.groupId, {
-          poiIds: [poi.id],
-          ...(opts?.download ? { download: true } : {}),
-        }))
-      )
-        return;
-      try {
-        await authorizeContent({ db: db(), now: Date.now }, uid, {
-          tourId: access?.tourId,
-          mode: access?.mode,
-          poiIds: [poi.id],
-          tile: poi.tile,
-        });
-      } catch (e) {
-        if (e instanceof BillingError) {
-          throw new NarrationError(
-            e.code === 'not-found' ? 'not-found' : 'permission-denied',
-            e.message,
-            e.details,
-          );
-        }
-        throw e;
-      }
-    },
   };
 }
 
 export function routing(): RoutingProvider {
-  return ROUTING_PROVIDER.value() === 'openrouteservice'
+  return validateProvider('TUUR_ROUTING_PROVIDER', ROUTING_PROVIDER.value(), ['openrouteservice']) ===
+    'openrouteservice'
     ? new OrsRoutingProvider(ORS_API_KEY.value())
     : new MockRoutingProvider();
 }
@@ -179,7 +226,7 @@ export function plannedRouteDeps(): TourDeps {
 }
 
 export function payments(): PaymentsProvider {
-  return PAYMENTS_PROVIDER.value() === 'stripe'
+  return validateProvider('TUUR_PAYMENTS_PROVIDER', PAYMENTS_PROVIDER.value(), ['stripe']) === 'stripe'
     ? new StripePayments(STRIPE_SECRET_KEY.value(), STRIPE_WEBHOOK_SECRET.value())
     : new MockPayments();
 }

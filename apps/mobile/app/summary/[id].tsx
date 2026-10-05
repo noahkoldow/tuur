@@ -48,7 +48,15 @@ export default function Summary() {
 
   const stats = useMemo(
     () =>
-      record ? summarizeWalk(record.track, record.stopsVisited, record.startedAt, record.endedAt) : undefined,
+      record
+        ? summarizeWalk(
+            record.track,
+            record.stopsVisited,
+            record.startedAt,
+            record.endedAt,
+            record.trackTotals,
+          )
+        : undefined,
     [record],
   );
   // a badge is new when this tour created it or moved it up a tier

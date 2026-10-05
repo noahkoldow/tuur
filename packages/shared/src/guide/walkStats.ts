@@ -23,12 +23,16 @@ export interface WalkSummary {
   stops: number;
 }
 
+/** Totals retained independently when old track points are thinned for bounded device storage. */
+export type TrackTotals = Pick<WalkSummary, 'distanceM' | 'movingMs'>;
+
 /** Strava-like numbers of a finished tour, computed on the device from the walked track. */
 export function summarizeWalk(
   track: TrackPoint[],
   stops: number,
   startedAt?: number,
   endedAt?: number,
+  totals?: TrackTotals,
 ): WalkSummary {
   let distanceM = 0;
   let movingMs = 0;
@@ -38,6 +42,7 @@ export function summarizeWalk(
     distanceM += d;
     if (dt > 0 && d / (dt / 1000) >= 0.5) movingMs += dt;
   }
+  if (totals) ({ distanceM, movingMs } = totals);
   const first = startedAt ?? track[0]?.ts ?? 0;
   const last = endedAt ?? track[track.length - 1]?.ts ?? first;
   const pace = distanceM >= 200 && movingMs > 0 ? movingMs / 60000 / (distanceM / 1000) : undefined;

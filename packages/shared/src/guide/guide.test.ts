@@ -90,12 +90,13 @@ describe('travel tracker', () => {
 });
 
 describe('pacing', () => {
-  it('chooses the longest tier that fits the window; cycling stays short', () => {
+  it('chooses the longest tier that fits the window; cycling and vehicle travel stay short', () => {
     expect(chooseTier(400, 'walking')).toBe('long');
     expect(chooseTier(120, 'walking')).toBe('medium');
     expect(chooseTier(45, 'walking')).toBe('short');
     expect(chooseTier(5, 'walking')).toBe('short');
     expect(chooseTier(600, 'cycling')).toBe('short');
+    expect(chooseTier(600, 'vehicle')).toBe('short');
     expect(chooseTier(600, 'walking', { ...DEFAULT_PACING, maxTier: 'medium' })).toBe('medium');
   });
 
@@ -104,6 +105,7 @@ describe('pacing', () => {
     expect(etaSeconds(100, 'walking', 0.1)).toBeLessThan(130);
     expect(etaSeconds(100, 'stationary', 0)).toBe(Infinity);
     expect(etaSeconds(420, 'cycling', 4.2)).toBeCloseTo(100, 0);
+    expect(etaSeconds(1600, 'vehicle', 32)).toBeCloseTo(50, 0);
   });
 
   it('starts before arrival so the closing part lands at the stop', () => {
@@ -273,6 +275,8 @@ function harness(
     }
     while (microQueue.length) microQueue.shift()!();
     now = ts;
+    if (playing)
+      dispatch({ type: 'progress', positionMs: Math.max(0, ts - playing.startTs + playing.skipMs), ts });
   };
 
   return {
@@ -349,7 +353,7 @@ describe('guide engine with simulated GPS', () => {
     expect(h.log.plays.every((p) => p.tier === 'short')).toBe(true);
   });
 
-  it('driving pauses the tour with a notice and resumes after slowing down', () => {
+  it('keeps narrating through car/public-transport travel and after returning to walking', () => {
     const h = harness(street(5, 400).stops);
     const p = street(5, 400).path;
     const fixes = simulateRoute(p, {
@@ -360,16 +364,20 @@ describe('guide engine with simulated GPS', () => {
         { untilMeters: Infinity, speedMps: 1.35 },
       ],
     });
-    for (const f of fixes) h.fix(f);
-    const notices = h.log.commands
-      .filter((c) => c.type === 'notice')
-      .map((c) => (c as { code: string }).code);
-    expect(notices).toContain('vehicle_paused');
-    expect(notices).toContain('vehicle_resumed');
-    // nothing is started while paused by vehicle
-    const pausedAt = h.log.commands.findIndex((c) => c.type === 'notice' && c.code === 'vehicle_paused');
-    const resumedAt = h.log.commands.findIndex((c) => c.type === 'notice' && c.code === 'vehicle_resumed');
-    expect(h.log.commands.slice(pausedAt + 1, resumedAt).some((c) => c.type === 'play')).toBe(false);
+    const vehicleCommands: GuideCommand[] = [];
+    const modes = new Set<string>();
+    for (const f of fixes) {
+      const before = h.log.commands.length;
+      h.fix(f);
+      modes.add(h.state.travel.mode);
+      if (h.state.travel.mode === 'vehicle') vehicleCommands.push(...h.log.commands.slice(before));
+    }
+    expect(modes.has('vehicle')).toBe(true);
+    expect(h.state.travel.mode).toBe('walking');
+    expect(h.log.commands.some((c) => c.type === 'pause')).toBe(false);
+    const plays = vehicleCommands.filter((c) => c.type === 'play');
+    expect(plays.length).toBeGreaterThan(0);
+    expect(plays.every((c) => c.tier === 'short')).toBe(true);
   });
 
   it('offers "tell me more" once when the user stands at a finished stop and continues seamlessly', () => {
@@ -421,7 +429,8 @@ describe('guide engine with simulated GPS', () => {
     for (const f of tail(simulateRoute(path, { startTs: T0, speedMps: 1.35 }), 90)) h.fix(f);
     h.tick(T0 + 3_600_000);
     expect(h.state.finished).toBe(true);
-    expect(h.state.visited).toContain('s1');
+    expect(h.state.visited).not.toContain('s1');
+    expect(h.state.skipped).toContain('s1');
   });
 
   it('prefetches lazily: only the current target at the start, later stops shortly before they are needed (cost brake)', () => {

@@ -7,6 +7,7 @@ import { Text } from './Text';
 export function ImageCredit({
   image,
   style,
+  compact = false,
 }: {
   image: {
     author?: string | undefined;
@@ -15,6 +16,7 @@ export function ImageCredit({
     sourceUrl?: string | undefined;
   };
   style?: object;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const link = (label: string, url?: string) =>
@@ -23,8 +25,11 @@ export function ImageCredit({
         variant="caption"
         accessibilityRole="link"
         color={colors.brand.redPressed}
-        style={{ textDecorationLine: 'underline', paddingVertical: 10 }}
-        onPress={() => void Linking.openURL(url)}
+        style={{ textDecorationLine: 'underline', paddingVertical: compact ? 4 : 10 }}
+        onPress={(event) => {
+          event.stopPropagation();
+          void Linking.openURL(url).catch(() => undefined);
+        }}
       >
         {label}
       </Text>
@@ -33,14 +38,15 @@ export function ImageCredit({
     );
   return (
     <View style={[{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 6 }, style]}>
-      <Text variant="caption">
-        {t('player.imageBy', { author: image.author ?? 'Wikimedia Commons', license: '' }).replace(
+      {link(
+        t('player.imageBy', { author: image.author ?? 'Wikimedia Commons', license: '' }).replace(
           /,\s*$/,
           '',
-        )}
-      </Text>
+        ),
+        image.sourceUrl,
+      )}
       {link(image.license, image.licenseUrl)}
-      {image.sourceUrl ? link(t('player.imageSource'), image.sourceUrl) : null}
+      {!compact && image.sourceUrl ? link(t('player.imageSource'), image.sourceUrl) : null}
     </View>
   );
 }

@@ -17,6 +17,9 @@ export interface PlanRequest {
   /** Empty = balanced mix (spec 5). */
   interests: Interest[];
   pois: Poi[];
+  /** Places explicitly chosen by the listener must survive curation and budget fitting. */
+  requiredStopIds?: string[];
+  excludedStopIds?: string[];
   minScore?: number;
   maxCandidates?: number;
   maxLegMinutes?: number;
@@ -49,8 +52,12 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
   const minScore = req.minScore ?? 15;
   const speed = req.profile === 'cycling-regular' ? 14 : 4.5;
   const reachM = ((speed * 1000 * (req.budgetMinutes / 60)) / 1.3) * (req.end ? 1 : 0.5);
-  const pool = dedupeNearby(
-    req.pois.filter((p) => eligible(p, minScore)),
+  const requiredIds = new Set(req.requiredStopIds ?? []);
+  const excludedIds = new Set(req.excludedStopIds ?? []);
+  const required = req.pois.filter((p) => requiredIds.has(p.id) && eligible(p, 0) && !excludedIds.has(p.id));
+  if (required.length !== requiredIds.size) return undefined;
+  const ranked = dedupeNearby(
+    req.pois.filter((p) => eligible(p, minScore) && !excludedIds.has(p.id)),
     DEFAULT_TOUR_RULES.minStopDistanceM,
   )
     .map((p) => ({
@@ -65,6 +72,10 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
     )
     .slice(0, req.maxCandidates ?? 30)
     .map((x) => x.p);
+  const pool = [...required, ...ranked.filter((p) => !requiredIds.has(p.id))].slice(
+    0,
+    Math.max(required.length, req.maxCandidates ?? 30),
+  );
   if (pool.length === 0) return undefined;
 
   // nodes: 0 start, 1..n candidates, n+1 end (destination, or a copy of the start for round trips)
@@ -84,13 +95,16 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
     minutes: m.minutes,
     budgetMinutes: req.budgetMinutes,
     interests: req.interests,
+    forcedIds: [...requiredIds],
     maxLegMinutes: maxLeg,
     maxPartnerShare: req.maxPartnerShare ?? 0.25,
     ...(req.maxPartnerDetourMinutes !== undefined
       ? { maxPartnerDetourMinutes: req.maxPartnerDetourMinutes }
       : {}),
   });
-  if (result.order.length === 0) return undefined;
+  if (!result.order.length || required.some((p) => !result.order.includes(p.id))) return undefined;
+  if (!evaluateOrder({ candidates, minutes: m.minutes, maxLegMinutes: maxLeg }, result.order)?.legsOk)
+    return undefined;
   return assemble(req, pool, m, result.order, result.totalScore);
 }
 
@@ -158,6 +172,7 @@ export function fitToBudget(
   matrix: TravelMatrix,
   budgetMinutes: number,
   interests: Interest[],
+  requiredStopIds: string[] = [],
 ): { order: string[]; totalMinutes: number; dropped: string[] } {
   const cands: Candidate[] = stops.map((p) => ({
     id: p.id,
@@ -167,6 +182,7 @@ export function fitToBudget(
     interests: p.interests,
   }));
   let order = stops.map((s) => s.id);
+  const required = new Set(requiredStopIds);
   const dropped: string[] = [];
   const weight = (id: string) => {
     const c = cands.find((x) => x.id === id)!;
@@ -176,7 +192,10 @@ export function fitToBudget(
     const ev = evaluateOrder({ candidates: cands, minutes: matrix.minutes }, order);
     if (!ev || ev.totalMinutes <= budgetMinutes + 1e-6 || order.length <= 1)
       return { order, totalMinutes: ev?.totalMinutes ?? 0, dropped };
-    const worst = [...order].sort((a, b) => weight(a) - weight(b) || a.localeCompare(b))[0]!;
+    const worst = order
+      .filter((id) => !required.has(id))
+      .sort((a, b) => weight(a) - weight(b) || a.localeCompare(b))[0];
+    if (!worst) return { order, totalMinutes: ev.totalMinutes, dropped };
     order = order.filter((id) => id !== worst);
     dropped.push(worst);
   }

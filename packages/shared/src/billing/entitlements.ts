@@ -88,6 +88,16 @@ export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: numbe
   }
   if (!ctx.tourId) return { allowed: false, reason: 'no_context' };
   if (ctx.tourFree) {
+    if (
+      ents.some(
+        (e) =>
+          e.type === 'tour' &&
+          e.tourId === ctx.tourId &&
+          e.source === 'credit' &&
+          (e.expiresAt === null || e.expiresAt > now),
+      )
+    )
+      return { allowed: true, reason: 'tour' };
     const freeGrant = ents.some(
       (e) =>
         e.type === 'tour' &&
@@ -104,6 +114,40 @@ export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: numbe
   )
     return { allowed: true, reason: 'tour' };
   return { allowed: false, reason: 'denied' };
+}
+
+export type DownloadAccessDecision =
+  | { allowed: true; reason: 'subscription' | 'purchase' | 'session' }
+  | { allowed: false; reason: 'download_not_supported' | 'download_requires_purchase' };
+
+/** New downloads require paid access. Existing complete downloads retain their saved receipt (D56). */
+export function decideDownloadAccess(
+  ents: Entitlement[],
+  ctx: Pick<AccessContext, 'tourId' | 'mode' | 'placeId'>,
+  now: number,
+): DownloadAccessDecision {
+  if (!ctx.tourId || (ctx.mode && ctx.mode !== 'tour' && ctx.mode !== 'planned'))
+    return { allowed: false, reason: 'download_not_supported' };
+  if (isSubscriber(ents, now)) return { allowed: true, reason: 'subscription' };
+  if (ctx.mode === 'planned') {
+    // A paid 24h session is the existing product for private planned itineraries at this place.
+    if (
+      ctx.placeId &&
+      ents.some((e) => e.type === 'session' && e.placeId === ctx.placeId && e.expiresAt > now)
+    )
+      return { allowed: true, reason: 'session' };
+  } else if (
+    ents.some(
+      (e) =>
+        e.type === 'tour' &&
+        e.tourId === ctx.tourId &&
+        e.source === 'credit' &&
+        (e.expiresAt === null || e.expiresAt > now),
+    )
+  ) {
+    return { allowed: true, reason: 'purchase' };
+  }
+  return { allowed: false, reason: 'download_requires_purchase' };
 }
 
 export interface Wallet {
@@ -126,10 +170,11 @@ export function decideSpend(
   kind: SpendKind,
   alreadyUnlocked: boolean,
   subscriber: boolean,
+  paidOnly = false,
 ): SpendDecision {
   if (subscriber) return { ok: false, reason: 'subscriber' };
   if (alreadyUnlocked) return { ok: false, reason: 'already_unlocked' };
-  if (kind === 'tour' && wallet.rewardBalance > 0)
+  if (!paidOnly && kind === 'tour' && wallet.rewardBalance > 0)
     return { ok: true, use: 'reward', wallet: { ...wallet, rewardBalance: wallet.rewardBalance - 1 } };
   if (wallet.balance > 0)
     return { ok: true, use: 'paid', wallet: { ...wallet, balance: wallet.balance - 1 } };
@@ -190,7 +235,7 @@ export const RC_EVENT_TYPES = [
   'TEST',
 ] as const;
 
-export const RevenueCatEventSchema = z.object({
+const RevenueCatPurchaseEventSchema = z.object({
   id: z.string(),
   type: z.string(),
   app_user_id: z.string(),
@@ -205,6 +250,17 @@ export const RevenueCatEventSchema = z.object({
   transaction_id: z.string().optional(),
   cancel_reason: z.string().optional(),
 });
+// Dashboard TEST payloads contain null transaction IDs. Keep purchase validation unchanged.
+export const RevenueCatEventSchema = z.union([
+  RevenueCatPurchaseEventSchema.extend({
+    type: z.literal('TEST'),
+    transaction_id: z
+      .string()
+      .nullish()
+      .transform((value) => value ?? undefined),
+  }),
+  RevenueCatPurchaseEventSchema,
+]);
 export type RevenueCatEvent = z.infer<typeof RevenueCatEventSchema>;
 
 export type ProductKind =
@@ -244,14 +300,17 @@ export function planRevenueCatEvent(e: RevenueCatEvent, products: ProductMap, no
     const ref = e.transaction_id ?? e.id;
     if (e.type === 'NON_RENEWING_PURCHASE' || e.type === 'INITIAL_PURCHASE')
       return [{ op: 'addCredits', amount: product.credits, ref }];
-    if (e.type === 'REFUND') return [{ op: 'removeCredits', amount: product.credits, ref }];
+    // RevenueCat reports non-renewing refunds as CANCELLATION; REFUND is a legacy internal payload.
+    if (e.type === 'CANCELLATION' || e.type === 'REFUND')
+      return [{ op: 'removeCredits', amount: product.credits, ref }];
     return [{ op: 'ignore', reason: `credit_event:${e.type}` }];
   }
   if (product.kind === 'seat') {
     const ref = e.transaction_id ?? e.id;
     if (e.type === 'NON_RENEWING_PURCHASE' || e.type === 'INITIAL_PURCHASE')
       return [{ op: 'addSeats', amount: product.seats, ref }];
-    if (e.type === 'REFUND') return [{ op: 'removeSeats', amount: product.seats, ref }];
+    if (e.type === 'CANCELLATION' || e.type === 'REFUND')
+      return [{ op: 'removeSeats', amount: product.seats, ref }];
     return [{ op: 'ignore', reason: `seat_event:${e.type}` }];
   }
 

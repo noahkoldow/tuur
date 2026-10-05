@@ -11,6 +11,9 @@ import type {
   Tour,
   ExploredSpot,
   PartnerApplication,
+  OfflineDownloadAccess,
+  SelectNearbyRequest,
+  SelectNearbyResult,
 } from '@tuur/shared';
 
 export type Unsubscribe = () => void;
@@ -34,6 +37,8 @@ export interface UserInfo {
   isAnonymous: boolean;
   email?: string;
   phoneNumber?: string;
+  /** Firebase provider IDs; older test/offline fixtures may omit these. */
+  providerIds?: string[];
 }
 
 export interface EntitlementState {
@@ -61,7 +66,8 @@ export interface GroupInfo {
   expiresAt: number;
 }
 
-export type SpendRequest = { kind: 'tour'; tourId: string } | { kind: 'session'; placeId: string };
+export type SpendRequest =
+  { kind: 'tour'; tourId: string; paidOnly?: boolean } | { kind: 'session'; placeId: string };
 
 /** Only present on the in-memory demo backend: simulates what the store + webhooks would grant. */
 export interface DemoControls {
@@ -81,7 +87,7 @@ export interface RedemptionToken {
 export interface AuthApi {
   current(): UserInfo | null;
   onChange(cb: (u: UserInfo | null) => void): Unsubscribe;
-  /** Resolves once a user exists (creates an anonymous one if needed). */
+  /** Resolves for a signed-in account with a verified phone; never creates a guest identity. */
   ensureSignedIn(): Promise<UserInfo>;
   signInWithEmail(email: string, password: string, create: boolean): Promise<UserInfo>;
   signInWithApple(): Promise<UserInfo>;
@@ -106,6 +112,8 @@ export interface Backend {
   watchTours(placeId: string, cb: (tours: Tour[]) => void): Unsubscribe;
   getTour(id: string): Promise<Tour | null>;
   getPois(tiles: string[]): Promise<Poi[]>;
+  /** Gemini curates real candidates as the walk progresses; no precise GPS is sent. */
+  selectNearby(req: SelectNearbyRequest): Promise<SelectNearbyResult>;
   /** Places other users explored in these tiles (anonymous aggregates, k-anonymity threshold applied). */
   getExploredSpots(tiles: string[]): Promise<ExploredSpot[]>;
   /** Personal route (spec 5.2): re-checks the client plan with routing times and adds the narrative thread. */
@@ -120,6 +128,8 @@ export interface Backend {
     mode: 'tour' | 'planned',
   ): Promise<{ counted: boolean; remaining: number | null }>;
   spendCredit(req: SpendRequest): Promise<{ used: 'reward' | 'paid'; wallet: Wallet }>;
+  /** Verifies a fixed itinerary for download; does not start a tour or consume a tour-start quota. */
+  prepareTourDownload(tourId: string, mode: 'tour' | 'planned'): Promise<OfflineDownloadAccess>;
   createInvite(tourId: string): Promise<{ token: string; remaining: number; expiresAt: number }>;
   redeemInvite(token: string): Promise<{ tourId: string }>;
   /** Nonce for rewarded-ad server-side verification (daily limit enforced on the server). */
@@ -165,8 +175,10 @@ export interface Backend {
     lang: string;
     walkMinutes: number;
     tourTitle?: string;
+    scriptInstanceId?: string;
     /** Guide voice persona id (settings). */
     voice?: string;
+    download?: boolean;
     access?: AccessInfo;
   }): Promise<TransitionResponse>;
   /** Resolves a playable/downloadable URL for a Cloud Storage audio path. */

@@ -1,35 +1,33 @@
 import {
   DEFAULT_GUIDE_PREFS,
+  createTourScript,
+  narrationContextFor,
+  storyFingerprint,
   distanceToTarget,
   guideStep,
   initialGuideState,
+  restoreGuideState,
   resumeParagraphIndex,
   targetOf,
   type Fix,
   type GuideCommand,
   type GuideEvent,
   type GuidePrefs,
+  type GuideProgress,
   type GuideState,
   type GuideStop,
   type Interest,
   type LengthTier,
   type NarrationResponse,
   type TravelMode,
+  type TourScript,
 } from '@tuur/shared';
 import type { AudioEngine, AudioItem } from '../audio/types';
 import { realClock, type Clock } from '../audio/simulatedEngine';
 import { BackendError, type AccessInfo, type Backend } from '../backend/types';
 import type { LocationSource } from '../location/types';
 
-export type Notice =
-  | 'vehicle_paused'
-  | 'vehicle_resumed'
-  | 'finished'
-  | 'unavailable'
-  | 'generation_paused'
-  | 'rate_limited'
-  | 'locked'
-  | 'offline';
+export type Notice = 'finished' | 'unavailable' | 'generation_paused' | 'rate_limited' | 'locked' | 'offline';
 
 export interface GuideUi {
   phase: 'idle' | 'approaching' | 'narrating' | 'paused' | 'finished';
@@ -38,6 +36,7 @@ export interface GuideUi {
     name: string;
     location: { lat: number; lng: number };
     state: 'visited' | 'current' | 'upcoming' | 'skipped';
+    navigationOnly?: boolean;
   }[];
   index: number;
   target?: { id: string; name: string; distanceM?: number };
@@ -74,6 +73,8 @@ export interface RuntimeDeps {
   /** Guide voice persona chosen in the settings; the server falls back to its default. */
   voice?: string;
   interest?: Interest;
+  /** The same editorial brief is retained across reroutes and recovery. */
+  script?: TourScript;
   /** What the listener is doing; the server decides access with it (tour id or dynamic mode). */
   access?: AccessInfo;
   clock?: Clock;
@@ -91,6 +92,7 @@ const keyOf = (poiId: string, tier: LengthTier) => `${poiId}:${tier}`;
 export class GuideRuntime {
   private state: GuideState = initialGuideState();
   private readonly prefs: GuidePrefs;
+  private readonly script: TourScript;
   private access: AccessInfo | undefined;
   private readonly clock: Clock;
   private ui: GuideUi = {
@@ -119,6 +121,8 @@ export class GuideRuntime {
   private draining = false;
 
   constructor(private readonly deps: RuntimeDeps) {
+    this.script =
+      deps.script ?? createTourScript({ lang: deps.lang, interests: deps.interest ? [deps.interest] : [] });
     this.access = deps.access;
     this.prefs = { ...DEFAULT_GUIDE_PREFS, ...deps.prefs };
     this.clock = deps.clock ?? realClock;
@@ -153,6 +157,26 @@ export class GuideRuntime {
   };
   getSnapshot = () => this.ui;
   getState = () => this.state;
+  getScript = (): TourScript => this.script;
+  getProgress = (): GuideProgress => {
+    const s = this.state;
+    const playback = s.playback?.kind === 'stop' ? s.playback : undefined;
+    const pending = s.pending;
+    return {
+      index: s.index,
+      visited: [...s.visited],
+      skipped: [...s.skipped],
+      narrated: [...s.narrated],
+      playedTier: { ...s.playedTier },
+      reached: { ...s.reached },
+      closest: { ...s.closest },
+      ...(playback
+        ? { playback: { poiId: playback.poiId, tier: playback.tier, positionMs: this.audioPosition() } }
+        : pending
+          ? { playback: { poiId: pending.poiId, tier: pending.tier, positionMs: pending.skipMs ?? 0 } }
+          : {}),
+    };
+  };
 
   private emit() {
     if (this.disposed) return;
@@ -165,7 +189,7 @@ export class GuideRuntime {
     const dist = distanceToTarget(s);
     const phase: GuideUi['phase'] = s.finished
       ? 'finished'
-      : s.paused || s.vehiclePaused
+      : s.paused
         ? 'paused'
         : s.playback
           ? 'narrating'
@@ -180,12 +204,13 @@ export class GuideRuntime {
         id: r.id,
         name: r.name,
         location: r.location,
+        ...(r.navigationOnly ? { navigationOnly: true } : {}),
         state: s.skipped.includes(r.id)
           ? 'skipped'
-          : s.visited.includes(r.id)
-            ? 'visited'
-            : i === s.index && !s.finished
-              ? 'current'
+          : i === s.index && !s.finished
+            ? 'current'
+            : s.visited.includes(r.id)
+              ? 'visited'
               : 'upcoming',
       })),
       ...(target
@@ -200,7 +225,7 @@ export class GuideRuntime {
       travelMode: s.travel.mode,
       awaitingRoute: s.awaitingRoute,
       positionMs: this.audioPosition(),
-      playing: this.deps.audio.isPlaying() && !s.paused && !s.vehiclePaused,
+      playing: this.deps.audio.isPlaying() && !s.paused,
       ...patch,
     };
     if (!target) delete this.ui.target;
@@ -231,7 +256,7 @@ export class GuideRuntime {
   async start(
     stops: GuideStop[],
     source?: LocationSource,
-    opts: { startIndex?: number; open?: boolean } = {},
+    opts: { startIndex?: number; open?: boolean; progress?: GuideProgress } = {},
   ) {
     // dispose() waits for a start that is still in flight, so a session ended during startup never leaks GPS or audio
     this.starting = this.doStart(stops, source, opts);
@@ -241,16 +266,21 @@ export class GuideRuntime {
   private async doStart(
     stops: GuideStop[],
     source: LocationSource | undefined,
-    opts: { startIndex?: number; open?: boolean },
+    opts: { startIndex?: number; open?: boolean; progress?: GuideProgress },
   ) {
     await this.deps.audio.init();
     if (this.disposed) return;
-    this.dispatch({
-      type: 'setRoute',
-      stops,
-      startIndex: opts.startIndex ?? 0,
-      ...(opts.open ? { open: true } : {}),
-    });
+    if (opts.progress) {
+      this.state = restoreGuideState(stops, opts.progress, opts.open);
+      this.refreshUi();
+    } else {
+      this.dispatch({
+        type: 'setRoute',
+        stops,
+        startIndex: opts.startIndex ?? 0,
+        ...(opts.open ? { open: true } : {}),
+      });
+    }
     if (!source) return;
     const unsub = await source.subscribe((fix) => this.onFix(fix));
     if (this.disposed) unsub();
@@ -278,6 +308,22 @@ export class GuideRuntime {
     const s = this.state;
     const keep = s.route.slice(0, s.awaitingRoute ? s.route.length : s.index);
     this.dispatch({ type: 'setRoute', stops: [...keep, stop], startIndex: keep.length, open: true });
+  }
+
+  /** Keep the current story and visited history while releasing the remaining itinerary. */
+  explore() {
+    const s = this.state;
+    const current = s.route[s.index];
+    // Keep a reached/heard stop current until its normal departure or waypoint handling finishes.
+    const keepCurrent =
+      current &&
+      (s.narrated.includes(current.id) ||
+        (s.reached[current.id] && (!s.playback || s.playback.poiId === current.id)));
+    // A handover may mention the next destination, but it must not keep that itinerary stop.
+    const playingIndex =
+      s.playback?.kind === 'stop' ? s.route.findIndex((stop) => stop.id === s.playback!.poiId) : -1;
+    const keepCount = Math.max(s.index + (keepCurrent ? 1 : 0), playingIndex + 1);
+    this.setRoute(s.route.slice(0, keepCount), Math.min(s.index, keepCount), true);
   }
 
   addCommandListener(cb: (c: GuideCommand) => void) {
@@ -348,7 +394,14 @@ export class GuideRuntime {
   }
 
   private async ensureNarration(poiId: string, tier: LengthTier): Promise<NarrationResponse | undefined> {
-    const k = keyOf(poiId, tier);
+    const context = narrationContextFor(
+      this.script,
+      this.state.route,
+      poiId,
+      this.state.open,
+      this.state.skipped,
+    );
+    const k = `${keyOf(poiId, tier)}:${storyFingerprint(JSON.stringify(context))}`;
     const hit = this.narrations.get(k);
     if (hit) return hit;
     const running = this.inflight.get(k);
@@ -358,6 +411,7 @@ export class GuideRuntime {
         poiId,
         lang: this.deps.lang,
         lengthTier: tier,
+        context,
         ...(this.deps.voice ? { voice: this.deps.voice } : {}),
         ...(this.access ? { access: this.access } : {}),
         ...(this.deps.interest ? { primaryInterest: this.deps.interest } : {}),
@@ -511,6 +565,8 @@ export class GuideRuntime {
         toPoiId,
         lang: this.deps.lang,
         walkMinutes,
+        tourTitle: this.script.title,
+        ...(this.script.instanceId ? { scriptInstanceId: this.script.instanceId } : {}),
         ...(this.deps.voice ? { voice: this.deps.voice } : {}),
         ...(this.access ? { access: this.access } : {}),
       });

@@ -1,4 +1,5 @@
 import { DynamicColorIOS, Platform, type ColorValue, type TextStyle } from 'react-native';
+import { INTERESTS, type Interest } from '@tuur/shared';
 import {
   colors as brand,
   fonts,
@@ -9,8 +10,34 @@ import {
   textStyles,
   type SemanticPalette,
 } from '@tuur/ui';
+import { categoryOnSolid, categoryPalette } from './categories';
 
 export { fonts, metrics, radii, spacing };
+
+interface CategoryColors {
+  foreground: ColorValue;
+  background: ColorValue;
+  solid: string;
+  onSolid: string;
+}
+
+/** The same hue always means the same interest; iOS follows appearance like the rest of the theme. */
+export const categoryColors = Object.fromEntries(
+  INTERESTS.map((interest) => {
+    const { light, dark } = categoryPalette[interest];
+    const color = (role: 'foreground' | 'background') =>
+      Platform.OS === 'ios' ? DynamicColorIOS({ light: light[role], dark: dark[role] }) : light[role];
+    return [
+      interest,
+      {
+        foreground: color('foreground'),
+        background: color('background'),
+        solid: light.foreground,
+        onSolid: categoryOnSolid,
+      },
+    ];
+  }),
+) as Record<Interest, CategoryColors>;
 
 /**
  * Resolves a semantic role to the system appearance. On iOS the value is a dynamic color, so every style that uses it
@@ -127,3 +154,20 @@ export const shadow = {
 
 /** Minimum touch target: 44 pt (accessibility.md, buttons.md). */
 export const HIT = metrics.hit;
+
+/** Shared geometry and elevation for map stops, explored places and the position puck. */
+export const mapMarker = {
+  hit: 48,
+  stopHeight: 34,
+  currentHeight: 40,
+  icon: 18,
+  compactIcon: 16,
+  gap: spacing.sm,
+  inset: 10,
+  discMin: 32,
+  discMax: 40,
+  positionSize: 40,
+  positionCore: 24,
+  shadow: '0 2px 7px rgba(0, 0, 0, 0.12)',
+  selectedShadow: '0 3px 10px rgba(0, 0, 0, 0.18)',
+} as const;

@@ -1,34 +1,22 @@
 import { useEffect, useRef } from 'react';
-import { Animated, Linking, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Animated, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { ImageRef, Interest, Poi } from '@tuur/shared';
 import { formatKm } from '../format';
 import { colors, radii, shadow } from '../theme';
-import { Icon } from './Icon';
+import { CategoryBadge } from './category-badge';
 import { INTEREST_ICON } from './icons';
-import { ImageCredit } from './ImageCredit';
+import { PlacePhoto } from './PlacePhoto';
+import { PhotoInfo, type PhotoTextSource } from './photo-info';
+import { placeSummary } from './placeDetails';
 import { SnapCarousel, type SnapCarouselItem } from './SnapCarousel';
 import { Text } from './Text';
 
-const CARD_H = 250;
+const CARD_H = 218;
+type CardImage = Omit<ImageRef, 'file'>;
 
 export const interestOf = (poi: Poi | undefined): Interest | undefined =>
   poi?.primaryInterest ?? poi?.interests[0];
-
-/** First sentences of the best-matching Wikipedia extract (UI language, then English, then any). */
-function extractOf(poi: Poi, lang: string): { text: string; url?: string } | undefined {
-  const refs = poi.sources.wikipedia.filter((w) => w.extract);
-  const ref = refs.find((w) => w.lang === lang) ?? refs.find((w) => w.lang === 'en') ?? refs[0];
-  if (!ref?.extract) return undefined;
-  const sentences = ref.extract.match(/[^.!?]+[.!?]+/g) ?? [ref.extract];
-  let text = '';
-  for (const s of sentences) {
-    if (text && (text + s).length > 300) break;
-    text += s;
-  }
-  return { text: text.trim(), ...(ref.url ? { url: ref.url } : {}) };
-}
 
 /**
  * Profile-style cards about the next stop that pop up while walking there: photo with name and category, a
@@ -40,12 +28,15 @@ export function StopCards({
   name,
   distanceM,
   keyFacts,
+  images: narrationImages,
   lang,
 }: {
   poi: Poi | undefined;
   name: string;
   distanceM?: number | undefined;
   keyFacts?: string[] | undefined;
+  /** Narration photos also carry local file URLs for downloaded tours. */
+  images?: CardImage[] | undefined;
   lang: string;
 }) {
   const { t } = useTranslation();
@@ -57,8 +48,8 @@ export function StopCards({
   }, [id, pop]);
 
   const interest = interestOf(poi);
-  const images = poi?.imageRefs ?? [];
-  const extract = poi ? extractOf(poi, lang) : undefined;
+  const images = narrationImages?.length ? narrationImages : (poi?.imageRefs ?? []);
+  const extract = poi ? placeSummary(poi, lang) : undefined;
   const distance =
     distanceM === undefined
       ? undefined
@@ -72,21 +63,16 @@ export function StopCards({
     {
       key: 'hero',
       label: name,
-      node: <HeroCard name={name} interest={interest} image={images[0]} distance={distance} />,
+      node: (
+        <HeroCard name={name} interest={interest} image={images[0]} distance={distance} summary={extract} />
+      ),
     },
   ];
   if (extract)
     items.push({
       key: 'extract',
       label: t('cards.ahead'),
-      node: (
-        <PromptCard
-          prompt={t('cards.ahead')}
-          body={extract.text}
-          footer={t('cards.source', { source: 'Wikipedia (CC BY-SA)' })}
-          {...(extract.url ? { onFooter: () => void Linking.openURL(extract.url!) } : {})}
-        />
-      ),
+      node: <PromptCard prompt={t('cards.ahead')} body={extract.text} summary={extract} />,
     });
   images
     .slice(1, 3)
@@ -113,7 +99,7 @@ export function StopCards({
 }
 
 const cardStyle = {
-  height: CARD_H,
+  minHeight: CARD_H,
   borderRadius: radii.lg,
   overflow: 'hidden' as const,
   borderCurve: 'continuous' as const,
@@ -126,70 +112,32 @@ function HeroCard({
   interest,
   image,
   distance,
+  summary,
 }: {
   name: string;
   interest?: Interest | undefined;
-  image?: ImageRef | undefined;
+  image?: CardImage | undefined;
   distance?: string | undefined;
+  summary?: PhotoTextSource | undefined;
 }) {
-  const { t } = useTranslation();
   return (
-    <View style={cardStyle}>
-      {image ? (
-        <Image
-          source={{ uri: image.thumbUrl ?? image.url }}
-          style={{ flex: 1 }}
-          contentFit="cover"
-          transition={250}
-          accessibilityIgnoresInvertColors
-          accessibilityLabel={name}
-        />
-      ) : (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: colors.brand.redTint,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon
-            name={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
-            size={64}
-            color={colors.brand.red}
-          />
-        </View>
-      )}
+    <View style={[cardStyle, { paddingTop: 64, justifyContent: 'flex-end' }]}>
+      <PlacePhoto
+        image={image}
+        name={name}
+        icon={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
+        showInfo={false}
+        style={{ position: 'absolute', inset: 0 }}
+      />
       <View
         style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
           padding: 14,
           gap: 6,
-          backgroundColor: 'rgba(17,17,17,0.62)',
+          backgroundColor: 'rgba(17,17,17,0.76)',
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {interest ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: 8,
-                paddingVertical: 2,
-                borderRadius: radii.pill,
-                backgroundColor: '#FFFFFF',
-              }}
-            >
-              <Icon name={INTEREST_ICON[interest]} size={13} color={colors.brand.redPressed} />
-              <Text variant="caption" style={{ color: colors.ink.primary, fontSize: 12, lineHeight: 16 }}>
-                {t(`interests.${interest}`)}
-              </Text>
-            </View>
-          ) : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+          {interest ? <CategoryBadge interest={interest} /> : null}
           {distance ? (
             <Text variant="caption" style={{ color: '#FFFFFF' }}>
               {distance}
@@ -200,42 +148,15 @@ function HeroCard({
           {name}
         </Text>
       </View>
-      {image ? <CreditBadge image={image} /> : null}
+      <PhotoInfo image={image} name={name} summary={summary} />
     </View>
   );
 }
 
-function PhotoCard({ image, name }: { image: ImageRef; name: string }) {
+function PhotoCard({ image, name }: { image: CardImage; name: string }) {
   return (
-    <View style={cardStyle}>
-      <Image
-        source={{ uri: image.thumbUrl ?? image.url }}
-        style={{ flex: 1 }}
-        contentFit="cover"
-        transition={250}
-        accessibilityIgnoresInvertColors
-        accessibilityLabel={name}
-      />
-      <CreditBadge image={image} />
-    </View>
-  );
-}
-
-/** Commons attribution on top of a photo (author, license, links), required by the CC licenses. */
-function CreditBadge({ image }: { image: ImageRef }) {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        maxWidth: '80%',
-        paddingHorizontal: 8,
-        borderRadius: radii.sm,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-      }}
-    >
-      <ImageCredit image={image} />
+    <View style={[cardStyle, { height: CARD_H }]}>
+      <PlacePhoto image={image} name={name} />
     </View>
   );
 }
@@ -243,34 +164,27 @@ function CreditBadge({ image }: { image: ImageRef }) {
 function PromptCard({
   prompt,
   body,
-  footer,
-  onFooter,
+  summary,
   ai,
 }: {
   prompt: string;
   body: string;
-  footer?: string;
-  onFooter?: () => void;
+  summary?: PhotoTextSource | undefined;
   ai?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <View style={[cardStyle, { padding: 18, gap: 10 }]}>
-      <Text variant="subheadline" style={{ color: colors.brand.redPressed, fontWeight: '600' }}>
+      <Text
+        variant="subheadline"
+        style={{ color: colors.brand.redPressed, fontWeight: '600', paddingRight: summary ? 44 : 0 }}
+      >
         {prompt}
       </Text>
       <Text variant="body" numberOfLines={7} style={{ flex: 1 }}>
         {body}
       </Text>
-      {footer ? (
-        <Text
-          variant="caption"
-          {...(onFooter ? { accessibilityRole: 'link' as const, onPress: onFooter } : {})}
-          style={onFooter ? { textDecorationLine: 'underline' } : null}
-        >
-          {footer}
-        </Text>
-      ) : null}
+      {summary ? <PhotoInfo name={prompt} summary={summary} /> : null}
       {ai ? <Text variant="caption">{t('player.aiGenerated')}</Text> : null}
     </View>
   );

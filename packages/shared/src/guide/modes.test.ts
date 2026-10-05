@@ -162,10 +162,22 @@ describe('roam mode', () => {
     expect(ROAM_PROFILES.low.minGapM).toBeGreaterThan(ROAM_PROFILES.high.minGapM);
   });
 
-  it('looks farther ahead when faster and not at all in a vehicle', () => {
+  it('looks farther ahead when faster, including car and public-transport travel', () => {
     expect(corridorLengthM('cycling', 5)).toBeGreaterThan(corridorLengthM('walking', 1.3));
-    expect(corridorLengthM('vehicle', 15)).toBe(0);
-    expect(pickRoamTarget({ ...base, mode: 'vehicle' })).toBeUndefined();
+    expect(corridorLengthM('vehicle', 15)).toBeGreaterThan(corridorLengthM('cycling', 5));
+    expect(corridorLengthM('vehicle', 55)).toBe(4000);
+    const forward = {
+      ...pois[0]!,
+      location: destinationPoint(start, east, 1100),
+      score: 90,
+      accessible: true,
+      hidden: false,
+      interests: ['history' as const],
+    };
+    expect(pickRoamTarget({ ...base, candidates: [forward], mode: 'vehicle', speedMps: 15 })?.id).toBe(
+      forward.id,
+    );
+    expect(pickRoamTarget({ ...base, candidates: [forward] })).toBeUndefined();
   });
 
   it('lists the tiles ahead, including neighbouring tiles across a tile boundary', () => {

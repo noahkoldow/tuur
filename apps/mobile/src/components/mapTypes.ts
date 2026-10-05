@@ -29,23 +29,32 @@ export interface TuurMapProps {
   stops?: MapStop[];
   /** Route polyline in brand red (whole route, or the part after the current leg while navigating). */
   route?: LatLng[];
-  /** Walked part of the route, drawn muted. */
+  /** Actual walked GPS trail, drawn in teal; keep separate from the planned route. */
   routeDone?: LatLng[];
   /** Current navigation leg (user -> next stop), drawn prominently; when set, `route` is drawn lighter. */
   leg?: LatLng[];
+  /** Animate the native camera with GPS updates. A map gesture suspends following; locate resumes it. */
+  followUser?: boolean;
+  /** Explain walked/current/upcoming line styles above the player sheet. */
+  showRouteLegend?: boolean;
   spots?: MapSpot[];
   onSpotPress?: (id: string) => void;
   /** Taps on the map background (not on markers). */
   onMapPress?: () => void;
   /** Fit the camera to these points (tour overview); takes precedence over `center`. */
   fit?: LatLng[];
-  /** Shows the "back to my location" button (the camera never follows on its own). Default: when `user` is set. */
+  /** Shows the "back to my location" button. Default: when `user` is set. */
   locateButton?: boolean;
+  /** Distance above the bottom inset for the locate button; allow room for sheet artwork. */
+  locateButtonOffset?: number;
+  /** Change to reset position, zoom and orientation once; mounting does not reset an initial overview. */
+  recenterKey?: number;
   /** Bottom padding so content is not hidden behind a sheet. */
   bottomInset?: number;
   onStopPress?: (id: string) => void;
   testID?: string;
 }
 
-export const ROUTE_DONE_COLOR = '#B9B9B9';
-export const LOCATE_ZOOM = 16.5;
+export const ROUTE_DONE_COLOR = '#427B73';
+// One zoom level halves magnification and shows twice as much ground in each direction.
+export const LOCATE_ZOOM = 15.5;

@@ -135,8 +135,12 @@ describe('seat purchases', () => {
     expect(planRevenueCatEvent(ev as never, DEFAULT_PRODUCTS, now)).toEqual([
       { op: 'addSeats', amount: 1, ref: 'tx9' },
     ]);
-    expect(planRevenueCatEvent({ ...ev, type: 'REFUND' } as never, DEFAULT_PRODUCTS, now)).toEqual([
-      { op: 'removeSeats', amount: 1, ref: 'tx9' },
-    ]);
+    expect(
+      planRevenueCatEvent(
+        { ...ev, type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT' } as never,
+        DEFAULT_PRODUCTS,
+        now,
+      ),
+    ).toEqual([{ op: 'removeSeats', amount: 1, ref: 'tx9' }]);
   });
 });

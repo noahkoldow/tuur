@@ -15,6 +15,7 @@ import {
   type Tour,
 } from '@tuur/shared';
 import { authorizeContent, loadEntitlements } from '../billing/entitlements';
+import { consumePurchaseUnit } from '../billing/purchaseLedger';
 import { consumeRateLimit } from '../util/rateLimit';
 
 export interface GroupDeps {
@@ -165,6 +166,8 @@ export async function addGroupSeat(deps: GroupDeps, uid: string, raw: unknown) {
       throw new GroupError('failed-precondition', 'Group is at its maximum size', 'max_size');
     const seats = Number(wallet.get('seatBalance') ?? 0);
     if (seats < 1) throw new GroupError('failed-precondition', 'No seat credit', 'no_seat_credit');
+    const consume = await consumePurchaseUnit(tx, deps.db, uid, 'seat', seats, deps.now());
+    consume();
     tx.set(walletRef, { seatBalance: seats - 1 }, { merge: true });
     tx.update(ref, { extraSeats: g.data.extraSeats + 1 });
     return {
@@ -198,5 +201,11 @@ export async function hasGroupAccess(
   if (!/^[A-Za-z0-9]{10,40}$/.test(groupId)) return false;
   const snap = await groups(deps.db).doc(groupId).get();
   const g = snap.exists ? GroupSchema.safeParse(snap.data()) : undefined;
+  if (
+    g?.success &&
+    g.data.hostSubscriber &&
+    !isSubscriber(await loadEntitlements(deps.db, g.data.hostUid), deps.now())
+  )
+    return false;
   return Boolean(g?.success && decideGroupAccess(g.data, uid, req, deps.now()));
 }

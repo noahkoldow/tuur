@@ -1,5 +1,6 @@
 import type { LengthTier } from '../constants';
 import { LENGTH_TIER_SECONDS } from '../constants';
+import { narrationContextPrompt, type NarrationContext } from './script';
 
 export interface SourceBundle {
   poiName: string;
@@ -65,11 +66,22 @@ export function systemPrompt(lang: string): string {
   return `You are tuur, a charismatic local city guide who speaks to visitors walking or cycling past the place.
 Rules you must never break:
 1. Use ONLY facts contained in the SOURCES block of the user message. If a detail is not in the sources, leave it out. Never guess dates, names, numbers or quotations.
-2. Translate and paraphrase the sources into ${languageName(lang)}. Do not quote long passages.
+2. Treat the sources as research notes, never as the recording script. Write a NEW spoken chapter in ${languageName(lang)}: select the relevant details, rephrase them for listening, and connect them to the tour's central question. Do not read out, paste, or merely translate an encyclopedia extract or raw information text. Do not quote long passages.
 3. Address the listener informally and directly (German: "du", never "Sie"; English: "you"). Speak naturally as a guide would: vivid, warm, spoken language. No lists, no bullet points, no headings, no parentheses, no URLs, no markdown, no emojis. Write numbers and years the way they are spoken naturally.
 4. Orientation hints are welcome ("Look up at the facade...") but only if they follow from the sources; never invent visual details.
 5. Do not include advertising or opinions about businesses. Text marked as partner information may only be restated neutrally as what the business says about itself (no superlatives, no prices, no promises); the listener is told separately that it is a partner introduction.
-6. Output a JSON object with: title (short, no quotes), narration (the full spoken text), paragraphs (the same text split into the requested number of paragraphs, each ending on a full sentence), keyFacts (every distinct factual claim you made, each as one short standalone sentence taken from the sources), sourcesUsed (identifiers of the sources you used, e.g. "wikipedia:de", "wikidata", "osm", "admin", "partner").`;
+6. Write for the ear: a brief inviting opening, short sentences, natural rhythm, an optional sourced observation for the listener, and a smooth hand-over. Avoid a catalogue of facts, repetitive greetings and filler. The script must work when heard once while walking. Keep delivery notes, citations and source metadata OUT of the spoken words; TTS receives only the finished paragraphs.
+7. Output a JSON object with: title (short, no quotes), narration (the full authored recording script), paragraphs (exactly the words TTS should speak, split into the requested number of paragraphs, each ending on a full sentence), keyFacts (every distinct factual claim you made, each as one short standalone sentence taken from the sources; separate verification metadata, not extra spoken text), sourcesUsed (identifiers of the sources you used, e.g. "wikipedia:de", "wikidata", "osm", "admin", "partner").`;
+}
+
+/** Reject a source document passed through unchanged as the recording script. Facts and names may repeat. */
+export function isUnadaptedSourceText(paragraphs: string[], bundle: SourceBundle): boolean {
+  const normalize = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  const raw = [sourceText(bundle), ...bundle.wikipedia.map((w) => w.extract), ...bundle.adminFacts]
+    .map(normalize)
+    .filter((text) => text.length >= 80);
+  const spoken = [paragraphs.join(' '), ...paragraphs].map(normalize);
+  return spoken.some((text) => text.length >= 80 && raw.includes(text));
 }
 
 export interface NarrationPromptInput {
@@ -77,7 +89,7 @@ export interface NarrationPromptInput {
   lang: string;
   tier: LengthTier;
   interest: string | undefined;
-  context?: { previousPoiName?: string | undefined; tourTitle?: string | undefined } | undefined;
+  context?: NarrationContext | undefined;
 }
 
 export function userPrompt(i: NarrationPromptInput): string {
@@ -96,7 +108,7 @@ export function userPrompt(i: NarrationPromptInput): string {
 Language of the narration: ${languageName(i.lang)}
 Length: about ${target} ${unit} in exactly ${paras} paragraph${paras > 1 ? 's' : ''}.
 Listener's main interest: ${i.interest ?? 'balanced mix'}. Emphasize matching aspects if the sources contain any.
-${i.context?.previousPoiName ? `The listener just came from: ${i.context.previousPoiName}. A short natural hand-over is welcome.\n` : ''}${i.context?.tourTitle ? `Tour: ${i.context.tourTitle}\n` : ''}
+${narrationContextPrompt(i.context)}
 SOURCES
 Wikipedia excerpts:
 ${wiki}

@@ -1,7 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { appendTrackPoint, type LatLng, type TrackPoint, type WalkedTour } from '@tuur/shared';
+import {
+  appendTrackPoint,
+  distanceMeters,
+  summarizeWalk,
+  type LatLng,
+  type TrackPoint,
+  type TrackTotals,
+  type WalkedTour,
+} from '@tuur/shared';
 
 export interface TourRecord extends WalkedTour {
   mode: 'tour' | 'planned' | 'fork' | 'roam';
@@ -13,6 +21,8 @@ export interface TourRecord extends WalkedTour {
   stops: { id: string; name: string; location: LatLng }[];
   /** Walked GPS track, thinned (device only, never uploaded). */
   track: TrackPoint[];
+  /** Includes segments removed from the display track, so long car/transit tours keep accurate totals. */
+  trackTotals?: TrackTotals;
   /** Planned route as encoded polyline (standard/planned tours). */
   path?: string;
   /** Live group the tour was walked in (D47). */
@@ -30,12 +40,15 @@ export interface RecordStart {
 
 interface HistoryState {
   records: TourRecord[];
+  /** Prevent a running or recovered session from recreating history the user explicitly removed. */
+  deletedIds: string[];
   /** Creates the record when a session starts (idempotent). */
   start(session: RecordStart): void;
   addStop(session: RecordStart, stop: { id: string; name: string; location: LatLng }): void;
   addTrackPoint(id: string, p: TrackPoint): void;
   /** Ends the record; records without stops and without real walking are dropped (noise). */
   finish(id: string, endedAt: number): TourRecord | undefined;
+  remove(id: string): void;
   clear(): void;
 }
 
@@ -60,6 +73,7 @@ const fresh = (s: RecordStart, now: number): TourRecord => ({
   updatedAt: now,
   stops: [],
   track: [],
+  trackTotals: { distanceM: 0, movingMs: 0 },
   stopsVisited: 0,
   center: { lat: 0, lng: 0 },
 });
@@ -75,14 +89,16 @@ export const useHistory = create<HistoryState>()(
   persist(
     (set, get) => ({
       records: [],
+      deletedIds: [],
       start: (session) =>
         set((s) =>
-          s.records.some((r) => r.id === session.id)
+          s.deletedIds.includes(session.id) || s.records.some((r) => r.id === session.id)
             ? s
             : { records: upsert(s.records, fresh(session, Date.now())) },
         ),
       addStop: (session, stop) =>
         set((s) => {
+          if (s.deletedIds.includes(session.id)) return s;
           const cur = s.records.find((r) => r.id === session.id) ?? fresh(session, Date.now());
           if (cur.stops.some((x) => x.id === stop.id)) return s;
           const stops = [...cur.stops, stop];
@@ -99,12 +115,27 @@ export const useHistory = create<HistoryState>()(
       addTrackPoint: (id, p) =>
         set((s) => {
           const cur = s.records.find((r) => r.id === id);
-          if (!cur || cur.endedAt || cur.track.length >= MAX_TRACK_POINTS) return s;
-          const track = appendTrackPoint(cur.track, p);
+          if (!cur || cur.endedAt) return s;
+          let track = appendTrackPoint(cur.track, p);
           if (track === cur.track) return s;
+          const last = cur.track.at(-1);
+          const distance = last ? distanceMeters(last, p) : 0;
+          const dt = last ? p.ts - last.ts : 0;
+          const totals = cur.trackTotals ?? summarizeWalk(cur.track, cur.stopsVisited);
+          const trackTotals = {
+            distanceM: totals.distanceM + distance,
+            movingMs: totals.movingMs + (dt > 0 && distance / (dt / 1000) >= 0.5 ? dt : 0),
+          };
+          if (track.length > MAX_TRACK_POINTS) {
+            // Thin older points, preserving the start and every recent fix including the current position.
+            const older = Math.floor(track.length / 2);
+            track = track.filter((_, index) => index >= older || index % 2 === 0);
+          }
           return {
             records: s.records.map((r) =>
-              r.id === id ? { ...r, track, ...(r.stops.length ? {} : { center: centerOf(track) }) } : r,
+              r.id === id
+                ? { ...r, track, trackTotals, ...(r.stops.length ? {} : { center: centerOf(track) }) }
+                : r,
             ),
           };
         }),
@@ -120,16 +151,28 @@ export const useHistory = create<HistoryState>()(
         set((s) => ({ records: s.records.map((r) => (r.id === id ? done : r)) }));
         return done;
       },
-      clear: () => set({ records: [] }),
+      remove: (id) =>
+        set((s) =>
+          s.records.some((r) => r.id === id)
+            ? {
+                records: s.records.filter((r) => r.id !== id),
+                deletedIds: [...new Set([...s.deletedIds, id])],
+              }
+            : s,
+        ),
+      clear: () => set({ records: [], deletedIds: [] }),
     }),
     {
       name: 'tuur.history.v1',
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => AsyncStorage),
       // v1 records had no track
       migrate: (state) => {
-        const s = state as { records?: TourRecord[] };
-        return { records: (s.records ?? []).map((r) => ({ ...r, track: r.track ?? [] })) } as never;
+        const s = state as { records?: TourRecord[]; deletedIds?: string[] };
+        return {
+          records: (s.records ?? []).map((r) => ({ ...r, track: r.track ?? [] })),
+          deletedIds: s.deletedIds ?? [],
+        } as never;
       },
     },
   ),

@@ -21,13 +21,15 @@ export function TravelModeChip({ mode }: { mode: TravelMode }) {
         justifyContent: 'center',
         gap: 6,
         borderRadius: 999,
+        maxWidth: '100%',
+        flexShrink: 1,
       }}
     >
       <Icon name={TRAVEL_ICON[mode]} size={16} color={sys.label} />
       <Text
         variant="footnote"
         color={sys.label}
-        style={{ fontWeight: '600' }}
+        style={{ fontWeight: '600', flexShrink: 1 }}
         accessible
         accessibilityLabel={t('travel.detected', { mode: label })}
         accessibilityLiveRegion="polite"

@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useArea } from '../location/useArea';
 import { canUseSession, useEntitlementStore } from './entitlements';
@@ -9,16 +10,19 @@ export function useSessionGate(
 ) {
   const router = useRouter();
   const ent = useEntitlementStore();
-  const { placeId } = useArea(position, { tours: false });
+  const { placeId, phase, reload } = useArea(position, { tours: false });
   const unlocked = canUseSession(ent, mode, placeId);
+  const requireAccess = useCallback(() => {
+    if (unlocked) return true;
+    if (placeId) router.push({ pathname: '/paywall', params: { kind: 'session', placeId, mode } });
+    return false;
+  }, [unlocked, placeId, router, mode]);
   return {
     unlocked,
     placeId,
+    error: phase === 'failed',
+    reload,
     /** Returns true when the mode may start; otherwise opens the paywall. */
-    require(): boolean {
-      if (unlocked) return true;
-      if (placeId) router.push({ pathname: '/paywall', params: { kind: 'session', placeId, mode } });
-      return false;
-    },
+    require: requireAccess,
   };
 }

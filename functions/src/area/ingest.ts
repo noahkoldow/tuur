@@ -24,8 +24,10 @@ import { placeFromGeocode } from '../providers/geocoding';
 import type { LlmProvider } from '../providers/llm';
 import type { PoiSourceClient } from '../providers/poiSources';
 import { loadPartnerConfig } from '../partners/service';
-import { logUsage, spentToday } from '../util/usage';
-import { AREAS, markAreaFailed } from './store';
+import { spentToday } from '../util/usage';
+import { budgetedLlm } from '../providers/budgeted';
+import { RateLimitError } from '../util/rateLimit';
+import { AREAS, deferAreaForQuota, markAreaFailed } from './store';
 
 export interface IngestDeps {
   db: Firestore;
@@ -58,6 +60,13 @@ export async function ingestArea(
   geohash: string,
 ): Promise<{ status: string; poiCount: number; warnings: string[] }> {
   const { db } = deps;
+  // Cloud Tasks can redeliver independently of ensureArea's claim guard. Keep the stored deadline
+  // unchanged and make no provider request until it expires, including after an upstream HTTP 429.
+  const area = await db.collection(AREAS).doc(geohash).get();
+  const retryAt = area.get('ingestRetryAt');
+  const startAt = deps.now();
+  if (area.get('status') === 'failed' && typeof retryAt === 'number' && retryAt > startAt)
+    throw new RateLimitError(retryAt - startAt);
   const warnings: string[] = [];
   const bounds = geohashBounds(geohash);
   const center = geohashCenter(geohash);
@@ -103,16 +112,13 @@ export async function ingestArea(
     if (!gate.allowed) warnings.push(`llm classification skipped: ${gate.reason}`);
     if (result.unclassified.length && gate.allowed) {
       const llm = await settled(
-        deps.llm.classifyInterests(result.unclassified.slice(0, 60), deps.ai.models.lite),
+        budgetedLlm(deps.llm, db, deps.ai, deps.now, { tile: geohash }).classifyInterests(
+          result.unclassified.slice(0, 60),
+          deps.ai.models.lite,
+        ),
         { interests: {} as Record<string, Interest[]>, usage: {} },
         'llm',
         warnings,
-      );
-      await logUsage(
-        db,
-        deps.ai.pricing,
-        { kind: 'classify', model: deps.ai.models.lite, usage: llm.usage, tile: geohash, ok: true },
-        deps.now(),
       );
       result = buildPois(raw, {
         now: deps.now(),
@@ -185,7 +191,8 @@ export async function ingestArea(
       );
     return { status, poiCount: pois.length, warnings };
   } catch (e) {
-    await markAreaFailed(db, geohash, (e as Error).message, deps.now());
+    if (e instanceof RateLimitError) await deferAreaForQuota(db, geohash, e.retryAfterMs, deps.now());
+    else await markAreaFailed(db, geohash, (e as Error).message, deps.now());
     throw e;
   }
 }

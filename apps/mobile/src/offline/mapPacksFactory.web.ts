@@ -1,5 +1,5 @@
-import { NoopMapPackManager, type MapPackManager } from './mapPacks';
+import { UnavailableMapPackManager, type MapPackManager } from './mapPacks';
 
 export function createMapPackManager(): MapPackManager {
-  return new NoopMapPackManager();
+  return new UnavailableMapPackManager();
 }

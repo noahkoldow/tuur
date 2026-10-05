@@ -1,9 +1,11 @@
 node_modules
+.agents/skills
 .next
 .expo
 .turbo
 lib
 dist
+dist-check
 pnpm-lock.yaml
 assets
 docs/PRODUCT_SPEC.md

@@ -5,6 +5,7 @@ import { DownloadManager } from './manager';
 import { createMapPackManager } from './mapPacksFactory';
 import { useSettings } from '../state/settings';
 import type { FileStore } from './fileStore';
+import { randomUUID } from 'expo-crypto';
 
 let files: FileStore | undefined;
 let library: OfflineLibrary | undefined;
@@ -17,7 +18,7 @@ export function getFileStore(): FileStore {
 
 /** Device library of downloaded tours; `load()` is called once at startup. */
 export function getOfflineLibrary(): OfflineLibrary {
-  library ??= new OfflineLibrary(getFileStore());
+  library ??= new OfflineLibrary(getFileStore(), Date.now, true);
   return library;
 }
 
@@ -28,6 +29,7 @@ export function getDownloadManager(): DownloadManager {
     maps: createMapPackManager(),
     library: getOfflineLibrary(),
     voice: () => useSettings.getState().voiceId,
+    newScriptInstanceId: randomUUID,
   });
   return manager;
 }

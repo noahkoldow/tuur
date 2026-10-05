@@ -11,6 +11,7 @@ export default tseslint.config(
       'functions/lib/**',
       '**/deploy/**',
       '**/dist/**',
+      '**/dist-check/**',
       '**/.next/**',
       '**/.expo/**',
       '**/.turbo/**',

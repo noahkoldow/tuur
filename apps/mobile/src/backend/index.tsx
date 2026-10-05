@@ -16,10 +16,13 @@ export function getBaseBackend(): Backend {
 /** App-wide backend: offline-first wrapper around the network backend (downloaded content works without network). */
 export function getBackend(): Backend {
   if (!singleton) {
-    const { getFileStore, getOfflineLibrary } = require('../offline') as typeof import('../offline');
+    const { getFileStore, getOfflineLibrary, getDownloadManager } =
+      require('../offline') as typeof import('../offline');
     const { withOfflineFirst } =
       require('../offline/offlineBackend') as typeof import('../offline/offlineBackend');
-    singleton = withOfflineFirst(getBaseBackend(), getOfflineLibrary(), getFileStore());
+    singleton = withOfflineFirst(getBaseBackend(), getOfflineLibrary(), getFileStore(), {
+      clearAccountDownloads: () => getDownloadManager().clearAll(false),
+    });
   }
   return singleton;
 }

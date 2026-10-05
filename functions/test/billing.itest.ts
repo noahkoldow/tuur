@@ -1,5 +1,5 @@
 import { generateKeyPairSync, createSign } from 'node:crypto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AI_CONFIG, REGION_FIXTURES, buildPois, type Poi } from '@tuur/shared';
 import {
   BillingError,
@@ -51,7 +51,7 @@ beforeEach(async () => {
   clock += 3 * 3600_000;
   await db.collection('places').doc('DE_berlin').set({ name: 'Berlin' });
   await db.collection('areas').doc('u33dc0').set({ placeId: 'DE_berlin', status: 'ready' });
-});
+}, 30_000);
 
 describe('spendCredit', () => {
   it('unlocks a tour permanently with one credit and never charges twice', async () => {
@@ -59,12 +59,12 @@ describe('spendCredit', () => {
     await wallet('u1', 2);
     const r = await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
     expect(r.used).toBe('paid');
-    expect(await walletOf('u1')).toEqual({ balance: 1, rewardBalance: 0 });
+    expect(await walletOf('u1')).toEqual({ balance: 1, rewardBalance: 0, seatBalance: 0 });
     expect(await entIds('u1')).toEqual(['tour_tour1']);
     await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' })).rejects.toMatchObject({
       code: 'already-exists',
     });
-    expect(await walletOf('u1')).toEqual({ balance: 1, rewardBalance: 0 });
+    expect(await walletOf('u1')).toEqual({ balance: 1, rewardBalance: 0, seatBalance: 0 });
   });
 
   it('uses reward credits first for tours and unlocks a 24 h session with a paid credit', async () => {
@@ -204,11 +204,25 @@ describe('claimTourStart', () => {
 });
 
 describe('authorizeContent', () => {
-  it('serves the free tour to everyone but only its own stops', async () => {
+  it('serves a free tour only after the verified ad grant, and only its own stops', async () => {
     await seedTour({ free: true });
-    expect(
-      (await authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] })).reason,
-    ).toBe('free');
+    const request = { tourId: 'tour1', mode: 'tour' as const, poiIds: ['wd_Q82425'] };
+    await expect(authorizeContent(deps(), 'u1', request)).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    const { nonce } = await createRewardNonce(deps(), 'u1', { tourId: 'tour1' }, true);
+    await expect(
+      grantRewardFromSsv(deps(), {
+        userId: 'u1',
+        nonce,
+        transactionId: 'free-access',
+        phoneNumberVerified: true,
+      }),
+    ).resolves.toMatchObject({ granted: true });
+    expect((await authorizeContent(deps(), 'u1', request)).reason).toBe('free');
+    await expect(authorizeContent(deps(), 'u2', request)).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
     await expect(
       authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q999'] }),
     ).rejects.toMatchObject({ code: 'permission-denied' });
@@ -366,6 +380,19 @@ describe('RevenueCat webhook processing', () => {
     ).data()!;
     expect(s['active']).toBe(true);
     await seedTour();
+    await expect(
+      authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] }),
+    ).rejects.toMatchObject({
+      code: 'permission-denied',
+      details: { reason: 'tour_start_required' },
+    });
+    await expect(
+      claimTourStart(deps(), 'u1', {
+        tourId: 'tour1',
+        sessionId: '00000000-0000-4000-8000-000000000001',
+        mode: 'tour',
+      }),
+    ).resolves.toEqual({ counted: true, remaining: 9 });
     expect(
       (await authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] })).reason,
     ).toBe('subscription');
@@ -390,12 +417,24 @@ describe('RevenueCat webhook processing', () => {
     expect((await walletOf('u1'))!['balance']).toBe(5);
     await processRevenueCatEvent(
       deps(),
-      body({ id: 'r1', type: 'REFUND', product_id: 'tuur_credit_5', transaction_id: 't1' }),
+      body({
+        id: 'r1',
+        type: 'CANCELLATION',
+        cancel_reason: 'CUSTOMER_SUPPORT',
+        product_id: 'tuur_credit_5',
+        transaction_id: 't1',
+      }),
     );
     expect((await walletOf('u1'))!['balance']).toBe(0);
     await processRevenueCatEvent(
       deps(),
-      body({ id: 'r2', type: 'REFUND', product_id: 'tuur_credit_5', transaction_id: 't1' }),
+      body({
+        id: 'r2',
+        type: 'CANCELLATION',
+        cancel_reason: 'CUSTOMER_SUPPORT',
+        product_id: 'tuur_credit_5',
+        transaction_id: 't1',
+      }),
     );
     expect((await walletOf('u1'))!['balance']).toBe(0);
   });
@@ -447,16 +486,20 @@ describe('rewarded ads (server-side verification)', () => {
         transactionId: `tx${++tx}`,
         phoneNumberVerified: true,
       });
-    const results: boolean[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       const tourId = `free${i + 1}`;
       await seedTour({ free: true, placeId: `city${i + 1}` }, tourId);
-      const { nonce } = await createRewardNonce(deps(), 'u1', { tourId }, true).catch(() => ({ nonce: '' }));
-      results.push(nonce ? (await grant('u1', nonce)).granted : false);
+      const { nonce } = await createRewardNonce(deps(), 'u1', { tourId }, true);
+      await expect(grant('u1', nonce)).resolves.toMatchObject({ granted: true });
     }
-    expect(results).toEqual([true, true, true, false]);
+    await seedTour({ free: true, placeId: 'city4' }, 'free4');
+    await expect(createRewardNonce(deps(), 'u1', { tourId: 'free4' }, true)).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      details: { reason: 'daily_limit' },
+    });
     expect((await db.collection('users').doc('u1').collection('entitlements').get()).size).toBe(3);
-    expect((await walletOf('u1'))!['rewardBalance']).toBe(0);
+    // SSV grants the specific free tour, never spendable reward credits.
+    expect(await walletOf('u1')).toBeUndefined();
   });
 
   it('requires phone verification and rejects reused, foreign, expired and unknown city-tour nonces', async () => {
@@ -585,6 +628,17 @@ import { narrationDeps, plannedRouteDeps } from '../src/config';
 import { composePlannedRoute } from '../src/tours/planned';
 
 describe('production wiring enforces entitlements', () => {
+  beforeEach(() => {
+    // emulators:exec starts only Firestore/Auth/Storage; these direct wiring tests
+    // deliberately use local mock providers without starting a Functions process.
+    vi.stubEnv('FUNCTIONS_EMULATOR', 'true');
+    vi.stubEnv('TUUR_LLM_PROVIDER', 'mock');
+    vi.stubEnv('TUUR_TTS_PROVIDER', 'mock');
+    vi.stubEnv('TUUR_POI_PROVIDER', 'mock');
+    vi.stubEnv('TUUR_ROUTING_PROVIDER', 'mock');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   it('narrationDeps() denies locked content and lets the internal pre-generation through', async () => {
     const poi = buildPois(REGION_FIXTURES[0]!.raw, { now: 1 }).pois.find((p) => p.id === 'wd_Q82425')!;
     await seedTour();

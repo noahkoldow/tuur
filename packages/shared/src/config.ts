@@ -22,12 +22,12 @@ export const AiConfigSchema = z.object({
   promptVersion: z.string().min(1),
   /** Google Search grounding (default off, see DECISIONS D16: grounded output is never cached). */
   groundingEnabled: z.boolean(),
-  /** Hard global AI-generation budget cap in USD; cached content still works after reaching the cap. */
+  /** Global admission limit on estimated AI spend in USD, including pending reservations. Not an invoice cap. */
   dailyBudgetUsd: z.number().nonnegative().max(3),
   /** Per-area (tile) daily cap in USD. */
   areaDailyBudgetUsd: z.number().nonnegative(),
   killSwitch: z.boolean(),
-  /** Prices used only for cost logging/budget estimates; keep in sync with Google's price list. */
+  /** Estimated provider prices, not an invoice guarantee; keep in sync with each provider's billing. */
   pricing: z.object({
     inputPerMTokUsd: z.number().nonnegative(),
     outputPerMTokUsd: z.number().nonnegative(),
@@ -49,12 +49,12 @@ export const AiConfigSchema = z.object({
 export type AiConfig = z.infer<typeof AiConfigSchema>;
 
 /**
- * Defaults verified 2026-09-29 against search snippets of ai.google.dev (primary docs were not reachable
- * from the build sandbox): gemini-3.8-flash (text), gemini-3.5-flash-lite (lite), gemini-3.8-flash-lite-tts.
+ * Defaults verified 2026-10-03 against ai.google.dev/gemini-api/docs/models and speech-generation:
+ * Gemini 3.8 Flash (text + high-fidelity TTS), Gemini 3.5 Flash-Lite (classification/fact checking).
  * Admins override via Firestore `config/ai`. Re-verify before launch, see docs/DECISIONS.md D16.
  */
 export const DEFAULT_AI_CONFIG: AiConfig = {
-  models: { narration: 'gemini-3.8-flash', lite: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-lite-tts' },
+  models: { narration: 'gemini-3.8-flash', lite: 'gemini-3.5-flash-lite', tts: 'gemini-3.8-flash-tts' },
   voices: { default: 'Kore', de: 'Kore', en: 'Kore' },
   voiceCast: DEFAULT_VOICE_CAST,
   defaultVoiceId: DEFAULT_VOICE_ID,
@@ -70,7 +70,8 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
     outputPerMTokUsd: 3.75,
     liteInputPerMTokUsd: 0.3,
     liteOutputPerMTokUsd: 2.5,
-    ttsPerMCharsUsd: 10,
+    // Conservative character estimate for slow narration; Gemini bills audio tokens, not characters.
+    ttsPerMCharsUsd: 50,
     ttsPerMCharsUsdByProvider: { openai: 17 },
     groundingPer1kQueriesUsd: 35,
     routingPer1kCallsUsd: 0.5,

@@ -183,7 +183,12 @@ describe('RevenueCat events', () => {
     expect(buy).toEqual([{ op: 'addCredits', amount: 5, ref: 'tx9' }]);
     expect(
       planRevenueCatEvent(
-        ev({ type: 'REFUND', product_id: 'tuur_credit_1', transaction_id: 'tx1' }),
+        ev({
+          type: 'CANCELLATION',
+          cancel_reason: 'CUSTOMER_SUPPORT',
+          product_id: 'tuur_credit_1',
+          transaction_id: 'tx1',
+        }),
         DEFAULT_PRODUCTS,
         NOW,
       ),

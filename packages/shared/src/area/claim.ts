@@ -37,6 +37,7 @@ export function decideClaim(
       return now - (area.ingestStartedAt ?? 0) > p.staleIngestMs ? 'claim' : 'skip';
     case 'failed':
       if (area.ingestAttempts >= p.maxAttempts) return 'skip';
+      if (area.ingestRetryAt !== undefined) return now >= area.ingestRetryAt ? 'claim' : 'skip';
       return now - area.updatedAt >= p.retryBackoffMs * Math.max(1, area.ingestAttempts) ? 'claim' : 'skip';
     case 'ready':
     case 'low_content':

@@ -14,6 +14,10 @@ const de = {
   'common.cancel': 'Abbrechen',
   'common.delete': 'Löschen',
   'common.error': 'Das hat nicht geklappt. Bitte versuch es noch einmal.',
+  'common.verificationUnavailable':
+    'Die Sicherheitsprüfung ist derzeit nicht verfügbar. Bitte kontaktiere den Support.',
+  'common.verificationFailed':
+    'Die Sicherheitsprüfung ist fehlgeschlagen. Lade die Seite neu und versuche es erneut.',
   'common.active': 'Aktiv',
   'common.inactive': 'Inaktiv',
   'common.language': 'Sprache',
@@ -32,7 +36,8 @@ const de = {
   'auth.toSignUp': 'Noch kein Konto? Registrieren',
   'auth.toSignIn': 'Schon registriert? Anmelden',
   'auth.forgot': 'Passwort vergessen?',
-  'auth.resetSent': 'Falls es ein Konto mit dieser Adresse gibt, haben wir dir einen Link zum Zurücksetzen geschickt.',
+  'auth.resetSent':
+    'Falls es ein Konto mit dieser Adresse gibt, haben wir dir einen Link zum Zurücksetzen geschickt.',
   'auth.invalid': 'E-Mail oder Passwort stimmt nicht.',
   'auth.weak': 'Das Passwort ist zu schwach. Nimm mindestens 8 Zeichen.',
   'auth.exists': 'Für diese E-Mail gibt es schon ein Konto. Melde dich an.',
@@ -53,9 +58,11 @@ const de = {
   'partner.statusPending': 'In Prüfung',
   'partner.statusApproved': 'Freigegeben',
   'partner.statusSuspended': 'Gesperrt',
-  'partner.statusHintPending': 'Wir prüfen dein Profil und die Verknüpfung mit deinem Ort. Das dauert meist ein bis zwei Werktage.',
+  'partner.statusHintPending':
+    'Wir prüfen dein Profil und die Verknüpfung mit deinem Ort. Das dauert meist ein bis zwei Werktage.',
   'partner.statusHintApproved': 'Dein Profil ist freigegeben. Mit einem Paket wirst du in tuur sichtbar.',
-  'partner.statusHintSuspended': 'Dein Profil ist gerade gesperrt und in der App nicht sichtbar. Schreib uns, wenn du Fragen hast.',
+  'partner.statusHintSuspended':
+    'Dein Profil ist gerade gesperrt und in der App nicht sichtbar. Schreib uns, wenn du Fragen hast.',
   'partner.contentNote':
     'Partnerinhalte sind in der App immer als „Partner“ gekennzeichnet. Die Partnervorstellung im Audio basiert auf deinen Angaben – schreib sie sachlich und ehrlich.',
   'partner.planLabel': 'Paket',
@@ -157,7 +164,8 @@ const de = {
   'scanner.reason.wrong_partner': 'Dieser Code gehört zu einem anderen Partner.',
   'scanner.reason.expired': 'Der Code ist abgelaufen. Bitte deinen Gast, einen neuen zu öffnen.',
   'scanner.reason.already_used': 'Dieser Code wurde schon eingelöst.',
-  'scanner.reason.partner_inactive': 'Dein Paket ist nicht aktiv. Angebote lassen sich gerade nicht einlösen.',
+  'scanner.reason.partner_inactive':
+    'Dein Paket ist nicht aktiv. Angebote lassen sich gerade nicht einlösen.',
   'scanner.reason.offer_inactive': 'Dieses Angebot ist nicht aktiv.',
   'scanner.reason.offer_expired': 'Dieses Angebot ist nicht (mehr) gültig.',
   'scanner.reason.daily_limit': 'Das Tageslimit für dieses Angebot ist erreicht.',
@@ -344,6 +352,8 @@ const en: Record<TKey, string> = {
   'common.cancel': 'Cancel',
   'common.delete': 'Delete',
   'common.error': 'That did not work. Please try again.',
+  'common.verificationUnavailable': 'Security verification is currently unavailable. Please contact support.',
+  'common.verificationFailed': 'Security verification failed. Reload the page and try again.',
   'common.active': 'Active',
   'common.inactive': 'Inactive',
   'common.language': 'Language',

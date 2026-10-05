@@ -1,6 +1,6 @@
 import { distanceMeters, type LatLng } from '../geo/geohash';
 
-/** A walked tour as the badge logic needs it (kept on the device only). */
+/** An explored tour as the badge logic needs it (kept on the device only). */
 export interface WalkedTour {
   id: string;
   /** Centre of the visited stops. */
@@ -16,7 +16,7 @@ export const BADGE_TIERS: { tier: BadgeTier; tours: number }[] = [
   { tier: 'silver', tours: 3 },
   { tier: 'gold', tours: 7 },
 ];
-export const MIN_STOPS_FOR_BADGE = 2;
+export const MIN_STOPS_FOR_BADGE = 1;
 
 export interface EarnedBadge {
   cityId: string;
@@ -49,8 +49,10 @@ export function earnedBadges(
   cities: readonly { id: string; center: LatLng; radiusKm: number }[],
 ): EarnedBadge[] {
   const count = new Map<string, number>();
+  const seen = new Set<string>();
   for (const t of tours) {
-    if (t.stopsVisited < MIN_STOPS_FOR_BADGE) continue;
+    if (t.stopsVisited < MIN_STOPS_FOR_BADGE || seen.has(t.id)) continue;
+    seen.add(t.id);
     const c = cityOf(t.center, cities);
     if (c) count.set(c.id, (count.get(c.id) ?? 0) + 1);
   }

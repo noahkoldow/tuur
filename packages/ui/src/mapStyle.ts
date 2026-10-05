@@ -1,7 +1,7 @@
 import { colors } from './tokens';
 
 export interface MapStyleOptions {
-  /** TileJSON URL of an OpenMapTiles-schema vector tile source (default provider: MapTiler). */
+  /** TileJSON URL of an OpenMapTiles-schema vector tile source (default provider: OpenFreeMap). */
   tilesUrl: string;
   /** Glyph URL template with {fontstack} and {range}. */
   glyphsUrl: string;
@@ -186,8 +186,9 @@ export interface MapEnv {
 }
 
 /**
- * Resolves the style for the current environment: an explicit style URL wins, then the tuur style on MapTiler
- * tiles, and finally the public MapLibre demo tiles so development works without any key.
+ * An explicit style URL wins, followed by an optional MapTiler key. Otherwise use production OSM tiles
+ * from OpenFreeMap without a key, preserving tuur's light/dark appearance. TileJSON supplies attribution.
+ * This online default does not authorize offline prefetching from the public endpoint.
  */
 export function resolveMapStyle(env: MapEnv, appearance: 'light' | 'dark' = 'light'): string | Json {
   if (env.styleUrl) return env.styleUrl;
@@ -198,5 +199,9 @@ export function resolveMapStyle(env: MapEnv, appearance: 'light' | 'dark' = 'lig
       appearance,
     });
   }
-  return 'https://demotiles.maplibre.org/style.json';
+  return buildTuurMapStyle({
+    tilesUrl: 'https://tiles.openfreemap.org/planet',
+    glyphsUrl: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    appearance,
+  });
 }

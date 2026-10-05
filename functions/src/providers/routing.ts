@@ -55,10 +55,14 @@ interface OrsDirectionsResponse {
 /** OpenRouteService. Keys stay server side (this runs in Cloud Functions, spec 3 "Routing"). */
 export class OrsRoutingProvider implements RoutingProvider {
   readonly source: RoutingSource = 'ors';
+  private readonly baseUrl: string;
   constructor(
     private readonly apiKey: string,
-    private readonly baseUrl = process.env['ORS_URL'] ?? 'https://api.openrouteservice.org',
-  ) {}
+    // HeiGIT's gateway includes the service prefix; self-hosted instances can override ORS_URL.
+    baseUrl = process.env['ORS_URL'] ?? 'https://api.heigit.org/openrouteservice',
+  ) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
 
   private headers() {
     return { Authorization: this.apiKey, 'Content-Type': 'application/json' };
@@ -72,7 +76,7 @@ export class OrsRoutingProvider implements RoutingProvider {
         locations: points.map((p) => [p.lng, p.lat]),
         metrics: ['duration', 'distance'],
       }),
-      retries: 1,
+      retries: 0, // Each upstream attempt must have its own budget reservation.
     });
     const fallback = haversineMatrix(points, profile);
     // Unroutable pairs come back as null: fall back to the straight-line estimate for that pair.
@@ -88,9 +92,10 @@ export class OrsRoutingProvider implements RoutingProvider {
   async directions(points: LatLng[], profile: RoutingProfile): Promise<Directions> {
     const json = await fetchJson<OrsDirectionsResponse>(`${this.baseUrl}/v2/directions/${profile}/geojson`, {
       method: 'POST',
-      headers: this.headers(),
+      // The GeoJSON endpoint rejects Accept: application/json with HTTP 406.
+      headers: { ...this.headers(), Accept: 'application/geo+json' },
       body: JSON.stringify({ coordinates: points.map((p) => [p.lng, p.lat]), instructions: false }),
-      retries: 1,
+      retries: 0,
     });
     const f = json.features[0];
     if (!f) throw new Error('ORS returned no route');

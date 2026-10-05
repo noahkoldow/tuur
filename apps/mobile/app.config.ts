@@ -1,6 +1,7 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 const brand = '../../assets/brand/app';
+const expoGoPreview = process.env.EXPO_PUBLIC_EXPO_GO === '1';
 
 /** Native Firebase config files are provided per environment (never committed), see docs/SETUP.md. */
 const googleServicesIos = process.env.GOOGLE_SERVICES_INFO_PLIST ?? './GoogleService-Info.plist';
@@ -17,16 +18,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   scheme: 'tuur',
   version: '0.1.0',
+  // Publish the Expo Go preview without enabling OTA delivery for native releases.
+  ...(expoGoPreview ? { updates: { url: 'https://u.expo.dev/2d786517-671d-464c-aafe-8893f358531e' } } : {}),
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   icon: `${brand}/icon-ios-1024.png`,
   ios: {
+    ...(expoGoPreview ? { runtimeVersion: { policy: 'appVersion' as const } } : {}),
     bundleIdentifier: 'com.tuurapp',
     supportsTablet: false,
     usesAppleSignIn: true,
     associatedDomains: ['applinks:tuur.app'],
     ...(googleServicesIos ? { googleServicesFile: googleServicesIos } : {}),
     infoPlist: {
+      NSSupportsLiveActivities: true,
       UIBackgroundModes: ['audio', 'location'],
       NSLocationWhenInUseUsageDescription:
         'tuur uses your location on your device to tell you the right story when you arrive at a place.',
@@ -68,6 +73,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   web: { favicon: `${brand}/favicon-48.png`, bundler: 'metro' },
   plugins: [
     'expo-router',
+    // Live Activities use the built-in target; widgets[] is for home-screen widgets only.
+    ['expo-widgets', { bundleIdentifier: 'com.tuurapp.widgets', groupIdentifier: 'group.com.tuurapp' }],
     'expo-font',
     [
       'expo-splash-screen',

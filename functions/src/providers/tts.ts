@@ -2,6 +2,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { estimateSpeechMs, silencePcm } from '@tuur/shared';
 import { Mp3Encoder } from '@breezystack/lamejs';
 import { TTS_SAMPLE_RATE, type TtsProviderId } from '@tuur/shared';
+import { MAX_TTS_OUTPUT_TOKENS } from './limits';
 
 export interface TtsRequest {
   text: string;
@@ -36,25 +37,68 @@ export interface AudioEncoder {
 /** Gemini TTS (same platform as the text model). The voice is the tuur guide voice configured per language. */
 export class GeminiTtsProvider implements TtsProvider {
   private readonly ai: GoogleGenAI;
-  constructor(apiKey: string) {
-    this.ai = new GoogleGenAI({ apiKey });
+  constructor(apiKey: string, client?: GoogleGenAI) {
+    this.ai =
+      client ?? new GoogleGenAI({ apiKey, httpOptions: { timeout: 120_000, retryOptions: { attempts: 1 } } });
   }
   async synthesize(req: TtsRequest) {
-    // Gemini TTS takes delivery directions as natural language in front of the transcript.
     const direction =
       req.style ?? 'Say in a warm, engaging, natural tour-guide voice, at a relaxed walking-tour pace';
+    if (/^gemini-3\.(?:[8-9]|\d{2,})-/.test(req.model)) {
+      // 3.8 reads text verbatim. Keep directions out of the transcript and explicitly request
+      // PCM: the default unary response is WAV, whose header must not be encoded as samples.
+      const result = await this.ai.interactions.create({
+        model: req.model,
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              {
+                type: 'text',
+                text: req.text,
+                annotations: [{ type: 'speech_metadata', style: `${direction} Speak in ${req.lang}.` }],
+              },
+            ],
+          },
+        ],
+        response_format: { type: 'audio', mime_type: 'audio/l16', sample_rate: TTS_SAMPLE_RATE },
+        generation_config: {
+          speech_config: [{ voice: req.voice }],
+          max_output_tokens: MAX_TTS_OUTPUT_TOKENS,
+        },
+        store: false,
+      });
+      const audio = result.output_audio;
+      if (!audio?.data) throw new Error('Gemini TTS returned no audio');
+      return { pcm: decodeGeminiPcm(audio.data, audio.mime_type), chars: req.text.length };
+    }
+    // Legacy 2.5/3.1 models use natural-language delivery directions before the transcript.
     const res = await this.ai.models.generateContent({
       model: req.model,
       contents: [{ parts: [{ text: `${direction}\n\nRead aloud exactly this text:\n${req.text}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
+        maxOutputTokens: MAX_TTS_OUTPUT_TOKENS,
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: req.voice } } },
       },
     });
-    const b64 = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
-    if (!b64) throw new Error('TTS returned no audio');
-    return { pcm: new Uint8Array(Buffer.from(b64, 'base64')), chars: req.text.length };
+    const audio = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
+    if (!audio?.data) throw new Error('Gemini TTS returned no audio');
+    return { pcm: decodeGeminiPcm(audio.data, audio.mimeType), chars: req.text.length };
   }
+}
+
+/** Fail before caching an MP3 if a provider returns a different encoding/sample rate. */
+export function decodeGeminiPcm(base64: string, mimeType?: string): Uint8Array {
+  if (mimeType && !/^audio\/(?:l16|pcm)(?:;|$)/i.test(mimeType))
+    throw new Error(`Gemini TTS returned unsupported audio format: ${mimeType}`);
+  const rate = mimeType?.match(/(?:rate|sample_rate)=(\d+)/i)?.[1];
+  if (rate && Number(rate) !== TTS_SAMPLE_RATE)
+    throw new Error('Gemini TTS returned an unsupported sample rate');
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length === 0 || bytes.length % 2 !== 0 || bytes.subarray(0, 4).toString() === 'RIFF')
+    throw new Error('Gemini TTS returned invalid PCM audio');
+  return new Uint8Array(bytes);
 }
 
 /**
@@ -70,6 +114,7 @@ export class OpenAiTtsProvider implements TtsProvider {
   async synthesize(req: TtsRequest) {
     const res = await this.fetcher('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
+      signal: AbortSignal.timeout(120_000),
       headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: req.model,

@@ -1,6 +1,8 @@
 import type { Interest } from '../constants';
 import { distanceMeters, type Bounds, type LatLng } from '../geo/geohash';
 import type { Poi } from '../schemas';
+import { isLocalContextPoi } from '../poi/localContext';
+import { normalizeName } from '../poi/merge';
 import { haversineMatrix, type RoutingProfile, type TravelMatrix } from './matrix';
 import { evaluateOrder, solveOrienteering, type Candidate, type OrienteeringResult } from './orienteering';
 import { DEFAULT_TOUR_RULES, validateTour, type TourIssue, type TourValidationRules } from './validation';
@@ -60,6 +62,7 @@ export const DEFAULT_TEMPLATES: TourTemplate[] = [
     minStops: 4,
     minCandidates: 6,
   },
+  { id: 'local_walk', budgetMinutes: 30, minScore: 1, minStops: 2, minCandidates: 2 },
 ];
 
 export interface PlanOptions {
@@ -110,7 +113,14 @@ export function dedupeNearby(pois: Poi[], minDistM: number): Poi[] {
   const sorted = [...pois].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   const kept: Poi[] = [];
   for (const p of sorted)
-    if (kept.every((k) => distanceMeters(k.location, p.location) >= minDistM)) kept.push(p);
+    if (
+      kept.every(
+        (k) =>
+          distanceMeters(k.location, p.location) >= minDistM &&
+          !(isLocalContextPoi(p) && isLocalContextPoi(k) && normalizeName(p.name) === normalizeName(k.name)),
+      )
+    )
+      kept.push(p);
   return kept;
 }
 
@@ -129,7 +139,18 @@ export function prepareTour(
   if (!start) return undefined;
   const speed = opt.profile === 'cycling-regular' ? 14 : 4.5;
   const radiusM = ((speed * 1000 * (template.budgetMinutes / 60)) / 2 / 1.3) * 1.0;
-  const near = eligible.filter((p) => distanceMeters(start.location, p.location) <= radiusM);
+  // Brief, source-backed details can connect a longer walk even if they do not meet its landmark threshold.
+  const extras = pois.filter(
+    (p) =>
+      !p.hidden &&
+      p.accessible &&
+      !p.partnerId &&
+      isLocalContextPoi(p) &&
+      (!template.interests || p.interests.some((i) => template.interests!.includes(i))),
+  );
+  const near = dedupeNearby([...eligible, ...extras], minDist).filter(
+    (p) => distanceMeters(start.location, p.location) <= radiusM,
+  );
   const candidates = near.slice(0, opt.maxCandidates ?? 30);
   if (!candidates.some((c) => c.id === start.id)) candidates.unshift(start);
   if (candidates.length < template.minCandidates) return undefined;

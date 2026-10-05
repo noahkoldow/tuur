@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   REGION_FIXTURES,
+  createTourScript,
+  narrationContextFor,
   decodePolyline,
   destinationPoint,
   encodeGeohash,
@@ -10,20 +12,27 @@ import {
 } from '@tuur/shared';
 import { SimulatedAudioEngine } from '../audio/simulatedEngine';
 import { createDemoBackend } from '../backend/demoBackend';
-import { BackendError, type Backend } from '../backend/types';
+import { BackendError, type Backend, type UserInfo } from '../backend/types';
 import { GuideRuntime } from '../guide/runtime';
 import { SimulatedLocationSource } from '../location/simulated';
 import { FakeClock } from '../testing/fakeClock';
 import { MemoryFileStore } from './fileStore';
 import { OfflineLibrary } from './library';
 import { DownloadError, DownloadManager } from './manager';
-import { NoopMapPackManager } from './mapPacks';
+import { NoopMapPackManager, UnavailableMapPackManager } from './mapPacks';
 import { withOfflineFirst } from './offlineBackend';
+import { downloadedTourScript } from './downloadScript';
 
 const berlin = REGION_FIXTURES[0]!;
 
 async function setup() {
   const backend = createDemoBackend({ latencyMs: 0 });
+  backend.demo!.grantSubscription();
+  await backend.auth.signInWithEmail('test@example.com', 'password', true);
+  await backend.auth.confirmPhoneVerification(
+    await backend.auth.requestPhoneVerification('+491701234567'),
+    '000000',
+  );
   const tile = encodeGeohash(berlin.center.lat, berlin.center.lng, 6);
   await backend.ensureArea(tile);
   for (let i = 0; i < 50; i++) {
@@ -50,6 +59,359 @@ async function setup() {
 }
 
 describe('offline downloads', () => {
+  it('downloads audio and texts without claiming a map when no offline source is available', async () => {
+    const { backend, tour, files, library } = await setup();
+    const maps = new UnavailableMapPackManager();
+    let mapAttempts = 0;
+    maps.create = async () => {
+      mapAttempts++;
+      throw new Error('must not prefetch');
+    };
+    const manager = new DownloadManager({ backend, files, maps, library });
+    expect(manager.mapsSupported).toBe(false);
+    const saved = await manager.start(tour, 'de', () => undefined);
+    expect(saved.complete).toBe(true);
+    expect(Object.keys(saved.narrations).length).toBeGreaterThan(0);
+    expect(saved.mapPack).toBeUndefined();
+    expect(library.list()[0]?.hasMap).toBe(false);
+    await expect(manager.repairMap(tour.id, () => undefined)).rejects.toMatchObject({ code: 'unsupported' });
+    expect(mapAttempts).toBe(0);
+  });
+
+  it('binds legacy downloads to their first authenticated owner without losing them', async () => {
+    const { tour, manager, files } = await setup();
+    await manager.start(tour, 'de', () => undefined);
+    await files.remove('downloads-owner.txt');
+    const restored = new OfflineLibrary(files, Date.now, true);
+    await restored.load();
+    expect(restored.list()).toEqual([]);
+    let cleared = false;
+    await restored.bindOwner('first-owner', async () => {
+      cleared = true;
+      await restored.clear();
+    });
+    expect(cleared).toBe(false);
+    expect(restored.available(tour.id)?.tourId).toBe(tour.id);
+    expect(await files.readText('downloads-owner.txt')).toBe('first-owner');
+  });
+
+  it('retains downloads when a guest is linked, but clears them before another UID can read them', async () => {
+    const { tour, manager, files, library, backend, maps } = await setup();
+    let user: UserInfo = { uid: 'owner-a', isAnonymous: true };
+    let notify!: (user: UserInfo | null) => void;
+    backend.auth.current = () => user;
+    backend.auth.ensureSignedIn = async () => user;
+    backend.auth.onChange = (cb) => {
+      notify = cb;
+      cb(user);
+      return () => undefined;
+    };
+    await manager.start(tour, 'de', () => undefined);
+    const wrapped = withOfflineFirst({ ...backend, getTour: async () => null }, library, files, {
+      clearAccountDownloads: () => manager.clearAll(false),
+    });
+    wrapped.auth.onChange(() => undefined);
+    user = { uid: 'owner-a', isAnonymous: false };
+    notify(user);
+    expect((await wrapped.getTour(tour.id))?.id).toBe(tour.id);
+    user = { uid: 'owner-b', isAnonymous: false };
+    notify(user);
+    expect(library.list()).toEqual([]);
+    expect(await wrapped.getTour(tour.id)).toBeNull();
+    expect(await files.exists('downloads')).toBe(false);
+    expect(maps.created).toEqual([]);
+    expect(await files.readText('downloads-owner.txt')).toBe('owner-b');
+  });
+
+  it('waits for a previous account download to stop before completing the UID change', async () => {
+    const { tour, manager, files, library, backend, maps } = await setup();
+    let user: UserInfo = { uid: 'owner-a', isAnonymous: true };
+    backend.auth.current = () => user;
+    backend.auth.ensureSignedIn = async () => user;
+    let release!: () => void;
+    let signal: { cancelled: boolean } | undefined;
+    let mapStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      mapStarted = resolve;
+    });
+    maps.create = async (_name, _bounds, _progress, options) => {
+      signal = options?.signal;
+      mapStarted();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    };
+    const download = manager.start(tour, 'de', () => undefined);
+    const cancelled = expect(download).rejects.toMatchObject({ code: 'cancelled' });
+    await started;
+    user = { uid: 'owner-b', isAnonymous: false };
+    const wrapped = withOfflineFirst({ ...backend, getTour: async () => null }, library, files, {
+      clearAccountDownloads: () => manager.clearAll(false),
+    });
+    const read = wrapped.getTour(tour.id);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(signal?.cancelled).toBe(true);
+    expect(library.list()).toEqual([]);
+    release();
+    await cancelled;
+    expect(await read).toBeNull();
+    expect(await files.exists('downloads')).toBe(false);
+  });
+
+  it('keeps previous-account content hidden and retryable if native map deletion fails', async () => {
+    const { tour, manager, files, library, backend, maps } = await setup();
+    await manager.start(tour, 'de', () => undefined);
+    backend.auth.current = () => ({ uid: 'new-owner', isAnonymous: false });
+    backend.auth.ensureSignedIn = async () => backend.auth.current()!;
+    const remove = maps.remove.bind(maps);
+    maps.remove = async () => {
+      throw new Error('native map deletion failed');
+    };
+    const wrapped = withOfflineFirst({ ...backend, getTour: async () => null }, library, files, {
+      clearAccountDownloads: () => manager.clearAll(false),
+    });
+    await expect(wrapped.getTour(tour.id)).rejects.toThrow('native map deletion failed');
+    expect(library.list()).toEqual([]);
+    expect(await files.exists('downloads')).toBe(true);
+    maps.remove = remove;
+    expect(await wrapped.getTour(tour.id)).toBeNull();
+    expect(await files.exists('downloads')).toBe(false);
+    expect(maps.created).toEqual([]);
+  });
+
+  it('cannot resurrect downloads when account deletion finishes during owner hydration', async () => {
+    const { tour, files, backend, library, maps } = await setup();
+    const manager = new DownloadManager({ backend, files, library, maps });
+    let release!: () => void;
+    let readingOwner!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      readingOwner = resolve;
+    });
+    const read = files.readText.bind(files);
+    files.readText = async (path) => {
+      if (path === 'downloads-owner.txt') {
+        readingOwner();
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return read(path);
+    };
+    let prepares = 0;
+    const prepare = backend.prepareTourDownload;
+    backend.prepareTourDownload = async (...args) => {
+      prepares++;
+      return prepare(...args);
+    };
+    const download = manager.start(tour, 'de', () => undefined);
+    const cancelled = expect(download).rejects.toMatchObject({ code: 'cancelled' });
+    await reading;
+    await manager.clearAll();
+    release();
+    await cancelled;
+    expect(prepares).toBe(0);
+    expect(await files.exists('downloads')).toBe(false);
+  });
+
+  it('waits for persisted downloads before attempting a cold-start network read', async () => {
+    const { tour, manager, files, backend } = await setup();
+    await manager.start(tour, 'de', () => undefined);
+    const restored = new OfflineLibrary(files);
+    let remoteReads = 0;
+    const offline = withOfflineFirst(
+      {
+        ...backend,
+        getTour: async () => {
+          remoteReads++;
+          throw new Error('airplane mode');
+        },
+      },
+      restored,
+      files,
+    );
+    const [first, second] = await Promise.all([offline.getTour(tour.id), offline.getTour(tour.id)]);
+    expect(first?.id).toBe(tour.id);
+    expect(second?.id).toBe(tour.id);
+    expect(remoteReads).toBe(0);
+  });
+
+  it('repairs missing maps without downloading or generating audio again', async () => {
+    const { tour, manager, maps, calls, library } = await setup();
+    maps.create = async () => {
+      throw new Error('tiles unavailable');
+    };
+    await manager.start(tour, 'de', () => undefined);
+    expect(library.available(tour.id)?.mapPack).toBeUndefined();
+    const before = calls.narration;
+    maps.create = async (_name, _bounds, progress) => {
+      progress(1);
+    };
+    await manager.repairMap(tour.id, () => undefined);
+    expect(library.available(tour.id)?.mapPack).toBe(tour.id);
+    expect(calls.narration).toBe(before);
+  });
+
+  it('removes downloads, orphan files and native maps before account deletion', async () => {
+    const { tour, manager, maps, files, library } = await setup();
+    await manager.start(tour, 'de', () => undefined);
+    await files.writeText('downloads/orphan/audio.mp3', 'partial');
+    await manager.clearAll();
+    expect(library.list()).toEqual([]);
+    expect(maps.created).toEqual([]);
+    expect(await files.exists('downloads')).toBe(false);
+    const restored = new OfflineLibrary(files);
+    await restored.load();
+    expect(restored.tours()).toEqual([]);
+  });
+
+  it('cancels ongoing writes before clearing account downloads', async () => {
+    const { tour, manager, maps, files, library } = await setup();
+    let completeMap!: () => void;
+    let mapStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      mapStarted = resolve;
+    });
+    maps.create = async () => {
+      mapStarted();
+      await new Promise<void>((resolve) => {
+        completeMap = resolve;
+      });
+    };
+    const download = manager.start(tour, 'de', () => undefined);
+    const cancelled = expect(download).rejects.toMatchObject({ code: 'cancelled' });
+    await started;
+    const clearing = manager.clearAll();
+    completeMap();
+    await Promise.all([clearing, cancelled]);
+    expect(library.list()).toEqual([]);
+    expect(await files.exists('downloads')).toBe(false);
+  });
+
+  it('downloads a curated route with its own access, then replays after online expiry without any network claim', async () => {
+    const { backend, tour, files, maps, library } = await setup();
+    const planned: Tour = {
+      ...tour,
+      id: 'planned_saved',
+      source: 'planned',
+      template: 'planned',
+      expiresAt: Date.now() + 1_000,
+    };
+    let prepares = 0;
+    let starts = 0;
+    const source: Backend = {
+      ...backend,
+      prepareTourDownload: async (tourId, mode) => {
+        prepares++;
+        expect({ tourId, mode }).toEqual({ tourId: planned.id, mode: 'planned' });
+        return { tourId, mode, grantedAt: Date.now(), expiresAt: null };
+      },
+      claimTourStart: async () => {
+        starts++;
+        throw new Error('Download must not count as a start');
+      },
+      getNarration: async (req) => {
+        expect(req.access).toEqual({ tourId: planned.id, mode: 'planned' });
+        expect(req.download).toBe(true);
+        const n = await backend.getNarration({ ...req, access: { tourId: tour.id, mode: 'tour' } });
+        return { ...n, audioUrl: `https://signed.example/${n.key}` };
+      },
+      getTransition: async (req) => {
+        expect(req.access).toEqual({ tourId: planned.id, mode: 'planned' });
+        expect(req.download).toBe(true);
+        const n = await backend.getTransition({ ...req, access: { tourId: tour.id, mode: 'tour' } });
+        return { ...n, audioUrl: `https://signed.example/${n.key}` };
+      },
+      audioUrl: async () => {
+        throw new Error('Use the signed URL returned by generation');
+      },
+    };
+    const manager = new DownloadManager({ backend: source, files, maps, library });
+    await manager.start(planned, 'de', () => undefined);
+    expect(prepares).toBe(1);
+    expect(starts).toBe(0);
+    const restored = new OfflineLibrary(files, () => Date.now() + 30 * 86400_000);
+    await restored.load();
+    const dead = async (): Promise<never> => {
+      throw new BackendError('network', 'airplane mode');
+    };
+    const offline = withOfflineFirst(
+      {
+        ...source,
+        getTour: dead,
+        claimTourStart: dead,
+        getNarration: dead,
+        getTransition: dead,
+        audioUrl: dead,
+      },
+      restored,
+      files,
+    );
+    expect((await offline.getTour(planned.id))?.expiresAt).toBe(planned.expiresAt);
+    await expect(offline.claimTourStart(planned.id, 'saved', 'planned')).resolves.toEqual({
+      counted: false,
+      remaining: null,
+    });
+    const req = {
+      poiId: planned.stops[0]!.poiId,
+      lang: 'de',
+      lengthTier: 'short' as const,
+      access: { tourId: planned.id, mode: 'planned' as const },
+      context: narrationContextFor(
+        downloadedTourScript(restored.get(planned.id)!),
+        planned.stops.map((s) => ({ id: s.poiId, name: s.name })),
+        planned.stops[0]!.poiId,
+      ),
+    };
+    const n = await offline.getNarration(req);
+    expect(await offline.audioUrl(n.audioPath)).toMatch(/^file:\/\/\/mem\//);
+    expect(n.images.length).toBeGreaterThan(0);
+    expect(n.images.every((image) => image.url.startsWith('file:///mem/'))).toBe(true);
+    await expect(offline.getNarration({ ...req, access: { mode: 'roam' } })).rejects.toMatchObject({
+      code: 'network',
+    });
+    const saved = restored.get(planned.id)!;
+    await restored.save({ ...saved, access: { ...saved.access!, expiresAt: 1 } });
+    expect(restored.available(planned.id)).toBeUndefined();
+    await expect(offline.claimTourStart(planned.id, 'saved', 'planned')).rejects.toMatchObject({
+      code: 'network',
+    });
+  });
+
+  it('rejects Explore and Crossroads before authorizing or writing any download', async () => {
+    const { tour, backend, files, maps, library } = await setup();
+    const manager = new DownloadManager({
+      backend: {
+        ...backend,
+        prepareTourDownload: async () => {
+          throw new Error('must not call');
+        },
+      },
+      files,
+      maps,
+      library,
+    });
+    for (const mode of ['roam', 'fork'])
+      await expect(
+        manager.start({ ...tour, id: `${mode}_session`, template: mode }, 'de', () => undefined),
+      ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(library.list()).toEqual([]);
+  });
+
+  it('guards duplicate starts and leaves cancellation during map creation resumable', async () => {
+    const { tour, backend, files, library } = await setup();
+    const signal = { cancelled: false };
+    const maps = new NoopMapPackManager();
+    maps.create = async () => {
+      signal.cancelled = true;
+    };
+    const manager = new DownloadManager({ backend, files, maps, library });
+    const first = manager.start(tour, 'de', () => undefined, signal);
+    await expect(manager.start(tour, 'de', () => undefined)).rejects.toMatchObject({ code: 'busy' });
+    await expect(first).rejects.toMatchObject({ code: 'cancelled' });
+    expect(library.get(tour.id)?.complete).toBe(false);
+    expect(library.available(tour.id)).toBeUndefined();
+  });
+
   it('downloads audio for every stop and tier, texts, transitions and the map pack with rising progress', async () => {
     const { tour, manager, library, files, maps } = await setup();
     const seen: number[] = [];
@@ -81,12 +443,15 @@ describe('offline downloads', () => {
     await expect(manager.start(tour, 'de', () => undefined)).rejects.toMatchObject({ code: 'failed' });
     expect(library.get(tour.id)?.complete).toBe(false);
     const done = Object.keys(library.get(tour.id)!.narrations).length;
+    const personalScript = library.get(tour.id)!.script;
+    expect(personalScript?.instanceId).toBeTruthy();
     expect(done).toBeGreaterThan(0);
     files.offline = false;
     files.download = orig;
     const before = calls.narration;
     const m = await manager.start(tour, 'de', () => undefined);
     expect(m.complete).toBe(true);
+    expect(m.script).toEqual(personalScript);
     const total = tour.stops.length * 3;
     expect(calls.narration - before).toBeLessThanOrEqual(total - done + 1);
   });
@@ -126,18 +491,29 @@ describe('offline downloads', () => {
     expect(fresh.findNarration('en', tour.stops[0]!.poiId, 'short')).toBeUndefined();
   });
 
+  it('repairs a missing local audio file when resuming', async () => {
+    const { tour, manager, files, calls } = await setup();
+    const saved = await manager.start(tour, 'de', () => undefined);
+    const missing = Object.values(saved.narrations)[0]!;
+    await files.remove(missing.audioFile);
+    const before = calls.narration;
+    await manager.start(tour, 'de', () => undefined);
+    expect(await files.exists(missing.audioFile)).toBe(true);
+    expect(calls.narration - before).toBe(1);
+  });
+
   it('plays a downloaded tour completely in airplane mode (network backend fully dead)', async () => {
     const { tour, manager, library, files } = await setup();
-    await manager.start(tour, 'de', () => undefined);
+    const saved = await manager.start(tour, 'de', () => undefined);
     const dead = (): never => {
       throw new BackendError('network', 'airplane mode');
     };
     const offlineNet: Backend = {
       kind: 'demo',
       auth: {
-        current: () => null,
+        current: () => ({ uid: 'demo-user', isAnonymous: false, phoneNumber: '+491701234567' }),
         onChange: () => () => undefined,
-        ensureSignedIn: async () => ({ uid: 'x', isAnonymous: true }),
+        ensureSignedIn: async () => ({ uid: 'demo-user', isAnonymous: false, phoneNumber: '+491701234567' }),
         signInWithEmail: dead,
         signInWithApple: dead,
         signInWithGoogle: dead,
@@ -151,6 +527,7 @@ describe('offline downloads', () => {
       watchTours: () => () => undefined,
       getTour: dead,
       getPois: dead,
+      selectNearby: dead,
       getExploredSpots: dead,
       composePlannedRoute: dead,
       getTeaser: dead,
@@ -160,6 +537,7 @@ describe('offline downloads', () => {
       reportNarration: dead,
       watchEntitlements: () => () => undefined,
       claimTourStart: dead,
+      prepareTourDownload: dead,
       spendCredit: dead,
       createInvite: dead,
       redeemInvite: dead,
@@ -181,6 +559,10 @@ describe('offline downloads', () => {
     };
     const backend = withOfflineFirst(offlineNet, library, files);
     expect((await backend.getTour(tour.id))?.id).toBe(tour.id);
+    await expect(backend.claimTourStart(tour.id, 'offline-replay', 'tour')).resolves.toEqual({
+      counted: false,
+      remaining: null,
+    });
 
     const clock = new FakeClock();
     const urls: string[] = [];
@@ -190,7 +572,14 @@ describe('offline downloads', () => {
       urls.push(item.url);
       return origPlay(item, opts);
     };
-    const runtime = new GuideRuntime({ backend, audio, lang: 'de', clock });
+    const runtime = new GuideRuntime({
+      backend,
+      audio,
+      lang: 'de',
+      clock,
+      script: saved.script!,
+      access: { tourId: tour.id, mode: 'tour' },
+    });
     const path: LatLng[] = [
       destinationPoint(tour.stops[0]!.location, 270, 120),
       ...decodePolyline(tour.path).map(([lat, lng]) => ({ lat, lng })),
@@ -215,5 +604,65 @@ describe('offline downloads', () => {
     expect(n.audioPath.startsWith('demo:')).toBe(true);
     const t: Tour | null = await wrapped.getTour(tour.id);
     expect(t?.id).toBe(tour.id);
+  });
+
+  it('never serves a saved personal recording to an independent online walk with an identical brief', async () => {
+    const { backend, tour, library, files, manager } = await setup();
+    const saved = await manager.start(tour, 'de', () => undefined);
+    const wrapped = withOfflineFirst(backend, library, files);
+    const stops = tour.stops.map((s) => ({ id: s.poiId, name: s.name }));
+    const first = tour.stops[0]!;
+    const req = {
+      poiId: first.poiId,
+      lang: 'de',
+      lengthTier: 'short' as const,
+      access: { tourId: tour.id, mode: 'tour' as const },
+      context: narrationContextFor(saved.script!, stops, first.poiId),
+    };
+    expect((await wrapped.getNarration(req)).audioPath.startsWith('local:')).toBe(true);
+    const fresh = createTourScript({ lang: 'de', tour, instanceId: 'independent-walk' });
+    expect(fresh.id).toBe(saved.script!.id);
+    const response = await wrapped.getNarration({
+      ...req,
+      context: narrationContextFor(fresh, stops, first.poiId),
+    });
+    expect(response.audioPath.startsWith('demo:')).toBe(true);
+    const next = tour.stops[1]!;
+    const transition = await wrapped.getTransition({
+      fromPoiId: first.poiId,
+      toPoiId: next.poiId,
+      lang: 'de',
+      walkMinutes: 2,
+      access: req.access,
+      scriptInstanceId: fresh.instanceId!,
+    });
+    expect(transition.audioPath.startsWith('demo:')).toBe(true);
+  });
+
+  it('reopens legacy downloaded audio only through its explicit saved archive identity', async () => {
+    const { backend, tour, library, files, manager } = await setup();
+    const saved = await manager.start(tour, 'de', () => undefined);
+    delete saved.script;
+    await library.save(saved);
+    const script = downloadedTourScript(saved);
+    expect(downloadedTourScript(JSON.parse(JSON.stringify(saved)))).toEqual(script);
+    const wrapped = withOfflineFirst(backend, library, files);
+    const first = tour.stops[0]!;
+    const req = {
+      poiId: first.poiId,
+      lang: 'de',
+      lengthTier: 'short' as const,
+      access: { tourId: tour.id, mode: 'tour' as const },
+    };
+    const ownArchive = await wrapped.getNarration({
+      ...req,
+      context: narrationContextFor(
+        script,
+        tour.stops.map((s) => ({ id: s.poiId, name: s.name })),
+        first.poiId,
+      ),
+    });
+    expect(ownArchive.audioPath.startsWith('local:')).toBe(true);
+    expect((await wrapped.getNarration(req)).audioPath.startsWith('demo:')).toBe(true);
   });
 });

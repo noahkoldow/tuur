@@ -9,7 +9,8 @@ export interface FactVerdict {
 export interface FactCheckResult {
   ok: boolean;
   unsupported: string[];
-  reason?: 'llm_unsupported' | 'numbers_not_in_sources' | 'no_key_facts' | 'markup_or_lists';
+  reason?:
+    'llm_unsupported' | 'numbers_not_in_sources' | 'no_key_facts' | 'markup_or_lists' | 'raw_source_text';
 }
 
 /** Numbers with 3+ digits (years, heights) or dotted forms; these are the classic hallucination targets. */

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Alert, Linking, Platform, Share, Switch, TextInput, View } from 'react-native';
+import { Alert, Linking, Share, Switch, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_VOICE_CAST, INTERESTS, SUPPORTED_UI_LANGUAGES } from '@tuur/shared';
 import { getAds } from '../../../src/billing/entitlements';
 import { useBackend } from '../../../src/backend';
-import { AppleSignInButton } from '../../../src/components/AppleSignInButton';
 import { Banner } from '../../../src/components/Banner';
 import { BrandMark } from '../../../src/components/Brand';
 import { Button } from '../../../src/components/Button';
@@ -16,6 +15,7 @@ import { Text } from '../../../src/components/Text';
 import { config, isDev } from '../../../src/config';
 import { setCrashReporting } from '../../../src/telemetry';
 import { endSession } from '../../../src/guide/session';
+import { getDownloadManager } from '../../../src/offline';
 import { useHistory } from '../../../src/state/history';
 import { useSettings, type NarrationFrequency } from '../../../src/state/settings';
 import { metrics, sys } from '../../../src/theme';
@@ -42,55 +42,11 @@ export default function Settings() {
   const backend = useBackend();
   const [notice, setNotice] = useState<{ tone: 'info' | 'warning'; text: string } | undefined>();
   const [user, setUser] = useState(backend.auth.current());
-  const [phoneOpen, setPhoneOpen] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [phoneCode, setPhoneCode] = useState('');
-  const [phoneVerificationId, setPhoneVerificationId] = useState<string>();
-  const [phoneBusy, setPhoneBusy] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [openPicker, setOpenPicker] = useState<string | undefined>();
   const toggle = (id: string) => setOpenPicker((cur) => (cur === id ? undefined : id));
 
   useEffect(() => backend.auth.onChange(setUser), [backend]);
-
-  const requestPhoneCode = async () => {
-    setPhoneBusy(true);
-    setNotice(undefined);
-    try {
-      setPhoneVerificationId(await backend.auth.requestPhoneVerification(phoneNumber.trim()));
-      setNotice({ tone: 'info', text: t('account.phoneCodeSent') });
-    } catch {
-      setNotice({ tone: 'warning', text: t('account.phoneFailed') });
-    } finally {
-      setPhoneBusy(false);
-    }
-  };
-
-  const confirmPhoneCode = async () => {
-    if (!phoneVerificationId) return;
-    setPhoneBusy(true);
-    setNotice(undefined);
-    try {
-      setUser(await backend.auth.confirmPhoneVerification(phoneVerificationId, phoneCode.trim()));
-      setPhoneVerificationId(undefined);
-      setPhoneCode('');
-      setPhoneOpen(false);
-      setNotice({ tone: 'info', text: t('account.phoneVerified') });
-    } catch {
-      setNotice({ tone: 'warning', text: t('account.phoneFailed') });
-    } finally {
-      setPhoneBusy(false);
-    }
-  };
-
-  const signIn = async (f: () => Promise<unknown>) => {
-    setNotice(undefined);
-    try {
-      await f();
-    } catch {
-      setNotice({ tone: 'warning', text: t('errors.generic') });
-    }
-  };
 
   const toggleAnalytics = (v: boolean) => {
     set({ analyticsConsent: v });
@@ -99,6 +55,15 @@ export default function Settings() {
   const adChoices = async () => {
     const shown = await getAds().showPrivacyOptions();
     if (!shown) setNotice({ tone: 'info', text: t('account.adChoicesNone') });
+  };
+  const signOut = async () => {
+    try {
+      await endSession();
+      await backend.auth.signOut();
+      router.replace('/');
+    } catch {
+      setNotice({ tone: 'warning', text: t('errors.generic') });
+    }
   };
   const exportData = async () => {
     try {
@@ -119,6 +84,7 @@ export default function Settings() {
           void (async () => {
             try {
               await endSession();
+              await getDownloadManager().clearAll();
               await backend.deleteAccount();
               set({ onboarded: false, interests: [], analyticsConsent: false });
               useHistory.getState().clear();
@@ -168,7 +134,7 @@ export default function Settings() {
           label={t('settings.interests')}
           hint={t('onboarding.interestsHint')}
           multiple
-          choices={INTERESTS.map((i) => ({ id: i, label: t(`interests.${i}`) }))}
+          choices={INTERESTS.map((i) => ({ id: i, label: t(`interests.${i}`), interest: i }))}
           selected={interests}
           onChange={(next) => set({ interests: next as typeof interests })}
           open={openPicker === 'interests'}
@@ -250,73 +216,16 @@ export default function Settings() {
         <ListRow
           icon="user"
           label={accountName ? t('settings.signedInAs', { name: accountName }) : t('account.anonymous')}
-          {...(user?.isAnonymous !== false ? { hint: t('settings.linkAccountHint') } : {})}
+          {...(user?.isAnonymous !== false
+            ? { hint: t('settings.linkAccountHint'), onPress: () => router.replace('/sign-in') }
+            : {})}
         />
-        {user?.isAnonymous !== false && (Platform.OS === 'ios' || backend.kind === 'demo') ? (
-          <View style={{ padding: metrics.margin }}>
-            <AppleSignInButton
-              label={t('onboarding.signInApple')}
-              onPress={() => void signIn(() => backend.auth.signInWithApple())}
-            />
-          </View>
-        ) : null}
-        {user?.isAnonymous !== false ? (
-          <ListRow
-            icon="log-in"
-            label={t('onboarding.signInGoogle')}
-            onPress={() => void signIn(() => backend.auth.signInWithGoogle())}
-          />
-        ) : null}
         {user?.phoneNumber ? (
           <ListRow icon="check-circle" label={t('account.phoneVerifiedAs', { phone: user.phoneNumber })} />
         ) : (
-          <ListRow icon="phone" label={t('account.phoneTitle')} onPress={() => setPhoneOpen((o) => !o)} />
+          <ListRow icon="log-in" label={t('auth.signIn')} onPress={() => router.replace('/sign-in')} />
         )}
-        {phoneOpen && !user?.phoneNumber ? (
-          <View style={{ padding: metrics.margin, gap: 12 }}>
-            <Text variant="footnote">{t('account.phoneHint')}</Text>
-            <TextInput
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              placeholder={t('account.phonePlaceholder')}
-              placeholderTextColor={sys.labelTertiary}
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              autoComplete="tel"
-              accessibilityLabel={t('account.phoneTitle')}
-              style={inputStyle}
-            />
-            {phoneVerificationId ? (
-              <>
-                <TextInput
-                  value={phoneCode}
-                  onChangeText={setPhoneCode}
-                  placeholder={t('account.phoneCodePlaceholder')}
-                  placeholderTextColor={sys.labelTertiary}
-                  keyboardType="number-pad"
-                  textContentType="oneTimeCode"
-                  autoComplete="sms-otp"
-                  accessibilityLabel={t('account.phoneCodePlaceholder')}
-                  style={inputStyle}
-                />
-                <Button
-                  label={t('account.phoneConfirm')}
-                  loading={phoneBusy}
-                  disabled={phoneCode.trim().length < 4}
-                  onPress={() => void confirmPhoneCode()}
-                />
-              </>
-            ) : (
-              <Button
-                variant="secondary"
-                label={t('account.phoneSendCode')}
-                loading={phoneBusy}
-                disabled={!phoneNumber.trim()}
-                onPress={() => void requestPhoneCode()}
-              />
-            )}
-          </View>
-        ) : null}
+        <ListRow icon="log-out" label={t('auth.signOut')} onPress={() => void signOut()} />
         <ListRow icon="trash-2" label={t('account.delete')} destructive onPress={deleteAccount} />
       </ListGroup>
 
@@ -365,14 +274,3 @@ export default function Settings() {
     </ScrollScreen>
   );
 }
-
-const inputStyle = {
-  minHeight: 44,
-  borderRadius: metrics.radius.row,
-  borderCurve: 'continuous',
-  backgroundColor: sys.fill,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  fontSize: 17,
-  color: sys.label,
-} as const;

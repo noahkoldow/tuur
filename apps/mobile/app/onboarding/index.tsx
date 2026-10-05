@@ -30,7 +30,7 @@ const LANGUAGE_NAMES: Record<UiLanguage, string> = { de: 'Deutsch', en: 'English
 /**
  * Onboarding that shows instead of tells: three illustrated pages (walk and listen, tap a place, choose how), then
  * interests (skippable) and the location request with its reason. The intro can be skipped at any time; the
- * account stays optional, everyone starts anonymously. Terms and privacy are one tap away on the last intro page.
+ * account and mobile verification are completed first. Terms and privacy stay one tap away.
  */
 export default function Onboarding() {
   const { t } = useTranslation();
@@ -78,7 +78,7 @@ export default function Onboarding() {
       await backend.auth.ensureSignedIn();
       haptics.success();
       set({ onboarded: true });
-      router.replace('/home');
+      router.replace('/');
     } catch (e) {
       setError(e instanceof BackendError && e.code === 'network' ? t('errors.network') : t('errors.generic'));
     } finally {
@@ -137,14 +137,11 @@ export default function Onboarding() {
           {intro ? (
             <>
               <IntroArt kind={intro.kind} />
-              <View
-                accessible
-                accessibilityLabel={t('onboarding.pageOf', { index: intro.n, total: 3 })}
-                style={{ gap: 8, paddingHorizontal: 4 }}
-              >
+              <View style={{ gap: 8, paddingHorizontal: 4 }}>
                 <Text variant="title1" accessibilityRole="header">
                   {t(`onboarding.slide${intro.n}Title`)}
                 </Text>
+                <Text variant="footnote">{t('onboarding.pageOf', { index: intro.n, total: 3 })}</Text>
                 <Text variant="body" color={sys.labelSecondary}>
                   {t(`onboarding.slide${intro.n}Body`)}
                 </Text>
@@ -172,6 +169,7 @@ export default function Onboarding() {
                 {INTERESTS.map((i) => (
                   <Chip
                     key={i}
+                    interest={i}
                     label={t(`interests.${i}`)}
                     selected={interests.includes(i)}
                     onPress={() =>

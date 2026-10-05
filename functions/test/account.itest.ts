@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { REGION_FIXTURES, buildPois, type Poi } from '@tuur/shared';
 import { deleteAccount, exportMyData, type AccountDeps } from '../src/account/service';
 import { MockPayments } from '../src/partners/payments';
+import { personalAudioPrefix } from '../src/narration/personalScope';
 import {
   processPaymentEvent,
   saveOffer,
@@ -38,6 +39,11 @@ async function seedUserData(uid: string) {
     .set({ type: 'tour', tourId: 't1', source: 'credit', expiresAt: null });
   await u.collection('credits').doc('wallet').set({ balance: 2, rewardBalance: 1 });
   await u.collection('creditLedger').doc('l1').set({ delta: -1, kind: 'tour', ts: clock });
+  await db
+    .collection('revenuecatPurchases')
+    .doc('transaction-fingerprint')
+    .set({ ownerUid: uid, transactionId: 'private-receipt', remaining: 2 });
+  await db.collection('revenuecatSubscriptions').doc('subscription-fingerprint').set({ ownerUid: uid });
   await u
     .collection('sessions')
     .doc('s1')
@@ -70,6 +76,49 @@ async function seedUserData(uid: string) {
   await db.collection('rateLimits').doc(`narr_user_${uid}2`).set({ count: 1 }); // another user whose id starts the same way must survive... see below
   await db.collection('rateLimits').doc('narr_user_other').set({ count: 9 });
   await db.collection('usageDaily').doc('2026-01-01').set({ costUsd: 3 });
+  await db
+    .collection('groups')
+    .doc('hosted-group')
+    .set({
+      id: 'hosted-group',
+      hostUid: uid,
+      members: [uid, 'private-guest-uid'],
+      inviteHash: 'private-group-hash',
+      tour: { id: 't1' },
+      mode: 'tour',
+      status: 'live',
+      createdAt: clock,
+      expiresAt: clock + 1000,
+    });
+  await db
+    .collection('groups')
+    .doc('joined-group')
+    .set({
+      id: 'joined-group',
+      hostUid: 'private-host-uid',
+      members: ['private-host-uid', uid, 'other-member'],
+      inviteHash: 'other-private-hash',
+      tour: { id: 't2', path: 'other-private-route' },
+      mode: 'tour',
+      status: 'live',
+      createdAt: clock,
+      expiresAt: clock + 1000,
+    });
+  await db.collection('rateLimits').doc(`group_join_${uid}`).set({ count: 1 });
+  await db
+    .collection('narrations')
+    .doc('my-personal-recording')
+    .set({ ownerUid: uid, text: 'My private walk' });
+  await db
+    .collection('narrations')
+    .doc('my-personal-recording')
+    .collection('voices')
+    .doc('mara')
+    .set({ audioPath: `${personalAudioPrefix(uid)}chapter.mp3` });
+  await db
+    .collection('narrations')
+    .doc('another-personal-recording')
+    .set({ ownerUid: 'other-owner', text: 'Someone else private recording' });
 }
 
 beforeEach(async () => {
@@ -87,11 +136,30 @@ describe('account export', () => {
   it('contains the account data without secrets or other users’ data', async () => {
     const u = await makeUser('me@example.com');
     await seedUserData(u.uid);
-    const out = await exportMyData(deps(), u.uid);
+    const out = await exportMyData(
+      {
+        ...deps(),
+        payments: () => {
+          throw new Error('Stripe not configured');
+        },
+      },
+      u.uid,
+    );
     expect(out.account).toMatchObject({ uid: u.uid, email: 'me@example.com' });
     expect(out.wallet).toEqual({ balance: 2, rewardBalance: 1 });
     expect(out.entitlements).toHaveLength(1);
     expect(out.creditLedger).toHaveLength(1);
+    expect(out.purchases).toHaveLength(1);
+    expect(out.subscriptions).toHaveLength(1);
+    expect(out.personalNarrations).toHaveLength(1);
+    expect(out.personalNarrations[0]).toMatchObject({ ownerUid: u.uid, text: 'My private walk' });
+    expect(out.groups).toHaveLength(2);
+    expect(out.groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'hosted-group', role: 'host', tourId: 't1' }),
+        expect.objectContaining({ id: 'joined-group', role: 'member', tourId: 't2' }),
+      ]),
+    );
     expect(out.invitesCreated).toEqual([
       { tourId: 't1', createdAt: clock, expiresAt: clock + 1e6, redeemed: false },
     ]);
@@ -101,6 +169,11 @@ describe('account export', () => {
     expect(json).not.toContain('hash1');
     expect(json).not.toContain('secretRoute');
     expect(json).not.toContain('someoneElse');
+    expect(json).not.toContain('private-group-hash');
+    expect(json).not.toContain('private-guest-uid');
+    expect(json).not.toContain('private-host-uid');
+    expect(json).not.toContain('other-private-route');
+    expect(json).not.toContain('Someone else private recording');
   });
 });
 
@@ -110,12 +183,33 @@ describe('account deletion', () => {
     const other = await makeUser('other@example.com');
     await seedUserData(u.uid);
     await db.collection('users').doc(other.uid).set({ language: 'en' });
-    const r = await deleteAccount(deps(), u.uid);
+    const r = await deleteAccount(
+      {
+        ...deps(),
+        payments: () => {
+          throw new Error('Stripe not configured');
+        },
+      },
+      u.uid,
+    );
     expect(r.deleted).toBe(true);
+    expect((await db.collection('narrations').doc('my-personal-recording').get()).exists).toBe(false);
+    expect(
+      (await db.collection('narrations').doc('my-personal-recording').collection('voices').get()).empty,
+    ).toBe(true);
+    expect((await db.collection('narrations').doc('another-personal-recording').get()).exists).toBe(true);
 
     expect((await db.collection('users').doc(u.uid).get()).exists).toBe(false);
     expect((await db.collection('users').doc(u.uid).collection('entitlements').get()).size).toBe(0);
     expect((await db.collection('users').doc(u.uid).collection('sessions').get()).size).toBe(0);
+    expect((await db.collection('revenuecatPurchases').doc('transaction-fingerprint').get()).data()).toEqual({
+      deleted: true,
+      remaining: 0,
+      updatedAt: clock,
+    });
+    expect(
+      (await db.collection('revenuecatSubscriptions').doc('subscription-fingerprint').get()).data(),
+    ).toEqual({ deleted: true, remaining: 0, updatedAt: clock });
     expect((await db.collection('invites').doc('hash1').get()).exists).toBe(false);
     expect((await db.collection('invites').doc('hash2').get()).get('redeemedBy')).toBe('deleted');
     expect((await db.collection('redemptionTokens').get()).size).toBe(0);
@@ -123,6 +217,13 @@ describe('account deletion', () => {
     // the report (its id contains the uid and its text may identify the user) is deleted, not just stripped
     expect((await db.collection('feedback').doc(`${u.uid}__k`).get()).exists).toBe(false);
     expect((await db.collection('rateLimits').doc(`narr_user_${u.uid}`).get()).exists).toBe(false);
+    expect((await db.collection('rateLimits').doc(`narr_user_${u.uid}2`).get()).exists).toBe(true);
+    expect((await db.collection('rateLimits').doc(`group_join_${u.uid}`).get()).exists).toBe(false);
+    expect((await db.collection('groups').doc('hosted-group').get()).exists).toBe(false);
+    expect((await db.collection('groups').doc('joined-group').get()).get('members')).toEqual([
+      'private-host-uid',
+      'other-member',
+    ]);
     expect((await db.collection('rateLimits').doc('narr_user_other').get()).exists).toBe(true);
     expect((await db.collection('usageDaily').doc('2026-01-01').get()).exists).toBe(true);
     expect((await db.collection('users').doc(other.uid).get()).exists).toBe(true);

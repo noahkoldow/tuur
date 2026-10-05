@@ -1,19 +1,26 @@
 import { initializeApp } from 'firebase-admin/app';
+import { BudgetError } from './util/usage';
+import { allowSandboxBilling } from './billing/environment';
+import { RevenueCatV2 } from './billing/revenuecat';
 import { getFunctions } from 'firebase-admin/functions';
 import { setGlobalOptions } from 'firebase-functions/v2';
+import { error as logError } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { EnsureAreaRequestSchema, NarrationLangSchema, rateLimitDecision } from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
+import { ensureBetaSnapshotArea, BetaSnapshotError } from './area/betaSnapshot';
 import { ingestArea as runIngest } from './area/ingest';
 import {
   GEMINI_API_KEY,
-  OPENAI_API_KEY,
+  NARRATION_SECRETS,
+  ACCOUNT_SECRETS,
   ORS_API_KEY,
   db,
   geocoder,
   llm,
   narrationDeps,
+  teaserDeps,
   objectStore,
   PARTNER_SECRETS,
   partnerDeps,
@@ -27,6 +34,7 @@ import { composePlannedRoute as runComposeRoute } from './tours/planned';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
+import { selectNearby as runSelectNearby } from './discovery/service';
 import { recordVisit as runRecordVisit } from './stats/explorers';
 import { GroupError, addGroupSeat, createGroup, joinGroup, leaveGroup } from './groups/service';
 import { submitPartnerApplication as runSubmitApplication } from './partners/application';
@@ -79,19 +87,37 @@ import {
   spendCredit as runSpendCredit,
   verifyBearer,
 } from './billing/entitlements';
-import { fetchVerifierKeys, verifyAdmobSignature } from './billing/ssv';
+import { completeAdmobCallback, fetchVerifierKeys, verifyAdmobSignature } from './billing/ssv';
+import { prepareTourDownload as runPrepareTourDownload } from './billing/downloads';
 import { onRequest } from 'firebase-functions/v2/https';
-import { defineSecret } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 
 initializeApp();
 const REGION = 'europe-west1';
-setGlobalOptions({ region: REGION, maxInstances: 20 });
+const deploymentEnvironment = defineString('TUUR_DEPLOYMENT_ENV', { default: 'production' });
+// Empty retains the platform default outside deployments that explicitly choose dedicated identities.
+const healthServiceAccount = defineString('TUUR_HEALTH_SERVICE_ACCOUNT', { default: '' });
+const revenueCatServiceAccount = defineString('TUUR_REVENUECAT_SERVICE_ACCOUNT', { default: '' });
+const admobServiceAccount = defineString('TUUR_ADMOB_SERVICE_ACCOUNT', { default: '' });
+const coreServiceAccount = defineString('TUUR_CORE_SERVICE_ACCOUNT', { default: '' });
+const aiServiceAccount = defineString('TUUR_AI_SERVICE_ACCOUNT', { default: '' });
+// Keep the isolated beta small and idle at zero. These bounds limit capacity, not the final invoice.
+setGlobalOptions({
+  region: REGION,
+  serviceAccount: coreServiceAccount,
+  minInstances: 0,
+  maxInstances: deploymentEnvironment.equals('beta').thenElse(1, 20),
+  concurrency: deploymentEnvironment.equals('beta').thenElse(1, 80),
+});
 
 const isEmulator = process.env['FUNCTIONS_EMULATOR'] === 'true';
 // App Check is enforced in production; the emulator has no attestation provider.
 const enforceAppCheck = !isEmulator;
 
-export const health = onCall(() => ({ ok: true, service: 'tuur-functions' }));
+export const health = onCall({ timeoutSeconds: 10, serviceAccount: healthServiceAccount }, () => ({
+  ok: true,
+  service: 'tuur-functions',
+}));
 
 async function enforceRateLimit(key: string, limit: number, windowMs: number): Promise<void> {
   const ref = db().collection('rateLimits').doc(key);
@@ -110,28 +136,58 @@ async function enforceRateLimit(key: string, limit: number, windowMs: number): P
 }
 
 /** Client sends only the geohash tile (never the exact position). */
-export const ensureArea = onCall({ enforceAppCheck }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in (anonymous is fine) first');
-  const parsed = EnsureAreaRequestSchema.safeParse(request.data);
-  if (!parsed.success) throw new HttpsError('invalid-argument', 'Invalid geohash');
-  await enforceRateLimit(`ensureArea_${request.auth.uid}`, 30, 60_000);
-  const queue = getFunctions().taskQueue(`locations/${REGION}/functions/ingestArea`);
-  const res = await ensureAreas(
-    {
-      db: db(),
-      now: Date.now,
-      enqueueIngest: (geohash) => queue.enqueue({ geohash }, { dispatchDeadlineSeconds: 540 }),
-    },
-    parsed.data.geohash,
-    parsed.data.withNeighbors,
-    parsed.data.rings,
-  );
-  return res;
-});
+export const ensureArea = onCall(
+  {
+    enforceAppCheck,
+    secrets: process.env['TUUR_BETA_SNAPSHOT_TILES'] ? [] : [GEMINI_API_KEY, ORS_API_KEY],
+    timeoutSeconds: 300,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in (anonymous is fine) first');
+    const parsed = EnsureAreaRequestSchema.safeParse(request.data);
+    if (!parsed.success) throw new HttpsError('invalid-argument', 'Invalid geohash');
+    await enforceRateLimit(`ensureArea_${request.auth.uid}`, 30, 60_000);
+    try {
+      const snapshot = await ensureBetaSnapshotArea(
+        db(),
+        parsed.data.geohash,
+        parsed.data.withNeighbors,
+        parsed.data.rings,
+      );
+      if (snapshot) return snapshot;
+    } catch (error) {
+      if (error instanceof BetaSnapshotError)
+        throw new HttpsError('failed-precondition', error.message, { reason: error.reason });
+      throw error;
+    }
+    const queue = getFunctions().taskQueue(`locations/${REGION}/functions/ingestArea`);
+    const res = await ensureAreas(
+      {
+        db: db(),
+        now: Date.now,
+        // Cloud Tasks has no local emulator. Run locally so Expo Go can actually discover places.
+        enqueueIngest: async (geohash) => {
+          if (isEmulator) {
+            const ai = await loadAiConfig(db());
+            await runIngest(
+              { db: db(), sources: poiSources(), geocoder: geocoder(), llm: llm(), ai, now: Date.now },
+              geohash,
+            );
+          } else await queue.enqueue({ geohash }, { dispatchDeadlineSeconds: 540 });
+        },
+      },
+      parsed.data.geohash,
+      parsed.data.withNeighbors,
+      parsed.data.rings,
+    );
+    return res;
+  },
+);
 
 export const ingestArea = onTaskDispatched(
   {
-    secrets: [GEMINI_API_KEY],
+    serviceAccount: aiServiceAccount,
+    secrets: [GEMINI_API_KEY, ORS_API_KEY],
     retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
     rateLimits: { maxConcurrentDispatches: 6, maxDispatchesPerSecond: 3 },
     timeoutSeconds: 540,
@@ -149,13 +205,15 @@ export const ingestArea = onTaskDispatched(
 );
 
 function toHttpsError(e: unknown): never {
-  if (e instanceof NarrationError) throw new HttpsError(e.code, e.message, e.details);
+  if (e instanceof NarrationError || e instanceof BudgetError)
+    throw new HttpsError(e.code, e.message, e.details);
   throw e;
 }
 
 const genOptions = {
   enforceAppCheck,
-  secrets: [GEMINI_API_KEY, OPENAI_API_KEY],
+  serviceAccount: aiServiceAccount,
+  secrets: NARRATION_SECRETS,
   timeoutSeconds: 300,
   memory: '1GiB' as const,
 };
@@ -189,7 +247,7 @@ export const reportNarration = onCall({ enforceAppCheck }, async (request) => {
   const p = FeedbackSchema.safeParse(request.data);
   if (!p.success) throw new HttpsError('invalid-argument', 'Invalid report');
   try {
-    const d = narrationDeps();
+    const d = { db: db(), store: objectStore(), now: Date.now };
     return await reportNarrationIssue(d, request.auth.uid, p.data);
   } catch (e) {
     if (e instanceof Error && e.message === 'rate_limited')
@@ -208,7 +266,8 @@ const GenerateToursSchema = z.object({
 export const generateAutoTours = onCall(
   {
     enforceAppCheck,
-    secrets: [GEMINI_API_KEY, OPENAI_API_KEY, ORS_API_KEY],
+    serviceAccount: aiServiceAccount,
+    secrets: [GEMINI_API_KEY, ORS_API_KEY],
     timeoutSeconds: 300,
     memory: '1GiB',
   },
@@ -216,7 +275,6 @@ export const generateAutoTours = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     const p = GenerateToursSchema.safeParse(request.data);
     if (!p.success) throw new HttpsError('invalid-argument', 'Invalid request');
-    const nd = narrationDeps();
     try {
       return await runGenerateTours(
         {
@@ -224,18 +282,13 @@ export const generateAutoTours = onCall(
           llm: llm(),
           routing: routing(),
           now: Date.now,
-          pregenerate: async (ids, lang) => {
-            for (const poiId of ids)
-              await runGetNarration(nd, 'system-pregen', { poiId, lang, lengthTier: 'medium' }).catch(
-                () => undefined,
-              );
-          },
         },
         request.auth.uid,
         p.data,
       );
     } catch (e) {
-      if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
+      if (e instanceof TourError || e instanceof BudgetError)
+        throw new HttpsError(e.code, e.message, e.details);
       throw e;
     }
   },
@@ -244,7 +297,8 @@ export const generateAutoTours = onCall(
 export const composePlannedRoute = onCall(
   {
     enforceAppCheck,
-    secrets: [GEMINI_API_KEY, OPENAI_API_KEY, ORS_API_KEY],
+    serviceAccount: aiServiceAccount,
+    secrets: [GEMINI_API_KEY, ORS_API_KEY],
     timeoutSeconds: 120,
     memory: '512MiB',
   },
@@ -253,20 +307,33 @@ export const composePlannedRoute = onCall(
     try {
       return await runComposeRoute(plannedRouteDeps(), request.auth.uid, request.data);
     } catch (e) {
-      if (e instanceof TourError) throw new HttpsError(e.code, e.message, e.details);
+      if (e instanceof TourError || e instanceof BudgetError)
+        throw new HttpsError(e.code, e.message, e.details);
       throw e;
     }
   },
 );
 
 export const getTeaser = onCall(
-  { enforceAppCheck, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
+  { enforceAppCheck, serviceAccount: aiServiceAccount, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     try {
-      return await runGetTeaser(narrationDeps(), request.auth.uid, request.data);
+      return await runGetTeaser(teaserDeps(), request.auth.uid, request.data);
     } catch (e) {
       return toHttpsError(e);
+    }
+  },
+);
+
+export const selectNearby = onCall(
+  { enforceAppCheck, serviceAccount: aiServiceAccount, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runSelectNearby(teaserDeps(), request.auth.uid, request.data);
+    } catch (error) {
+      return toHttpsError(error);
     }
   },
 );
@@ -274,6 +341,9 @@ export const getTeaser = onCall(
 // ---- Monetization (spec 6): all entitlement writes happen here, never on the client ----
 
 const REVENUECAT_WEBHOOK_SECRET = defineSecret('REVENUECAT_WEBHOOK_SECRET');
+const REVENUECAT_API_V2_KEY = defineSecret('REVENUECAT_API_V2_KEY');
+const REVENUECAT_PROJECT_ID = defineString('REVENUECAT_PROJECT_ID', { default: '' });
+const ADMOB_REWARDED_UNIT = defineString('TUUR_ADMOB_REWARDED_UNIT', { default: '' });
 
 function toBilling(e: unknown): never {
   if (e instanceof BillingError) throw new HttpsError(e.code, e.message, e.details);
@@ -293,6 +363,15 @@ export const claimTourStart = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   try {
     return await runClaimTourStart({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const prepareTourDownload = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runPrepareTourDownload({ db: db(), now: Date.now }, request.auth.uid, request.data);
   } catch (e) {
     return toBilling(e);
   }
@@ -345,48 +424,88 @@ export const createRewardNonce = onCall({ enforceAppCheck }, async (request) => 
 
 /** RevenueCat webhook: authenticated by a shared bearer secret; events are idempotent. */
 export const revenueCatWebhook = onRequest(
-  { secrets: [REVENUECAT_WEBHOOK_SECRET], cors: false },
+  {
+    secrets: [REVENUECAT_WEBHOOK_SECRET, REVENUECAT_API_V2_KEY],
+    cors: false,
+    timeoutSeconds: 120,
+    serviceAccount: revenueCatServiceAccount,
+  },
   async (req, res) => {
     if (req.method !== 'POST') return void res.status(405).send('method not allowed');
     if (!verifyBearer(req.get('authorization'), REVENUECAT_WEBHOOK_SECRET.value()))
       return void res.status(401).send('unauthorized');
     try {
       const out = await processRevenueCatEvent(
-        { db: db(), now: Date.now, allowSandbox: isEmulator || process.env['TUUR_ALLOW_SANDBOX'] === 'true' },
+        {
+          db: db(),
+          now: Date.now,
+          allowSandbox: allowSandboxBilling(process.env),
+          revenuecat: new RevenueCatV2(REVENUECAT_PROJECT_ID.value(), REVENUECAT_API_V2_KEY.value()),
+          findFirebaseUids: async (ids) => {
+            if (!ids.length) return [];
+            const found: string[] = [];
+            for (let offset = 0; offset < ids.length; offset += 100) {
+              const users = await getAuth().getUsers(ids.slice(offset, offset + 100).map((uid) => ({ uid })));
+              found.push(...users.users.filter((user) => !user.disabled).map((user) => user.uid));
+            }
+            return found;
+          },
+        },
         req.body,
       );
       res.status(200).json(out);
     } catch (e) {
       if (e instanceof BillingError && e.code === 'invalid-argument')
         return void res.status(400).send('bad request');
+      if (e instanceof BillingError && e.details?.reason === 'revenuecat_transfer_reconciliation_required') {
+        logError(
+          'RevenueCat event awaits verified reconciliation; retry after resolving the provider state.',
+          {
+            eventId: e.details.eventId,
+            reason: e.details.reason,
+            issue: e.details.issue,
+          },
+        );
+        return void res.status(503).json({ error: 'reconciliation_required' });
+      }
       res.status(500).send('error'); // RevenueCat retries with backoff
     }
   },
 );
 
 /** AdMob rewarded-ad server-side verification callback (spec 6.2): signature-checked, single-use nonce. */
-export const admobSsv = onRequest({ cors: false }, async (req, res) => {
-  const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1) : '';
-  let keys = await fetchVerifierKeys().catch(() => []);
-  let check = verifyAdmobSignature(query, keys);
-  if (!check.ok && !keys.some((k) => String(k.keyId) === check.params.get('key_id'))) {
-    keys = await fetchVerifierKeys(fetch, Date.now(), true).catch(() => keys);
-    check = verifyAdmobSignature(query, keys);
-  }
-  if (!check.ok) return void res.status(403).send('invalid signature');
-  const userId = check.params.get('user_id');
-  const nonce = check.params.get('custom_data');
-  const transactionId = check.params.get('transaction_id');
-  if (!userId || !nonce || !transactionId) return void res.status(400).send('missing params');
-  const user = await getAuth()
-    .getUser(userId)
-    .catch(() => undefined);
-  const out = await grantRewardFromSsv(
-    { db: db(), now: Date.now },
-    { userId, nonce, transactionId, phoneNumberVerified: Boolean(user?.phoneNumber) },
-  );
-  res.status(200).json(out);
-});
+export const admobSsv = onRequest(
+  { cors: false, timeoutSeconds: 30, serviceAccount: admobServiceAccount },
+  async (req, res) => {
+    if (req.method !== 'GET') return void res.status(405).send('method not allowed');
+    const query = req.originalUrl.includes('?')
+      ? req.originalUrl.slice(req.originalUrl.indexOf('?') + 1)
+      : '';
+    // Malformed envelopes cannot trigger network requests for public verifier keys.
+    if (!verifyAdmobSignature(query, []).keyId) return void res.status(403).send('invalid signature');
+    let keys = await fetchVerifierKeys().catch(() => []);
+    let check = verifyAdmobSignature(query, keys);
+    if (!check.ok && check.keyId && !keys.some((k) => String(k.keyId) === check.keyId)) {
+      keys = await fetchVerifierKeys(fetch, Date.now(), true).catch(() => keys);
+      check = verifyAdmobSignature(query, keys);
+    }
+    const out = await completeAdmobCallback(
+      check,
+      ADMOB_REWARDED_UNIT.value(),
+      async ({ userId, nonce, transactionId }) => {
+        const user = await getAuth()
+          .getUser(userId)
+          .catch(() => undefined);
+        return grantRewardFromSsv(
+          { db: db(), now: Date.now },
+          { userId, nonce, transactionId, phoneNumberVerified: Boolean(user?.phoneNumber) },
+        );
+      },
+    );
+    if (typeof out.body === 'string') res.status(out.status).send(out.body);
+    else res.status(out.status).json(out.body);
+  },
+);
 
 /** Public invite preview for the landing page (no personal data). */
 export const invitePreview = onRequest({ cors: true }, async (req, res) => {
@@ -654,20 +773,20 @@ export const adminSavePartnerConfig = adminCallable(savePartnerConfig);
 const accountDeps = () => ({
   db: db(),
   auth: getAuth(),
-  payments: payments(),
+  payments,
   now: Date.now,
   deleteFiles: async (prefix: string) => {
     await getStorage().bucket().deleteFiles({ prefix });
   },
 });
 
-export const deleteAccount = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }, async (request) => {
+export const deleteAccount = onCall({ enforceAppCheck, secrets: ACCOUNT_SECRETS }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   await enforceRateLimit(`delete_account_${request.auth.uid}`, 3, 3600_000);
   return runDeleteAccount(accountDeps(), request.auth.uid);
 });
 
-export const exportMyData = onCall({ enforceAppCheck, secrets: PARTNER_SECRETS }, async (request) => {
+export const exportMyData = onCall({ enforceAppCheck, secrets: ACCOUNT_SECRETS }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   await enforceRateLimit(`export_data_${request.auth.uid}`, 5, 3600_000);
   return runExportMyData(accountDeps(), request.auth.uid);

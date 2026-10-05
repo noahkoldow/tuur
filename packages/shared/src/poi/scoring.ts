@@ -1,5 +1,6 @@
 import type { WikipediaRef } from '../schemas';
 import type { MergedPoi } from './merge';
+import { localContextKind } from './localContext';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -50,6 +51,8 @@ export function rawScore(p: MergedPoi): number {
   if (t['heritage']) s += 8;
   if (t['wikidata'] || p.wikidataId) s += 3;
   if (t['amenity'] === 'place_of_worship') s += 4;
+  if (localContextKind(t)) s += 8;
+  if (t['name:etymology'] || t['inscription'] || t['description']) s += 4;
   if (t['name'] && t['tourism'] === 'artwork' && !p.wikipedia.length) s -= 2;
   if (t['shop'] || (t['amenity'] && ['restaurant', 'cafe', 'fast_food', 'pub', 'bar'].includes(t['amenity'])))
     s -= 5;
@@ -102,6 +105,7 @@ export function applyModifiers(base: number, m: ScoreModifiers): number {
 
 /** Rough visit duration in minutes; used by the orienteering optimizer. */
 export function estimateDwellMinutes(score: number, tags: Record<string, string>): number {
+  if (localContextKind(tags) && score < 30) return 1;
   if (tags['tourism'] === 'museum') return clamp(20 + score / 5, 20, 40);
   if (tags['tourism'] === 'viewpoint' || tags['tourism'] === 'artwork') return 3;
   if (tags['leisure'] === 'park') return 10;

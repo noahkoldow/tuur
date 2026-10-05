@@ -70,6 +70,8 @@ export const TourSchema = z.object({
   texts: z.record(TourTextSchema).default({}),
   createdAt: z.number(),
   updatedAt: z.number(),
+  /** Private planned-route session availability online; a saved offline receipt has its own validity. */
+  expiresAt: z.number().optional(),
 });
 export type Tour = z.infer<typeof TourSchema>;
 
@@ -83,6 +85,7 @@ export interface GenerateToursResult {
 export const ComposeRouteRequestSchema = z.object({
   /** POI ids in the planned order (from the client-side planner). */
   stops: z.array(z.string().min(1).max(120)).min(1).max(25),
+  requiredStopIds: z.array(z.string().min(1).max(120)).max(25).optional(),
   /** Used only to route; never stored. Omitted = start at the first stop. */
   start: LatLngSchema.optional(),
   end: LatLngSchema.optional(),

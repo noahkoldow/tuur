@@ -36,6 +36,12 @@ export const OSM_TAG_ALLOWLIST = [
   'ele',
   'height',
   'artist_name',
+  'highway',
+  'place',
+  'name:etymology',
+  'old_name',
+  'information',
+  'species',
 ];
 
 export function filterOsmTags(tags: Record<string, string>, lang: string): Record<string, string> {
@@ -43,6 +49,8 @@ export function filterOsmTags(tags: Record<string, string>, lang: string): Recor
   for (const k of OSM_TAG_ALLOWLIST) if (tags[k]) out[k] = tags[k]!;
   const d = tags[`description:${lang}`];
   if (d) out['description'] = d;
+  const etymology = tags[`name:etymology:${lang}`];
+  if (etymology) out['name:etymology'] = etymology;
   return out;
 }
 

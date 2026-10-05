@@ -7,6 +7,9 @@ import {
   effectiveTier,
   evaluateFactCheck,
   layoutParagraphs,
+  localObservation,
+  isLocalContextPoi,
+  isUnadaptedSourceText,
   narrationKey,
   isPartnerLive,
   partnerIntro,
@@ -34,8 +37,11 @@ import type { NarrationSourceProvider } from '../providers/narrationSources';
 import { RoutedTtsProvider, type AudioEncoder, type TtsProvider } from '../providers/tts';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
-import { logUsage, spentToday } from '../util/usage';
+import { BudgetError, logUsage, spentToday, withBudget } from '../util/usage';
+import { budgetedLlm } from '../providers/budgeted';
+import { MAX_TTS_TEXT_CHARS } from '../providers/limits';
 import { loadPartner } from '../partners/service';
+import { personalAudioPrefix, personalNarrationScope } from './personalScope';
 
 export interface ObjectStore {
   put(path: string, data: Buffer, mimeType: string): Promise<void>;
@@ -169,14 +175,24 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
   const parsed = GetNarrationRequestSchema.safeParse(rawReq);
   if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
   const req = parsed.data;
+  if (
+    req.download &&
+    (!req.access?.tourId || (req.access.mode && !['tour', 'planned'].includes(req.access.mode)))
+  )
+    throw new NarrationError('permission-denied', 'Only fixed itineraries can be downloaded', {
+      reason: 'download_not_supported',
+    });
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const poi = await loadPoi(deps.db, req.poiId);
   await deps.authorize?.(uid, poi, req.access, { download: Boolean(req.download) });
 
   const partner = await partnerContext(deps.db, poi, deps.now());
-  const key = narrationKey(
-    { ...req, primaryInterest: req.primaryInterest ?? poi.primaryInterest },
-    partner ? `${cfg.promptVersion}-p${partner.rev}` : cfg.promptVersion,
+  const scope = personalNarrationScope(uid, req.context?.script?.instanceId);
+  const key = scope.key(
+    narrationKey(
+      { ...req, primaryInterest: req.primaryInterest ?? poi.primaryInterest },
+      partner ? `${cfg.promptVersion}-p${partner.rev}` : cfg.promptVersion,
+    ),
   );
   const ref = deps.db.collection('narrations').doc(key);
 
@@ -184,7 +200,12 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
   const hit = await ref.get();
   if (hit.exists) {
     const doc = NarrationDocSchema.parse(hit.data());
-    if (doc.status === 'ok' && !doc.grounded)
+    if (
+      doc.status === 'ok' &&
+      !doc.grounded &&
+      doc.ownerUid === uid &&
+      doc.scriptInstanceId === scope.scriptInstanceId
+    )
       return toResponse(await inVoice(deps, cfg, doc, ref, persona, poi), poi, true);
   }
 
@@ -197,7 +218,12 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
     const own = await cacheRef.get();
     if (own.exists) {
       const doc = NarrationDocSchema.parse(own.data());
-      if (doc.groundedExpiresAt && doc.groundedExpiresAt > deps.now())
+      if (
+        doc.ownerUid === uid &&
+        doc.scriptInstanceId === scope.scriptInstanceId &&
+        doc.groundedExpiresAt &&
+        doc.groundedExpiresAt > deps.now()
+      )
         return toResponse(await inVoice(deps, cfg, doc, cacheRef, persona, poi), poi, true);
     }
   }
@@ -261,7 +287,8 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
       const s = await cacheRef.get();
       if (s.exists) {
         const doc = NarrationDocSchema.parse(s.data());
-        if (doc.status === 'ok') return toResponse(doc, poi, true);
+        if (doc.status === 'ok' && doc.ownerUid === uid && doc.scriptInstanceId === scope.scriptInstanceId)
+          return toResponse(doc, poi, true);
       }
     }
     throw new NarrationError('unavailable', 'Generation in progress, try again shortly');
@@ -272,10 +299,15 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
     const late = await cacheRef.get();
     if (late.exists) {
       const doc = NarrationDocSchema.parse(late.data());
-      if (doc.status === 'ok' && (!grounded || (doc.groundedExpiresAt ?? 0) > deps.now()))
+      if (
+        doc.status === 'ok' &&
+        doc.ownerUid === uid &&
+        doc.scriptInstanceId === scope.scriptInstanceId &&
+        (!grounded || (doc.groundedExpiresAt ?? 0) > deps.now())
+      )
         return toResponse(doc, poi, true);
     }
-    return await generate(deps, cfg, poi, req, key, cacheRef, grounded, persona, partner);
+    return await generate(deps, cfg, poi, req, key, cacheRef, grounded, persona, scope, partner);
   } catch (e) {
     if (
       e instanceof NarrationError &&
@@ -299,6 +331,7 @@ async function generate(
   cacheRef: FirebaseFirestore.DocumentReference,
   grounded: boolean,
   persona: VoicePersona,
+  scope: ReturnType<typeof personalNarrationScope>,
   partner?: PartnerContext,
 ) {
   const langs = [req.lang, ...sourceLangsFor('XX')].filter((l, i, a) => a.indexOf(l) === i);
@@ -310,52 +343,44 @@ async function generate(
   );
   const bundle: SourceBundle = partner ? { ...gathered, partnerFacts: partner.facts } : gathered;
 
+  const observation = isLocalContextPoi(poi) ? localObservation(bundle, req.lang, req.context) : undefined;
   const tierDecision = effectiveTier(req.lengthTier, sourceRichness(bundle));
-  if (!tierDecision.ok)
+  if (!tierDecision.ok && !observation)
     throw new NarrationError('failed-precondition', 'Not enough verified source material', {
-      reason: tierDecision.reason,
+      reason: 'insufficient_sources',
     });
-  const tier = tierDecision.tier;
+  const tier = tierDecision.ok ? tierDecision.tier : 'short';
   const interest = req.primaryInterest ?? poi.primaryInterest;
   const sources = sourceText(bundle);
 
   let accepted:
     { output: Awaited<ReturnType<LlmProvider['generateNarration']>>; check: FactCheckResult } | undefined;
+  // This fixed observation contains only the source's place name and open questions. It makes no
+  // historical claims, so scarce local data never needs to be padded to satisfy a model word count.
+  if (observation)
+    accepted = { output: { output: observation, usage: {} }, check: { ok: true, unsupported: [] } };
   let lastCheck: FactCheckResult | undefined;
+  const llm = budgetedLlm(deps.llm, deps.db, cfg, deps.now, { tile: poi.tile, key });
   for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
     const retryNote = lastCheck
-      ? `\n\nYour previous attempt was rejected because these claims are not supported by the sources: ${JSON.stringify(lastCheck.unsupported)}. Remove them and use only the sources.`
+      ? lastCheck.reason === 'raw_source_text'
+        ? '\n\nYour previous attempt copied the raw source text. Develop a new conversational recording script from its verified facts, with your own phrasing and a connection to the tour. Do not return the source document.'
+        : `\n\nYour previous attempt was rejected because these claims are not supported by the sources: ${JSON.stringify(lastCheck.unsupported)}. Remove them and use only the sources.`
       : '';
-    const gen = await deps.llm.generateNarration({
+    const gen = await llm.generateNarration({
       model: cfg.models.narration,
       system: systemPrompt(req.lang),
-      user: userPrompt({ bundle, lang: req.lang, tier, interest }) + retryNote,
+      user: userPrompt({ bundle, lang: req.lang, tier, interest, context: req.context }) + retryNote,
       grounding: grounded,
       bundle,
       lang: req.lang,
       tier,
     });
-    await logUsage(
-      deps.db,
-      cfg.pricing,
-      {
-        kind: 'narration',
-        model: cfg.models.narration,
-        usage: { ...gen.usage, groundingQueries: gen.grounding?.queries ?? 0 },
-        tile: poi.tile,
-        key,
-        ok: true,
-      },
-      deps.now(),
-    );
-
-    const fc = await deps.llm.checkFacts({ model: cfg.models.lite, facts: gen.output.keyFacts, sources });
-    await logUsage(
-      deps.db,
-      cfg.pricing,
-      { kind: 'factcheck', model: cfg.models.lite, usage: fc.usage, tile: poi.tile, key, ok: true },
-      deps.now(),
-    );
+    if (isUnadaptedSourceText(gen.output.paragraphs, bundle)) {
+      lastCheck = { ok: false, unsupported: [], reason: 'raw_source_text' };
+      continue;
+    }
+    const fc = await llm.checkFacts({ model: cfg.models.lite, facts: gen.output.keyFacts, sources });
     const check = evaluateFactCheck(gen.output, sources, fc.verdicts);
     if (check.ok) accepted = { output: gen, check };
     else {
@@ -384,8 +409,9 @@ async function generate(
   const { output, grounding } = accepted.output;
   const audioBase = grounded
     ? `narrations-grounded/${cacheRef.parent.parent?.id ?? 'u'}/${key}`
-    : `narrations/${key}`;
+    : `${personalAudioPrefix(scope.ownerUid)}${key}`;
   // Partner content is announced before it is spoken (UWG, spec 7.3); the label is added here, never left to the model.
+  // The source bundle and fact-check metadata never enter TTS: only the accepted recording script.
   const spoken = partner
     ? [`${partnerIntro(req.lang)} ${output.paragraphs[0]!}`, ...output.paragraphs.slice(1)]
     : output.paragraphs;
@@ -394,6 +420,8 @@ async function generate(
 
   const doc: NarrationDoc = NarrationDocSchema.parse({
     key,
+    ownerUid: scope.ownerUid,
+    scriptInstanceId: scope.scriptInstanceId,
     poiId: poi.id,
     lang: req.lang,
     lengthTier: req.lengthTier,
@@ -431,7 +459,7 @@ const VoiceVariantSchema = z.object({
 });
 
 /**
- * The cached narration in the listener's voice. Text is shared by all voices (generated and fact-checked once);
+ * The personal narration in the listener's voice. Text is reused only inside this owner's script instance;
  * other voices only render audio, stored in `voices/{personaId}` under the narration (timings differ per voice).
  */
 export async function inVoice(
@@ -459,7 +487,11 @@ export async function inVoice(
     `${base}__${persona.id}`,
     { tile: poi.tile, key: doc.key },
     persona,
-  );
+  ).catch((error: unknown) => {
+    if (error instanceof BudgetError) return undefined;
+    throw error;
+  });
+  if (!audio) return doc;
   const last = audio.layout[audio.layout.length - 1];
   const variant = VoiceVariantSchema.parse({
     voiceId: persona.id,
@@ -494,25 +526,27 @@ export async function renderAudio(
     : { provider: 'gemini' as const, name: cfg.voices[lang] ?? cfg.voices['default'] ?? 'Kore' };
   const model = cfg.ttsModels[provider] ?? cfg.models.tts;
   const pcms: { text: string; pcm: Uint8Array }[] = [];
-  let ttsChars = 0;
   for (const text of paragraphs) {
-    const r = await tts.synthesize(provider, { text, lang, voice: name, model, style: persona.style });
+    if (text.length > MAX_TTS_TEXT_CHARS) throw new BudgetError('input_too_large');
+    const r = await withBudget(
+      deps.db,
+      cfg,
+      { kind: 'tts', model, ...attribution },
+      { ttsChars: text.length, ttsProvider: provider },
+      async () => {
+        const result = await tts.synthesize(provider, {
+          text,
+          lang,
+          voice: name,
+          model,
+          style: persona.style,
+        });
+        return { ...result, usage: { ttsChars: result.chars, ttsProvider: provider } };
+      },
+      deps.now,
+    );
     pcms.push({ text, pcm: r.pcm });
-    ttsChars += r.chars;
   }
-  await logUsage(
-    deps.db,
-    cfg.pricing,
-    {
-      kind: 'tts',
-      model,
-      usage: { ttsChars, ttsProvider: provider },
-      tile: attribution.tile,
-      key: attribution.key,
-      ok: true,
-    },
-    deps.now(),
-  );
   const layout = layoutParagraphs(
     pcms.map((p) => ({ text: p.text, pcmBytes: p.pcm.byteLength })),
     PARAGRAPH_GAP_MS,
@@ -579,6 +613,8 @@ export async function reportNarrationIssue(
   // only reports about narrations that exist count (no probing of arbitrary keys)
   const target = await deps.db.collection('narrations').doc(input.narrationKey).get();
   if (!target.exists) return { id: dupe.id };
+  const ownerUid = target.get('ownerUid') as string | undefined;
+  if (ownerUid && ownerUid !== uid) return { id: dupe.id };
   await dupe.set({
     narrationKey: input.narrationKey,
     uid,
@@ -590,6 +626,11 @@ export async function reportNarrationIssue(
   // A shared narration (and its audio) is only pulled after several distinct reporters agree; one account
   // (or a few throw-away accounts) cannot knock out content and force paid regeneration on its own.
   if (input.reason === 'wrong_fact' || input.reason === 'offensive') {
+    if (ownerUid === uid) {
+      // Only this owner can hear the personal chapter; their report is sufficient to regenerate it.
+      await blockNarration(deps, input.narrationKey, 'pending_review');
+      return { id: dupe.id };
+    }
     const same = await deps.db
       .collection('feedback')
       .where('narrationKey', '==', input.narrationKey)

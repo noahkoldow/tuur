@@ -1,4 +1,10 @@
-import { decideAccess, isSubscriber, type Entitlement } from '@tuur/shared';
+import {
+  decideAccess,
+  decideDownloadAccess,
+  isSubscriber,
+  type AccessContext,
+  type Entitlement,
+} from '@tuur/shared';
 import { config } from '../config';
 
 type Ents = { entitlements: Entitlement[] };
@@ -21,3 +27,8 @@ export function canUseSession(
 }
 
 export const subscribed = (s: Ents, now = Date.now()) => isSubscriber(s.entitlements, now);
+
+/** Download rights are separate from free/ad/invite playback, including in the interactive demo. */
+export function canDownloadTour(s: Ents, context: AccessContext, now = Date.now()) {
+  return decideDownloadAccess(s.entitlements, context, now).allowed;
+}

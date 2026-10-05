@@ -1,11 +1,76 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { GoogleGenAI } from '@google/genai';
 import {
   Mp3AudioEncoder,
   MockTtsProvider,
   OpenAiTtsProvider,
   RoutedTtsProvider,
   aiGeneratedId3Tag,
+  GeminiTtsProvider,
+  decodeGeminiPcm,
 } from './tts';
+
+describe('Gemini speech', () => {
+  it('keeps directions outside the 3.8 transcript and requests raw PCM for MP3 encoding', async () => {
+    const create = vi.fn().mockResolvedValue({ output_audio: { data: 'AQACAA==', mime_type: 'audio/l16' } });
+    const client = { interactions: { create } } as unknown as GoogleGenAI;
+    const result = await new GeminiTtsProvider('test', client).synthesize({
+      model: 'gemini-3.8-flash-tts',
+      voice: 'Sulafat',
+      text: 'Hallo Berlin.',
+      lang: 'de',
+      style: 'Warm guide',
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: [
+          {
+            type: 'user_input',
+            content: [
+              {
+                type: 'text',
+                text: 'Hallo Berlin.',
+                annotations: [{ type: 'speech_metadata', style: 'Warm guide Speak in de.' }],
+              },
+            ],
+          },
+        ],
+        response_format: { type: 'audio', mime_type: 'audio/l16', sample_rate: 24000 },
+        generation_config: { speech_config: [{ voice: 'Sulafat' }], max_output_tokens: 16_384 },
+        store: false,
+      }),
+    );
+    expect([...result.pcm]).toEqual([1, 0, 2, 0]);
+  });
+
+  it('rejects empty, corrupt or incompatible audio instead of caching noise', () => {
+    expect(() => decodeGeminiPcm('', 'audio/l16')).toThrow('invalid PCM');
+    expect(() => decodeGeminiPcm('AQ==', 'audio/l16')).toThrow('invalid PCM');
+    expect(() => decodeGeminiPcm('AQACAA==', 'audio/wav')).toThrow('unsupported audio format');
+    expect(() => decodeGeminiPcm('AQACAA==', 'audio/l16;rate=16000')).toThrow('sample rate');
+    expect(() => decodeGeminiPcm(Buffer.from('RIFFabcd').toString('base64'))).toThrow('invalid PCM');
+  });
+
+  it('retains the legacy API for operator-configured preview models', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      candidates: [
+        {
+          content: {
+            parts: [{ inlineData: { data: 'AQACAA==', mimeType: 'audio/L16;codec=pcm;rate=24000' } }],
+          },
+        },
+      ],
+    });
+    const client = { models: { generateContent } } as unknown as GoogleGenAI;
+    await new GeminiTtsProvider('test', client).synthesize({
+      model: 'gemini-3.1-flash-tts-preview',
+      voice: 'Kore',
+      text: 'Hello.',
+      lang: 'en',
+    });
+    expect(generateContent).toHaveBeenCalledOnce();
+  });
+});
 
 describe('AI marking of synthetic audio', () => {
   it('writes a valid ID3v2.3 tag with the AI_GENERATED frame in front of the MP3 frames', () => {

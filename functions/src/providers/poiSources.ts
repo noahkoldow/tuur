@@ -1,11 +1,9 @@
 import {
   buildCommonsQuery,
-  buildOverpassQuery,
   buildWikidataQuery,
   encodeGeohash,
   geohashBounds,
   parseCommonsImages,
-  parseOverpass,
   parseWikidata,
   parseWikipediaGenerator,
   syntheticRawPois,
@@ -14,6 +12,7 @@ import {
   type RawPoi,
 } from '@tuur/shared';
 import { fetchJson } from '../util/http';
+import { fetchOverpass, type OverpassOptions } from './overpass';
 
 /** Upstream POI data providers (OSM, Wikidata, Wikipedia, Commons) behind one interface. */
 export interface PoiSourceClient {
@@ -28,18 +27,11 @@ export class HttpPoiSources implements PoiSourceClient {
     private readonly overpass = process.env['OVERPASS_ENDPOINT'] ?? 'https://overpass-api.de/api/interpreter',
     private readonly wikidata = process.env['WIKIDATA_SPARQL_ENDPOINT'] ??
       'https://query.wikidata.org/sparql',
+    private readonly overpassOptions: OverpassOptions = {},
   ) {}
 
   async fetchOsm(b: Bounds): Promise<RawPoi[]> {
-    const body = new URLSearchParams({ data: buildOverpassQuery(b) }).toString();
-    const json = await fetchJson(this.overpass, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      timeoutMs: 70_000,
-      retries: 2,
-    });
-    return parseOverpass(json);
+    return fetchOverpass(this.overpass, b, this.overpassOptions);
   }
 
   async fetchWikidata(b: Bounds): Promise<RawPoi[]> {
@@ -57,8 +49,11 @@ export class HttpPoiSources implements PoiSourceClient {
       generator: 'geosearch',
       ggsbbox: `${b.north}|${b.west}|${b.south}|${b.east}`,
       ggslimit: '100',
-      prop: 'info|coordinates|pageprops',
+      prop: 'info|coordinates|pageprops|pageimages',
       inprop: 'url',
+      piprop: 'name',
+      pilicense: 'free',
+      pilimit: 'max',
       ppprop: 'wikibase_item|disambiguation',
       colimit: '100',
     });
@@ -67,10 +62,15 @@ export class HttpPoiSources implements PoiSourceClient {
 
   async fetchImages(files: string[]): Promise<Map<string, ImageRef>> {
     const out = new Map<string, ImageRef>();
-    for (let i = 0; i < files.length; i += 40) {
-      const chunk = files.slice(i, i + 40);
-      const json = await fetchJson(`https://commons.wikimedia.org/w/api.php?${buildCommonsQuery(chunk)}`);
-      for (const [k, v] of parseCommonsImages(json)) out.set(k, v);
+    const unique = [...new Set(files)];
+    for (let i = 0; i < unique.length; i += 40) {
+      const chunk = unique.slice(i, i + 40);
+      try {
+        const json = await fetchJson(`https://commons.wikimedia.org/w/api.php?${buildCommonsQuery(chunk)}`);
+        for (const [k, v] of parseCommonsImages(json)) out.set(k, v);
+      } catch {
+        // Keep earlier photos if one Commons batch is unavailable. Missing photos use the UI fallback.
+      }
     }
     return out;
   }

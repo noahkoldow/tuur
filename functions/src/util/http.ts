@@ -11,6 +11,17 @@ export const USER_AGENT =
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Retains provider backoff metadata without including request URLs, keys or response bodies. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    host: string,
+    readonly retryAfter: string | null,
+  ) {
+    super(`HTTP ${status} for ${host}`);
+  }
+}
+
 /** JSON fetch with timeout and bounded retries on 429/5xx; public endpoints (Overpass, Wikimedia) rate limit. */
 export async function fetchJson<T = unknown>(url: string, opt: FetchOptions = {}): Promise<T> {
   const retries = opt.retries ?? 2;
@@ -26,7 +37,7 @@ export async function fetchJson<T = unknown>(url: string, opt: FetchOptions = {}
         signal: ctrl.signal,
       });
       if (res.ok) return (await res.json()) as T;
-      lastErr = new Error(`HTTP ${res.status} for ${new URL(url).host}`);
+      lastErr = new HttpError(res.status, new URL(url).host, res.headers.get('Retry-After'));
       if (res.status !== 429 && res.status < 500) throw lastErr;
     } catch (e) {
       lastErr = e;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,7 @@ import { ListGroup, ListRow } from '../../../src/components/ListGroup';
 import { TuuSays } from '../../../src/components/TuuSays';
 import { RunningTour } from '../../../src/components/RunningTour';
 import { ScrollScreen } from '../../../src/components/Screen';
+import { SwipeDeleteRow } from '../../../src/components/SwipeDeleteRow';
 import { Text } from '../../../src/components/Text';
 import { useHistory, type TourRecord } from '../../../src/state/history';
 import { useSettings } from '../../../src/state/settings';
@@ -35,6 +36,8 @@ export default function Profile() {
   const backend = useBackend();
   const lang = useSettings((s) => s.language);
   const records = useHistory((s) => s.records);
+  const { width, fontScale } = useWindowDimensions();
+  const badgeWidth = Math.min(width - 2 * metrics.margin, Math.round(148 * Math.max(1, fontScale)));
   const [user, setUser] = useState(backend.auth.current());
   useEffect(() => backend.auth.onChange(setUser), [backend]);
 
@@ -55,7 +58,10 @@ export default function Profile() {
       />
       <ScrollScreen>
         <RunningTour />
-        <View
+        <Pressable
+          disabled={Boolean(user && !user.isAnonymous)}
+          accessibilityRole={user && !user.isAnonymous ? undefined : 'button'}
+          onPress={() => router.replace('/sign-in')}
           style={{
             flexDirection: 'row',
             alignItems: 'center',
@@ -84,7 +90,7 @@ export default function Profile() {
           >
             <Icon name="user" size={24} color={sys.labelSecondary} />
           </View>
-        </View>
+        </Pressable>
 
         <View
           style={{
@@ -115,7 +121,17 @@ export default function Profile() {
           ) : (
             <TuuSays pose="present" size={56} text={t('profile.badgesNone')} />
           )}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <ScrollView
+            horizontal
+            accessibilityLabel={t('profile.badges')}
+            showsHorizontalScrollIndicator
+            snapToInterval={badgeWidth + 12}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            disableIntervalMomentum
+            style={{ marginHorizontal: -metrics.margin }}
+            contentContainerStyle={{ gap: 12, paddingHorizontal: metrics.margin, paddingBottom: 8 }}
+          >
             {badges.map((b) => {
               const c = byId.get(b.cityId);
               if (!c) return null;
@@ -125,8 +141,7 @@ export default function Profile() {
                   accessible
                   accessibilityLabel={`${cityName(c)}, ${tierName(b.tier)}, ${t('profile.tours', { count: b.tours })}`}
                   style={{
-                    flexBasis: '31%',
-                    flexGrow: 1,
+                    width: badgeWidth,
                     alignItems: 'center',
                     gap: 6,
                     padding: 12,
@@ -163,10 +178,15 @@ export default function Profile() {
                 </View>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
 
-        <ListGroup title={t('profile.history')} footer={t('profile.historyLocal')}>
+        <ListGroup
+          title={t('profile.history')}
+          footer={[t('profile.historyLocal'), records.length ? t('profile.historySwipeHint') : '']
+            .filter(Boolean)
+            .join(' ')}
+        >
           {records.length === 0 ? <ListRow icon="map" label={t('profile.historyNone')} /> : null}
           {records.slice(0, 50).map((r) => (
             <HistoryRow
@@ -211,5 +231,26 @@ function HistoryRow({ record, lang, onPress }: { record: TourRecord; lang: strin
     .slice(0, 3)
     .map((s) => s.name)
     .join(', ')}`;
-  return <ListRow icon={MODE_ICON[record.mode]} label={title} hint={detail} onPress={onPress} />;
+  const confirmDelete = () => {
+    const heading = t('profile.deleteTitle');
+    const body = t('profile.deleteBody', { title });
+    const remove = () => useHistory.getState().remove(record.id);
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${heading}\n\n${body}`)) remove();
+      return;
+    }
+    Alert.alert(heading, body, [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('common.delete'), style: 'destructive', onPress: remove },
+    ]);
+  };
+  return (
+    <SwipeDeleteRow
+      label={t('common.delete')}
+      accessibilityLabel={t('profile.deleteTour', { title })}
+      onDelete={confirmDelete}
+    >
+      <ListRow icon={MODE_ICON[record.mode]} label={title} hint={detail} onPress={onPress} />
+    </SwipeDeleteRow>
+  );
 }

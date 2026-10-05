@@ -1,5 +1,6 @@
 import type { Interest } from '../constants';
 import type { MergedPoi } from './merge';
+import { localContextKind } from './localContext';
 
 export interface Classification {
   interests: Interest[];
@@ -113,6 +114,8 @@ export function classifyByRules(p: MergedPoi): Classification {
   if (t['leisure'] && ['park', 'garden', 'nature_reserve'].includes(t['leisure'])) set.add('nature');
   if (t['shop']) set.add('shopping');
   if (t['craft']) set.add('shopping');
+  if (localContextKind(t)) set.add('hidden_gems');
+  if (t['natural'] === 'tree') set.add('nature');
 
   // Wikidata-only candidates: infer from "instance of" labels.
   for (const c of p.instanceOf.map((x) => x.toLowerCase())) {

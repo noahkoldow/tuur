@@ -10,7 +10,8 @@
     {
       "source": "functions/deploy",
       "codebase": "default",
-      "predeploy": ["pnpm --filter @tuur/functions build"]
+      "ignore": ["node_modules", ".git", ".env*", ".secret*", "firebase-debug.log", "firebase-debug.*.log"],
+      "predeploy": ["node scripts/build-functions.mjs"]
     }
   ],
   "emulators": {

@@ -41,6 +41,19 @@ describe('decideClaim', () => {
     expect(decideClaim({ ...base, status: 'low_content', expiresAt: NOW - 1 }, NOW)).toBe('claim');
   });
 
+  it('waits for a provider quota deadline and then retries without the hard-failure backoff', () => {
+    const deferred: Area = {
+      ...base,
+      status: 'failed',
+      ingestAttempts: 0,
+      updatedAt: NOW,
+      ingestRetryAt: NOW + 60_000,
+    };
+    expect(decideClaim(deferred, NOW + 59_999)).toBe('skip');
+    expect(decideClaim(deferred, NOW + 60_000)).toBe('claim');
+    expect(decideClaim({ ...deferred, locked: true }, NOW + 60_000)).toBe('skip');
+  });
+
   it('never claims locked areas', () => {
     expect(decideClaim({ ...base, status: 'empty', locked: true }, NOW)).toBe('skip');
   });

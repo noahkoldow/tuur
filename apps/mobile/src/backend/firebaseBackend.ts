@@ -6,8 +6,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   linkWithCredential,
-  onAuthStateChanged,
-  signInAnonymously,
+  onIdTokenChanged,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut,
@@ -53,6 +52,10 @@ import {
 } from '@tuur/shared';
 import { config } from '../config';
 import { toBackendError } from './errors';
+import { reachableAudioUrl } from './audioUrl';
+import { linkOrSignIn } from './linkOrSignIn';
+import { accountStep, requireVerifiedAccount } from '../auth/policy';
+import { requestNativePhoneCode } from '../auth/phone-verification';
 import {
   BackendError,
   type AreaInfo,
@@ -68,6 +71,7 @@ const toUser = (u: User | null): UserInfo | null =>
     ? {
         uid: u.uid,
         isAnonymous: u.isAnonymous,
+        providerIds: u.providerData.map((provider) => provider.providerId),
         ...(u.email ? { email: u.email } : {}),
         ...(u.phoneNumber ? { phoneNumber: u.phoneNumber } : {}),
       }
@@ -92,7 +96,7 @@ export function createFirebaseBackend(): Backend {
 
   const call = async <Req, Res>(name: string, data: Req): Promise<Res> => {
     try {
-      const res = await httpsCallable<Req, Res>(fns, name)(data);
+      const res = await httpsCallable<Req, Res>(fns, name, { timeout: 300_000 })(data);
       return res.data;
     } catch (e) {
       throw toBackendError(e instanceof HttpsError ? e : e);
@@ -100,17 +104,21 @@ export function createFirebaseBackend(): Backend {
   };
 
   const signedUrls = new Map<string, string>();
+  let phoneChallenge: { id: string; uid: string } | undefined;
+  let phoneRequest = 0;
 
   const authApi: AuthApi = {
     current: () => toUser(auth.currentUser),
-    onChange: (cb) => onAuthStateChanged(auth, (u) => cb(toUser(u))),
-    ensureSignedIn: async () =>
-      toUser(auth.currentUser) ?? (toUser((await signInAnonymously(auth)).user) as UserInfo),
+    onChange: (cb) => onIdTokenChanged(auth, (u) => cb(toUser(u))),
+    ensureSignedIn: async () => {
+      await auth.authStateReady();
+      return requireVerifiedAccount(toUser(auth.currentUser));
+    },
     async signInWithEmail(email, password, create) {
       const current = auth.currentUser;
       if (create) {
         // Upgrade the anonymous user so purchases and progress are kept (spec 3, Auth).
-        if (current?.isAnonymous) {
+        if (current && accountStep(toUser(current)) === 'sign-in') {
           const { EmailAuthProvider } = await import('@react-native-firebase/auth');
           const res = await linkWithCredential(current, EmailAuthProvider.credential(email, password));
           return toUser(res.user) as UserInfo;
@@ -122,18 +130,25 @@ export function createFirebaseBackend(): Backend {
     async signInWithApple() {
       const AppleAuthentication = await import('expo-apple-authentication');
       const Crypto = await import('expo-crypto');
-      const nonce = Crypto.randomUUID();
-      const hashed = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce);
-      const res = await AppleAuthentication.signInAsync({
-        requestedScopes: [AppleAuthentication.AppleAuthenticationScope.EMAIL],
-        nonce: hashed,
-      });
-      if (!res.identityToken) throw new BackendError('unknown', 'Apple sign-in returned no token');
-      const credential = AppleAuthProvider.credential(res.identityToken, nonce);
+      const getCredential = async () => {
+        const nonce = Crypto.randomUUID();
+        const hashed = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce);
+        const res = await AppleAuthentication.signInAsync({
+          requestedScopes: [AppleAuthentication.AppleAuthenticationScope.EMAIL],
+          nonce: hashed,
+        });
+        if (!res.identityToken) throw new BackendError('unknown', 'Apple sign-in returned no token');
+        return AppleAuthProvider.credential(res.identityToken, nonce);
+      };
+      const credential = await getCredential();
       const current = auth.currentUser;
-      const out = current?.isAnonymous
-        ? await linkWithCredential(current, credential)
-        : await signInWithCredential(auth, credential);
+      const out = await linkOrSignIn({
+        anonymous: Boolean(current && accountStep(toUser(current)) === 'sign-in'),
+        credential,
+        link: (value) => linkWithCredential(current!, value),
+        signIn: (value) => signInWithCredential(auth, value),
+        refreshCredential: getCredential,
+      });
       return toUser(out.user) as UserInfo;
     },
     async signInWithGoogle() {
@@ -145,24 +160,64 @@ export function createFirebaseBackend(): Backend {
       if (!idToken) throw new BackendError('unknown', 'Google sign-in returned no token');
       const credential = GoogleAuthProvider.credential(idToken);
       const current = auth.currentUser;
-      const out = current?.isAnonymous
-        ? await linkWithCredential(current, credential)
-        : await signInWithCredential(auth, credential);
+      const out = await linkOrSignIn({
+        anonymous: Boolean(current && accountStep(toUser(current)) === 'sign-in'),
+        credential,
+        link: (value) => linkWithCredential(current!, value),
+        signIn: (value) => signInWithCredential(auth, value),
+      });
       return toUser(out.user) as UserInfo;
     },
     async requestPhoneVerification(phoneNumber) {
-      const snapshot = await verifyPhoneNumber(auth, phoneNumber);
-      if (snapshot.state === 'error') throw snapshot.error ?? new Error('Phone verification failed');
-      return snapshot.verificationId;
+      const current = auth.currentUser;
+      if (!current || accountStep(toUser(current)) === 'sign-in')
+        throw new BackendError('unauthenticated', 'Sign in before verifying a phone number');
+      const request = ++phoneRequest;
+      const ensureCurrent = () => {
+        if (request !== phoneRequest || auth.currentUser?.uid !== current.uid)
+          throw new BackendError('unauthenticated', 'Account changed');
+      };
+      return requestNativePhoneCode({
+        subscribe: (receive) => {
+          verifyPhoneNumber(auth, phoneNumber).on('state_changed', receive);
+        },
+        ensureCurrent,
+        onSent: (id) => {
+          phoneChallenge = { id, uid: current.uid };
+        },
+        onVerified: async (snapshot) => {
+          ensureCurrent();
+          // Android's native SDK caches instant-verification credentials under a null ID;
+          // RNFirebase's public types omit that native null case, but the bridge requires it.
+          const credential = PhoneAuthProvider.credential(
+            snapshot.verificationId as string,
+            snapshot.code ?? '',
+          );
+          const result = await linkWithCredential(current, credential);
+          ensureCurrent();
+          phoneChallenge = undefined;
+          await result.user.getIdToken(true);
+        },
+      });
     },
     async confirmPhoneVerification(verificationId, code) {
       const current = auth.currentUser;
-      if (!current) throw new BackendError('unauthenticated', 'Sign in before verifying a phone number');
+      if (!current || accountStep(toUser(current)) === 'sign-in')
+        throw new BackendError('unauthenticated', 'Sign in before verifying a phone number');
+      if (phoneChallenge?.uid !== current.uid || phoneChallenge.id !== verificationId)
+        throw new BackendError('unauthenticated', 'Request a new verification code for this account');
       const credential = PhoneAuthProvider.credential(verificationId, code);
       const result = await linkWithCredential(current, credential);
+      await result.user.getIdToken(true);
+      if (auth.currentUser?.uid !== current.uid) throw new BackendError('unauthenticated', 'Account changed');
+      phoneChallenge = undefined;
       return toUser(result.user) as UserInfo;
     },
-    signOut: () => signOut(auth),
+    signOut: async () => {
+      phoneRequest++;
+      phoneChallenge = undefined;
+      await signOut(auth);
+    },
   };
 
   async function getPois(tiles: string[]): Promise<Poi[]> {
@@ -228,11 +283,20 @@ export function createFirebaseBackend(): Backend {
       );
     },
     async getTour(id) {
-      const snap = await getDoc(doc(db, 'tours', id));
+      const planned = id.startsWith('planned_');
+      const uid = auth.currentUser?.uid;
+      if (planned && !uid) throw new BackendError('unauthenticated', 'Sign in to open your route');
+      const ref = planned
+        ? doc(db, 'users', uid!, 'sessions', id.slice('planned_'.length))
+        : doc(db, 'tours', id);
+      const snap = await getDoc(ref);
       const p = snap.exists() ? TourSchema.safeParse(snap.data()) : undefined;
-      return p?.success ? p.data : null;
+      if (p?.success && (!planned || p.data.expiresAt === undefined || p.data.expiresAt > Date.now()))
+        return p.data;
+      return null;
     },
     getPois,
+    selectNearby: (req) => call('selectNearby', req),
     async getExploredSpots(tiles) {
       // `poiStats` holds anonymous aggregates written by Cloud Functions (see functions/src/stats).
       const stats: PoiStats[] = [];
@@ -270,12 +334,18 @@ export function createFirebaseBackend(): Backend {
     },
     async getNarration(req: GetNarrationRequest) {
       const n = await call<GetNarrationRequest, NarrationResponse>('getNarration', req);
-      if (n.audioUrl) signedUrls.set(n.audioPath, n.audioUrl);
+      if (n.audioUrl) {
+        n.audioUrl = reachableAudioUrl(n.audioUrl, config.useEmulators ? config.emulatorHost : undefined);
+        signedUrls.set(n.audioPath, n.audioUrl);
+      }
       return n;
     },
     async getTransition(req) {
       const t = await call<typeof req, TransitionResponse>('getTransition', req);
-      if (t.audioUrl) signedUrls.set(t.audioPath, t.audioUrl);
+      if (t.audioUrl) {
+        t.audioUrl = reachableAudioUrl(t.audioUrl, config.useEmulators ? config.emulatorHost : undefined);
+        signedUrls.set(t.audioPath, t.audioUrl);
+      }
       return t;
     },
     watchEntitlements(cb) {
@@ -321,6 +391,7 @@ export function createFirebaseBackend(): Backend {
     },
     exportMyData: () => call('exportMyData', {}),
     claimTourStart: (tourId, sessionId, mode) => call('claimTourStart', { tourId, sessionId, mode }),
+    prepareTourDownload: (tourId, mode) => call('prepareTourDownload', { tourId, mode }),
     async recordPurchaseConsent(productId) {
       await call('recordPurchaseConsent', { productId, textVersion: LEGAL_VERSION });
     },

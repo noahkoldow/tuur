@@ -6,19 +6,25 @@ import {
   budgetDecision,
   type NarrationDoc,
   resolvePersona,
+  storyFingerprint,
+  sanitizeForPrompt,
 } from '@tuur/shared';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
-import { logUsage, spentToday } from '../util/usage';
+import { spentToday } from '../util/usage';
+import { budgetedLlm } from '../providers/budgeted';
 import { NarrationError, renderAudio, withAudioUrl, type NarrationDeps } from './service';
+import { personalAudioPrefix, personalNarrationScope } from './personalScope';
 
 export const GetTransitionRequestSchema = z.object({
   fromPoiId: z.string().min(1).max(120),
   toPoiId: z.string().min(1).max(120),
   lang: NarrationLangSchema,
-  /** Rounded on the server so equal hops share one cache entry. */
+  /** Rounded so retries of an equal hop within this personal script can reuse their recording. */
   walkMinutes: z.number().min(1).max(240),
   tourTitle: z.string().max(200).optional(),
+  scriptInstanceId: z.string().min(1).max(120).optional(),
+  download: z.boolean().optional(),
   voice: z
     .string()
     .regex(/^[a-z][a-z0-9-]{1,30}$/)
@@ -41,6 +47,10 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
   const parsed = GetTransitionRequestSchema.safeParse(raw);
   if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
   const r = parsed.data;
+  if (r.download && (!r.access?.tourId || (r.access.mode && !['tour', 'planned'].includes(r.access.mode))))
+    throw new NarrationError('permission-denied', 'Only fixed itineraries can be downloaded', {
+      reason: 'download_not_supported',
+    });
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const [from, to] = await Promise.all(
     [r.fromPoiId, r.toPoiId].map(async (id) => {
@@ -49,13 +59,19 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
       return PoiSchema.parse(s.data());
     }),
   );
-  await deps.authorize?.(uid, to!, r.access);
+  await deps.authorize?.(uid, to!, r.access, { download: Boolean(r.download) });
+  await deps.authorize?.(uid, from!, r.access, { download: Boolean(r.download) });
   const minutes = Math.max(1, Math.round(r.walkMinutes / 2) * 2);
   const persona = resolvePersona(cfg.voiceCast, cfg.defaultVoiceId, r.voice);
   const voicePart = persona.id === cfg.defaultVoiceId ? '' : `__${persona.id}`;
-  const key = `tr__${from!.id}__${to!.id}__${r.lang}__${minutes}__${cfg.promptVersion}${voicePart}`.replace(
-    /[^A-Za-z0-9_-]/g,
-    '_',
+  const title = r.tourTitle ? sanitizeForPrompt(r.tourTitle, 200) : undefined;
+  const storyPart = title ? `__story_${storyFingerprint(title)}` : '';
+  const scope = personalNarrationScope(uid, r.scriptInstanceId);
+  const key = scope.key(
+    `tr__${from!.id}__${to!.id}__${r.lang}__${minutes}__${cfg.promptVersion}${voicePart}${storyPart}`.replace(
+      /[^A-Za-z0-9_-]/g,
+      '_',
+    ),
   );
   const ref = deps.db.collection('narrations').doc(key);
   const hit = await ref.get();
@@ -71,7 +87,8 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
   });
   if (hit.exists) {
     const d = NarrationDocSchema.parse(hit.data());
-    if (d.status === 'ok') return pick(d, true);
+    if (d.status === 'ok' && d.ownerUid === uid && d.scriptInstanceId === scope.scriptInstanceId)
+      return pick(d, true);
   }
   try {
     await consumeRateLimit(deps.db, `narr_user_${uid}`, cfg.rateLimits.perUserPerHour, 3600_000, deps.now());
@@ -84,19 +101,14 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
   if (!budget.allowed)
     throw new NarrationError('unavailable', 'Generation is paused', { reason: budget.reason });
 
-  const t = await deps.llm.transition({
+  const t = await budgetedLlm(deps.llm, deps.db, cfg, deps.now, { tile: to!.tile, key }).transition({
     model: cfg.models.lite,
     lang: r.lang,
     from: from!.name,
     to: to!.name,
     walkMinutes: minutes,
+    ...(title ? { tourTitle: title } : {}),
   });
-  await logUsage(
-    deps.db,
-    cfg.pricing,
-    { kind: 'transition', model: cfg.models.lite, usage: t.usage, tile: to!.tile, key, ok: true },
-    deps.now(),
-  );
   const text = t.text.replace(/\s+/g, ' ').trim();
   if (!text || /[*#_`]|https?:\/\/|\(/.test(text))
     throw new NarrationError('failed-precondition', 'Transition rejected', { reason: 'markup' });
@@ -105,12 +117,14 @@ async function getTransitionChecked(deps: NarrationDeps, uid: string, raw: unkno
     cfg,
     [text],
     r.lang,
-    `narrations/${key}`,
+    `${personalAudioPrefix(uid)}${key}`,
     { tile: to!.tile, key },
     persona,
   );
   const doc = NarrationDocSchema.parse({
     key,
+    ownerUid: uid,
+    scriptInstanceId: scope.scriptInstanceId,
     poiId: to!.id,
     lang: r.lang,
     lengthTier: 'short',

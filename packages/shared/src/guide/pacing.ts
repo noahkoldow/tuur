@@ -38,20 +38,27 @@ export const minTier = (a: LengthTier, b: LengthTier): LengthTier => (tierIndex(
 export function etaSeconds(distanceM: number, mode: TravelMode, speedMps: number): number {
   if (mode === 'stationary') return Number.POSITIVE_INFINITY;
   const typical = TYPICAL_SPEED[mode];
-  const v = Math.min(typical * 1.6, Math.max(typical * 0.6, speedMps));
+  const maximum = mode === 'vehicle' ? 60 : typical * 1.6;
+  const v = Math.min(maximum, Math.max(typical * 0.6, speedMps));
   return distanceM / v;
 }
 
 /**
- * Longest tier whose spoken duration fits the time window before arrival (spec 4.6). Cycling uses the short tier
- * by default; the result never exceeds `maxTier`. Windows too small for `short` still return `short`.
+ * Longest tier whose spoken duration fits the time window before arrival (spec 4.6). Cycling uses its set cap;
+ * car/public-transport travel uses the shortest story as places pass more quickly.
+ * The result never exceeds `maxTier`. Windows too small for `short` still return `short`.
  */
 export function chooseTier(
   windowSec: number,
   mode: TravelMode,
   prefs: PacingPrefs = DEFAULT_PACING,
 ): LengthTier {
-  const cap = mode === 'cycling' ? minTier(prefs.maxTier, prefs.cyclingTier) : prefs.maxTier;
+  const cap =
+    mode === 'vehicle'
+      ? 'short'
+      : mode === 'cycling'
+        ? minTier(prefs.maxTier, prefs.cyclingTier)
+        : prefs.maxTier;
   const usable = windowSec - prefs.marginSec;
   let pick: LengthTier = 'short';
   for (const t of LENGTH_TIERS) {

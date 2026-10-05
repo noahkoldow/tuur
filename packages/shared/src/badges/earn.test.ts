@@ -24,7 +24,7 @@ describe('city badges', () => {
       walk('b', 52.52, 13.41),
       walk('c', 52.5, 13.42),
       walk('d', 52.4, 13.07),
-      walk('e', 52.4, 13.07, 1),
+      walk('e', 52.4, 13.07, 0),
     ];
     expect(earnedBadges(tours, cities)).toEqual([
       { cityId: 'berlin', tours: 3, tier: 'silver', toNext: 4 },
@@ -35,5 +35,19 @@ describe('city badges', () => {
   it('stops counting up at gold', () => {
     const tours = Array.from({ length: 8 }, (_, i) => walk(`t${i}`, 52.52, 13.405));
     expect(earnedBadges(tours, cities)[0]).toEqual({ cityId: 'berlin', tours: 8, tier: 'gold' });
+  });
+
+  it('earns the first Berlin badge for a one-stop trial, including already saved history', () => {
+    expect(earnedBadges([walk('old-trial', 52.5163, 13.3777, 1)], cities)).toEqual([
+      { cityId: 'berlin', tours: 1, tier: 'bronze', toNext: 2 },
+    ]);
+    expect(earnedBadges([walk('opened-in-berlin', 52.5163, 13.3777, 0)], cities)).toEqual([]);
+  });
+
+  it('counts a recovered tour only once', () => {
+    const tour = walk('same-record', 52.52, 13.405, 1);
+    expect(earnedBadges([tour, tour, tour], cities)).toEqual([
+      { cityId: 'berlin', tours: 1, tier: 'bronze', toNext: 2 },
+    ]);
   });
 });

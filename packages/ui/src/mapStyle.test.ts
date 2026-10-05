@@ -30,12 +30,17 @@ describe('map style', () => {
     for (const c of fills) expect(lum(c)).toBeGreaterThan(0.85);
   });
 
-  it('resolves explicit URL, MapTiler and keyless fallback in that order', () => {
+  it('resolves explicit URL, optional MapTiler and keyless OSM in that order', () => {
     expect(resolveMapStyle({ styleUrl: 'https://x/style.json', maptilerKey: 'k' })).toBe(
       'https://x/style.json',
     );
     expect(typeof resolveMapStyle({ maptilerKey: 'k' })).toBe('object');
-    expect(resolveMapStyle({})).toContain('demotiles');
+    expect(resolveMapStyle({})).toMatchObject({
+      name: 'tuur-light',
+      sources: { openmaptiles: { url: 'https://tiles.openfreemap.org/planet' } },
+      glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    });
+    expect(resolveMapStyle({}, 'dark')).toMatchObject({ name: 'tuur-dark' });
   });
 
   it('has a dark appearance with only dark fills and the same layers', () => {

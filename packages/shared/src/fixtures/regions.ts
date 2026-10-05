@@ -1,4 +1,5 @@
 import type { RawPoi } from '../poi/raw';
+import { fixtureImageFile } from './place-photos';
 
 /** Test fixtures: hand-built raw upstream candidates for four different regions. Not real API dumps. */
 
@@ -16,6 +17,7 @@ const osm = (
   location: { lat, lng },
   osmTags: { name, ...tags },
   names: {},
+  ...(fixtureImageFile(id) ? { imageFile: fixtureImageFile(id) } : {}),
   ...extra,
 });
 
@@ -34,6 +36,7 @@ const wd = (
   wikidataId: id,
   sitelinks,
   instanceOf,
+  ...(fixtureImageFile(id) ? { imageFile: fixtureImageFile(id) } : {}),
 });
 
 const wp = (lang: string, title: string, lat: number, lng: number, length: number): RawPoi => ({

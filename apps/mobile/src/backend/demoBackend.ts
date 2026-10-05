@@ -1,14 +1,21 @@
 import {
+  frameScriptParagraphs,
+  localObservation,
+  isLocalContextPoi,
+  filterOsmTags,
   DEFAULT_TEMPLATES,
   SESSION_DURATION_MS,
   decideAccess,
+  decideDownloadAccess,
   decideInvite,
   decideSpend,
+  downloadTourMode,
   isSubscriber,
   partnerIntro,
   type Entitlement,
   type Wallet,
   REGION_FIXTURES,
+  FIXTURE_IMAGES,
   buildPois,
   encodeGeohash,
   encodePolyline,
@@ -52,6 +59,7 @@ import {
   type UserInfo,
 } from './types';
 import { previewWalkingPath } from './previewRouting';
+import { normalizedPhone, requireVerifiedAccount, validPhone } from '../auth/policy';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -202,19 +210,37 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
   const groupsDemo = new Map<string, GroupInfo>();
   const groupListeners = new Map<string, Set<(g: GroupInfo | null) => void>>();
   /** Mirrors the server-side check so the demo shows the same locked/unlocked behavior. */
-  const gate = (access: { tourId?: string; mode?: 'tour' | 'planned' | 'fork' | 'roam' } | undefined) => {
-    if (!opts.enforceAccess) return;
+  const gate = (
+    access: { tourId?: string; mode?: 'tour' | 'planned' | 'fork' | 'roam' } | undefined,
+    download = false,
+    poiIds: string[] = [],
+  ) => {
+    if (!download && !opts.enforceAccess) return;
     const mode = access?.mode ?? (access?.tourId ? 'tour' : undefined);
     const tour = access?.tourId ? tours.get(access.tourId) : undefined;
     const placeId = tour?.placeId ?? [...regions.values()][0]?.placeId;
-    const d = decideAccess(
+    const now = Date.now();
+    if (download) {
+      if (!tour || downloadTourMode(tour) !== mode)
+        throw new BackendError(
+          'locked',
+          'Only fixed itineraries can be downloaded',
+          undefined,
+          'download_not_supported',
+        );
+      if (tour.locked || (tour.expiresAt !== undefined && tour.expiresAt <= now))
+        throw new BackendError('locked', 'This route is no longer available');
+      if (!poiIds.every((id) => tour.stops.some((stop) => stop.poiId === id)))
+        throw new BackendError('locked', 'Stop is not part of this tour');
+    }
+    const d = (download ? decideDownloadAccess : decideAccess)(
       ents,
       {
         ...(mode ? { mode } : {}),
         ...(access?.tourId ? { tourId: access.tourId, tourFree: tour?.free ?? false } : {}),
         ...(placeId ? { placeId } : {}),
       },
-      Date.now(),
+      now,
     );
     if (!d.allowed) throw new BackendError('locked', 'Content is locked', undefined, d.reason);
   };
@@ -237,7 +263,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
     const existing = regions.get(key);
     if (existing) return existing;
     const raw: RawPoi[] = fx ? fx.raw : syntheticRawPois(tile);
-    const { pois } = buildPois(raw, { now: Date.now(), precision: 6 });
+    const { pois } = buildPois(raw, { now: Date.now(), precision: 6, images: FIXTURE_IMAGES });
     const region: Region = {
       key,
       placeId: fx ? `${fx.countryCode}_${fx.key}` : `DEMO_${tile.slice(0, 5)}`,
@@ -251,6 +277,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
   }
 
   const user: { current: UserInfo | null } = { current: null };
+  let phoneChallenge: { id: string; phone: string; uid: string } | undefined;
   const authListeners = new Set<(u: UserInfo | null) => void>();
   const setUser = (u: UserInfo | null) => {
     user.current = u;
@@ -264,18 +291,51 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       cb(user.current);
       return () => authListeners.delete(cb);
     },
-    ensureSignedIn: async () => user.current ?? setUser({ uid: 'demo-user', isAnonymous: true })!,
-    signInWithEmail: async (email) => setUser({ uid: 'demo-user', isAnonymous: false, email })!,
+    ensureSignedIn: async () => requireVerifiedAccount(user.current),
+    signInWithEmail: async (email) =>
+      setUser({ uid: 'demo-user', isAnonymous: false, email, providerIds: ['password'] })!,
     signInWithApple: async () =>
-      setUser({ uid: 'demo-user', isAnonymous: false, email: 'demo@apple.example' })!,
+      setUser({
+        uid: 'demo-user',
+        isAnonymous: false,
+        email: 'demo@apple.example',
+        providerIds: ['apple.com'],
+      })!,
     signInWithGoogle: async () =>
-      setUser({ uid: 'demo-user', isAnonymous: false, email: 'demo@google.example' })!,
-    requestPhoneVerification: async () => 'demo-verification',
-    confirmPhoneVerification: async (_verificationId, _code) => {
-      const current = user.current ?? { uid: 'demo-user', isAnonymous: true };
-      return setUser({ ...current, isAnonymous: false, phoneNumber: '+15555550100' })!;
+      setUser({
+        uid: 'demo-user',
+        isAnonymous: false,
+        email: 'demo@google.example',
+        providerIds: ['google.com'],
+      })!,
+    requestPhoneVerification: async (phoneNumber) => {
+      if (!user.current || user.current.isAnonymous)
+        throw new BackendError('unauthenticated', 'Sign in before verifying a phone number');
+      if (!validPhone(phoneNumber))
+        throw Object.assign(new Error('Invalid phone number'), { code: 'auth/invalid-phone-number' });
+      phoneChallenge = {
+        id: `demo-${Date.now()}-${Math.random()}`,
+        phone: normalizedPhone(phoneNumber),
+        uid: user.current.uid,
+      };
+      return phoneChallenge.id;
     },
-    signOut: async () => void setUser(null),
+    confirmPhoneVerification: async (verificationId, code) => {
+      const current = user.current;
+      if (!current || current.isAnonymous || phoneChallenge?.uid !== current.uid)
+        throw new BackendError('unauthenticated', 'Sign in before verifying a phone number');
+      if (verificationId !== phoneChallenge.id || code !== '000000')
+        throw Object.assign(new Error('Invalid verification code'), {
+          code: 'auth/invalid-verification-code',
+        });
+      const phoneNumber = phoneChallenge.phone;
+      phoneChallenge = undefined;
+      return setUser({ ...current, phoneNumber })!;
+    },
+    signOut: async () => {
+      phoneChallenge = undefined;
+      setUser(null);
+    },
   };
 
   const backend: Backend = {
@@ -311,6 +371,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       const now = Date.now();
       const built: Tour[] = [];
       for (const template of DEFAULT_TEMPLATES) {
+        if (template.id === 'local_walk' && built.length) continue;
         const res = planTour(region.pois, {
           ...template,
           minCandidates: Math.min(template.minCandidates, 5),
@@ -367,6 +428,15 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
       return [...regions.values()].filter((r) => keys.has(r.key)).flatMap((r) => r.pois);
     },
+    async selectNearby(req) {
+      return {
+        poiIds: req.candidateIds.filter((id) => {
+          const poi = poiIndex.get(id);
+          return poi && !poi.hidden && poi.accessible;
+        }),
+        source: 'fallback',
+      };
+    },
     async getExploredSpots(tiles) {
       // Demo: deterministic, made-up popularity so the explore map can be tried; production reads `poiStats`.
       const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
@@ -414,7 +484,17 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       const minutes = m.minutes.map((row, i) =>
         row.map((v, j) => (open && j === row.length - 1 ? 0 : !req.start && i === 0 ? 0 : v)),
       );
-      const fit = fitToBudget(pois, { minutes, meters: m.meters }, req.budgetMinutes, req.interests);
+      if (req.requiredStopIds?.some((id) => !pois.some((p) => p.id === id)))
+        throw new BackendError('not_found', 'A chosen stop is unavailable');
+      const fit = fitToBudget(
+        pois,
+        { minutes, meters: m.meters },
+        req.budgetMinutes,
+        req.interests,
+        req.requiredStopIds,
+      );
+      if (fit.totalMinutes > req.budgetMinutes + 0.5)
+        throw new BackendError('unknown', 'The chosen stops do not fit the time budget');
       const kept = fit.order.map((id) => pois.find((p) => p.id === id)!);
       const legs: number[] = [];
       let prev = 0;
@@ -447,6 +527,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         now: Date.now(),
         ...(streets ? { path: streets } : {}),
       });
+      tour.expiresAt = Date.now() + SESSION_DURATION_MS;
       tours.set(tour.id, tour);
       return { tour, dropped: fit.dropped };
     },
@@ -460,13 +541,34 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
     },
     async getNarration(req: GetNarrationRequest): Promise<NarrationResponse> {
       await sleep(latency);
-      gate(req.access);
+      if (req.download && (!req.access?.tourId || !['tour', 'planned'].includes(req.access.mode ?? 'tour')))
+        throw new BackendError('locked', 'Only fixed itineraries can be downloaded');
+      gate(req.access, Boolean(req.download), [req.poiId]);
       const poi = poiIndex.get(req.poiId);
       if (!poi) throw new BackendError('not_found', 'POI not found');
       const sponsored = demoPartners && isDemoPartner(poi.id);
+      const observation =
+        !sponsored && isLocalContextPoi(poi)
+          ? localObservation(
+              {
+                poiName: poi.name,
+                wikipedia: [],
+                facts: [],
+                adminFacts: poi.adminFacts,
+                osmTags: filterOsmTags(poi.osmTags, req.lang),
+              },
+              req.lang,
+              req.context,
+            )
+          : undefined;
       const paras = [
         ...(sponsored ? [partnerIntro(req.lang)] : []),
-        ...demoNarrationParagraphs(poi, req.lang, req.lengthTier),
+        ...(observation?.paragraphs ??
+          frameScriptParagraphs(
+            demoNarrationParagraphs(poi, req.lang, req.lengthTier),
+            req.context,
+            req.lang,
+          )),
       ];
       const layout = layoutParagraphs(
         paras.map((text) => ({
@@ -494,16 +596,18 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       };
     },
     async getTransition(req) {
-      gate(req.access);
+      if (req.download && (!req.access?.tourId || !['tour', 'planned'].includes(req.access.mode ?? 'tour')))
+        throw new BackendError('locked', 'Only fixed itineraries can be downloaded');
+      gate(req.access, Boolean(req.download), [req.fromPoiId, req.toPoiId]);
       const to = poiIndex.get(req.toPoiId);
       const text =
         req.lang === 'de'
           ? `Weiter geht es zu ${to?.name ?? 'der nächsten Station'}, etwa ${req.walkMinutes} Minuten zu Fuß.`
           : `Next is ${to?.name ?? 'the next stop'}, about ${req.walkMinutes} minutes on foot.`;
       return {
-        key: `demo-tr-${req.fromPoiId}-${req.toPoiId}`,
+        key: `demo-tr-${req.fromPoiId}-${req.toPoiId}-${req.scriptInstanceId ?? 'preview'}`,
         text,
-        audioPath: `demo:tr:${req.toPoiId}`,
+        audioPath: `demo:tr:${req.toPoiId}:${req.scriptInstanceId ?? 'preview'}`,
         audioDurationMs: estimateSpeechMs(text, req.lang),
       };
     },
@@ -532,14 +636,33 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         throw new BackendError('locked', 'Tour is locked');
       return { counted: false, remaining: null };
     },
+    async prepareTourDownload(tourId, mode) {
+      const tour = tours.get(tourId);
+      if (!tour || downloadTourMode(tour) !== mode)
+        throw new BackendError('not_found', 'This route cannot be downloaded');
+      if (tour.expiresAt !== undefined && tour.expiresAt <= Date.now())
+        throw new BackendError('locked', 'This online route session has expired');
+      gate({ tourId, mode }, true);
+      return { tourId, mode, grantedAt: Date.now(), expiresAt: null };
+    },
     async spendCredit(req) {
       await sleep(latency);
       const now = Date.now();
+      const paidOnly = req.kind === 'tour' && req.paidOnly === true;
+      if (paidOnly) {
+        const tour = tours.get(req.tourId);
+        if (!tour || tour.locked) throw new BackendError('not_found', 'Tour not found');
+      }
       const unlocked =
         req.kind === 'tour'
-          ? ents.some((e) => e.type === 'tour' && e.tourId === req.tourId)
+          ? ents.some(
+              (e) =>
+                e.type === 'tour' &&
+                e.tourId === req.tourId &&
+                (!paidOnly || (e.source === 'credit' && (e.expiresAt === null || e.expiresAt > now))),
+            )
           : ents.some((e) => e.type === 'session' && e.placeId === req.placeId && e.expiresAt > now);
-      const d = decideSpend(wallet, req.kind, unlocked, isSubscriber(ents, now));
+      const d = decideSpend(wallet, req.kind, unlocked, isSubscriber(ents, now), paidOnly);
       if (!d.ok)
         throw new BackendError(
           d.reason === 'insufficient' ? 'insufficient_credit' : 'invite_invalid',

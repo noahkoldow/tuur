@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { INTERESTS, LENGTH_TIERS } from '../constants';
 import { NARRATION_LANGS } from './prompt';
+import { NarrationContextSchema } from './script';
 
 /** Supported narration languages as a plain string (keeps client code simple; unknown codes are rejected). */
 export const NarrationLangSchema = z
@@ -28,13 +29,8 @@ export const GetNarrationRequestSchema = z.object({
     .optional(),
   /** Set by the offline download manager: uses the download rate-limit bucket. */
   download: z.boolean().optional(),
-  /** Optional narrative context, e.g. previous stop title for smooth hand-over. */
-  context: z
-    .object({
-      previousPoiName: z.string().max(200).optional(),
-      tourTitle: z.string().max(200).optional(),
-    })
-    .optional(),
+  /** Fixed editorial script plus this stop's chapter; never factual source material. */
+  context: NarrationContextSchema.optional(),
 });
 export type GetNarrationRequest = z.infer<typeof GetNarrationRequestSchema>;
 
@@ -59,6 +55,9 @@ export const NARRATION_STATUSES = ['ok', 'blocked', 'pending_review'] as const;
 
 export const NarrationDocSchema = z.object({
   key: z.string(),
+  /** Personal recordings are reusable only by this account in this script instance. */
+  ownerUid: z.string().optional(),
+  scriptInstanceId: z.string().optional(),
   poiId: z.string(),
   lang: z.string(),
   lengthTier: z.enum(LENGTH_TIERS),

@@ -82,6 +82,8 @@ export const AreaSchema = z.object({
   /** After this the area may be refreshed by the next `ensureArea`. */
   expiresAt: z.number().optional(),
   ingestStartedAt: z.number().optional(),
+  /** Temporary provider quota deferral; retry once this timestamp is reached. */
+  ingestRetryAt: z.number().optional(),
   ingestAttempts: z.number().int().nonnegative().default(0),
   poiCount: z.number().int().nonnegative().default(0),
   qualityPoiCount: z.number().int().nonnegative().default(0),

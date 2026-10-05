@@ -1,8 +1,11 @@
 import type { AudioEngine } from './types';
 import { SimulatedAudioEngine } from './simulatedEngine';
+import { ExpoAudioEngine } from './expoAudioEngine';
+import { config } from '../config';
 
 /** Web preview: timer-based playback, speaking the paragraph text with the browser's speech synthesis. */
 export function createAudioEngine(): AudioEngine {
+  if (config.backend === 'firebase') return new ExpoAudioEngine();
   const hasSpeech = typeof window !== 'undefined' && 'speechSynthesis' in window;
   return new SimulatedAudioEngine(
     undefined,

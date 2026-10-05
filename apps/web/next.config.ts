@@ -27,7 +27,7 @@ const config: NextConfig = {
           "font-src 'self' data:",
           "worker-src 'self' blob:",
           "child-src 'self' blob: https://*.firebaseapp.com https://accounts.google.com",
-          "connect-src 'self' https://*.googleapis.com https://*.cloudfunctions.net https://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://nominatim.openstreetmap.org https://api.maptiler.com https://demotiles.maplibre.org http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
+          "connect-src 'self' https://*.googleapis.com https://*.cloudfunctions.net https://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://nominatim.openstreetmap.org https://api.maptiler.com https://tiles.openfreemap.org http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
           "media-src 'self' blob:",
         ].join('; '),
       },
