@@ -1,5 +1,15 @@
 # Release checklist
 
+## Expo Hosting preview refreshed — 2026-10-05
+
+The current web preview is live at **[tuur--preview.expo.app](https://tuur--preview.expo.app)**. EAS Hosting deployment [`fjgdnnav8i`](https://tuur--fjgdnnav8i.expo.app) uses the existing `preview` alias and environment for `noehxpo/tuur`, from source commit `f8e6453b1fea70227656ec5f17c17416db0b0abc`. This supersedes the older web-preview deployment below and includes the personal tour context, category colors, horizontal badges, history deletion and map pause menu/picker.
+
+Exported the mobile web app into a fresh temporary directory with `EXPO_PUBLIC_BACKEND=demo`, `EXPO_PUBLIC_PAYWALL=off`, `EXPO_PUBLIC_USE_EMULATORS=false`, `EXPO_PUBLIC_EXPO_GO=0`, no preview routing override and `EXPO_NO_DOTENV=1`. Published its 68 files with EAS CLI 24.10.0 using `deploy --environment preview --alias preview --export-dir <relative-export-path> --non-interactive --no-source-maps`. The export contains no source maps. On Windows, pass the export directory relative to `apps/mobile`; this CLI version joins the argument to the project directory.
+
+Verified HTTP 200 for the alias, immutable deployment, `/home`, `/sign-in`, JavaScript bundle and a font with a long package-derived URL. All sampled files match the fresh local export by SHA-256; the JavaScript bundle is 5,455,892 bytes. At 390 × 844, the hosted browser app passed simulated sign-in, Home rendering, upward map actions, **Pause finden**, the café result and the food-filter empty state.
+
+This is the demo web preview with a schematic map and browser speech. Live Gemini, Google Places and the backend's personal-recording changes are not activated by this static deployment. Native-device acceptance remains separate.
+
 ## Expo Go preview refreshed — 2026-10-05, 13:34 UTC
 
 Published the current iOS [Expo Go preview](https://expo.dev/accounts/noehxpo/projects/tuur/updates/6ce76fef-00ff-4537-8711-a2ea51c6d3f0) on the existing `expo-go` branch in EAS environment `preview`: SDK `57.0.0`, runtime `0.1.0`, update `01a10c45-7f7e-7b1f-8ee2-ea3835a4de8f`. This supersedes the older Expo Go preview below and the earlier unpublished UI status. It includes the personal tour context, category colors, horizontal badges, history swipe deletion and map pause menu/picker.
