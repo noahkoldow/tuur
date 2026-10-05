@@ -1,5 +1,72 @@
 # Release checklist
 
+## Git and Expo Go review checkpoint — 2026-10-05
+
+Latest owner instruction: commit and push the current project, publish the Expo Go preview, then wait for the owner's review. **Do not start a native TestFlight build or upload until a new explicit Go.** This supersedes the earlier same-day authorization below. The Expo Go preview remains demo-backed with device speech; live Gemini/TTS, native App Attest and real ORS navigation require the later native beta. The public operator-address decision remains outstanding for that release.
+
+## Native TestFlight preparation and real navigation — 2026-10-05
+
+The owner explicitly requested the current app be prepared and uploaded to TestFlight, lifting the earlier hold in D62–D65. This authorizes the isolated beta build/upload, not public App Store release or new tester invitations. Source includes concurrent app changes; no new native build has been uploaded yet.
+
+- Beta `tuur-beta-noehxpo` now has 30 active functions, including authenticated/App-Check-protected `getWalkingRoute`. Explore, Crossroads and active tours use real walking/cycling geometry; distance, next-segment direction and Live Activity follow the path. Sustained deviation triggers bounded rerouting; pause, stale GPS/requests and provider failures do not fabricate a straight-line route. Saved ORS tour geometry remains available offline.
+- Live backend smoke passed 52 checks with 12 successful fixture cleanup steps. A new personal Gemini recording at Brandenburger Tor produced 27.4 seconds / 164,827 bytes of audio; a repeat request reused the same recording. A real walking route returned 25 points over 419 metres. Temporary personal recordings, Auth users and App Check debug tokens were removed. Evidence: ignored `.firebase/beta-backend-verification.json`.
+- Existing daily admission limits remain USD 1 global and USD 0.50 per tile. An earlier test was correctly denied by `area_budget` in `u33dbb`; the passing run used the public canonical POI `wd_Q82425` in `u33db2`. Live coverage is still the six configured Berlin-Mitte tiles. This does not prove native App Attest, StoreKit or physical-device audio.
+- Firebase native Apple and Google sign-in are enabled for beta. iOS Team ID is `4GXK973R2W`; bundle ID is `com.tuurapp`, App Store Connect app is `6817677603`. SMS regions allow Germany only and the verified daily send quota is 20. Primary sign-in plus a linked phone number remains required. No SMS was sent by the test.
+- EAS `testflight` uses the isolated `preview` environment. Its refreshed Firebase iOS plist is a separate secret-file record; the existing production/development file remains intact. Google OAuth configuration and beta public settings are staged remotely. Node is 22.14.0; the default iOS app icon is opaque RGB, 1024 × 1024. `.easignore` excludes local credentials, generated output and previews.
+- Apple main-app capabilities now include App Attest, App Groups and Push Notifications; Sign in with Apple was already enabled. Both the main app and new `com.tuurapp.widgets` identifier share `group.com.tuurapp`. Renewed main profile `V8R3T3FY63` and widget profile `Q3LT55M75W` use the existing distribution certificate and are imported into EAS; the CLI reports both targets ready to build. Store entitlements, matching certificate, group and expiry on 13 August 2027 were checked without publishing private credentials.
+- Public legal documents have a separate `EXPO_PUBLIC_LEGAL_BASE_URL`, with backward-compatible fallback to `EXPO_PUBLIC_WEB_BASE_URL`. The beta legal-site generator validates real operator details before writing or publishing. Existing share/invite/group URLs retain their app host; their landing and native handoff remain unverified.
+- Validation: 359 mobile tests, navigation/backend tests, smoke safety tests, release/legal checks, TypeScript and scoped lint passed. Final native iOS JavaScript export passed with 2,828 modules and an 8,704,244-byte Hermes bundle. This is not an Xcode archive or a TestFlight acceptance result.
+
+Remaining gates: first wait for the owner's new TestFlight Go. The local iOS/beta release check reports only `EXPO_PUBLIC_OPERATOR_ADDRESS` missing. The registered Apple address was found in Edge, but its public use is awaiting the owner's answer. The Berlin supervisory-authority contact is staged from its [official page](https://www.datenschutz-berlin.de/ueber-uns/kontakt/). After authorization and the address are settled, publish the legal/support site, run the native EAS build, inspect the IPA, upload its exact ID and verify Apple processing. Then check real iPhone sign-in/phone/App Attest, Gemini playback/background interruptions, GPS walking/rerouting and sandbox purchases. See D67.
+
+## Place cards flip to information — 2026-10-05
+
+Implemented locally; not deployed. Home, nearby suggestions and Crossroads cards now flip to written place information when their body is tapped. Only the bottom-right navigation button starts or changes the destination. Navigation can be disabled during a story while the card remains readable. Tour-stop photo cards also flip to place information or their top three narrated facts. Photo/source credits stay separately accessible, long information scrolls, and Reduce Motion replaces the quick flip with a fade.
+
+Focused place-information/carousel tests (15), mobile typecheck, scoped ESLint, formatting and the web export pass. Visual/browser acceptance remains open because the automation connection timed out; native flip feel, horizontal swipes, large text and independent navigation/credit taps still need device checks.
+
+## Expo Go: Crossroads loading and visible pricing — 2026-10-05, 14:24 UTC
+
+Published the iOS [Expo Go demo update](https://expo.dev/accounts/noehxpo/projects/tuur/updates/2a05a13d-e837-41d7-bdfa-a6a2ab24a2ae) on branch `expo-go`, environment `preview`, runtime `0.1.0`, SDK `57.0.0`. Update ID: `01a10c73-b15b-765b-bce4-776b512d92fa`. Refresh Projects in Expo Go and reopen tuur while signed in as `noehxpo`.
+
+- Crossroads can compute its first two choices before a guide session exists. The previous partial runtime stub threw when curation accessed the session context. Cards appear while optional teasers are still loading.
+- **Profil → Preise & Abos**, also available in Settings, opens a persistent pricing overview even with the demo playback paywall disabled. Existing credit and subscription prices are unchanged; purchases are explicitly simulated and no money is charged. Contextual unlocks and paid download gates remain intact. See D66 in DECISIONS.md.
+- Published from an isolated `99e30dd` checkout plus the reviewed task changes because unrelated app work was changing concurrently. The source-map audit matches the frozen app sources and confirms that excluded native Firebase, MapLibre, TrackPlayer, purchases and ads packages are absent. The export contains 2,385 modules and 67 assets. Its bundle is 6,474,152 bytes; the published HTTP-200 manifest's SHA-256 hash matches the local export, with the expected project, runtime and SDK. The CDN rejected the anonymous bundle request with HTTP 403; an authenticated device download was not checked.
+- Validation: isolated mobile TypeScript and all 20 focused Crossroads/pricing regression tests passed; scoped lint and formatting passed. Browser QA at 390 × 844 verified both Crossroads cards and starting the selected tour. The browser connection stalled at the test-tour confirmation dialog, so the new pricing UI was not visually accepted in that run. Physical iPhone acceptance remains open.
+
+This updates the existing Expo Go demo only. The hosted web preview, Firebase backend and native store builds were not published by this change.
+
+## Map orientation during navigation and activities — 2026-10-05
+
+Implemented locally: active navigation, Explore and Crossroads maps follow the GPS movement direction in MapLibre, Expo Go and the schematic web preview. The last valid direction is retained below 0.5 m/s or when the course is missing; changes within 3 degrees are ignored. The phone compass continues to orient the position marker. Native map gestures suspend following, and the location control resumes it with the current movement direction. Overview maps keep their existing orientation behavior.
+
+Focused navigation, compass and guide-runtime regression tests pass (41 tests).
+
+- [ ] Physical-device acceptance: walk around a corner and across north, stop and turn the phone, pan/rotate the map and recenter, and repeat with Reduce Motion enabled on iOS and Android.
+
+## Optional activity-photo collage on the share card — 2026-10-05
+
+Follow-up: the map now scrolls completely out of view with the summary content. Close stays in the native header and Share stays at the bottom; the recap map passes vertical swipes to the page while retaining stop taps and zoom. Scoped lint, formatting and diff checks pass. The follow-up mobile typecheck is blocked by an unrelated offline test mock missing `Backend.getWalkingRoute` (`src/offline/offline.test.ts:511`). Browser automation timed out before visual verification. Check scrolling down/back up and tapping a stop on iOS and Android.
+
+Implemented locally; not published. The Strava-style recap card can include up to four photos taken between the activity's recorded start and finish. **Add activity photos** explicitly opts in before any photo-library access. The visible card includes the collage, route and stats; individual photos or the entire collage can be removed before sharing. Selections are temporary and are not added to history or uploaded by tuur.
+
+Photo discovery uses the SDK 57 `expo-media-library` API with photo-only permissions and supports limited access. Denial, no matching photos, missing files and failed reads leave the route-only card available. The export waits for images to display and rechecks access before capture; changing the selected photos invalidates an in-flight capture. Browser sharing retains its existing text fallback and does not request device-library access.
+
+Validation: 36 focused photo-discovery/consent/readiness tests and nine history regressions pass; the history suite's long-track test needed a 30-second timeout on this Windows workspace. Scoped ESLint, formatting and diff checks pass. The final mobile typecheck reports only an unrelated missing `../../src/components/IntroArt` import in onboarding. Expo config introspection confirms the photo-read usage description, no iOS add permission, photo-only Android media access and blocked external-storage writes. Browser visual acceptance was blocked before rendering by an unrelated missing onboarding import in the working tree; no visual or native export pass is claimed.
+
+- A native rebuild is required for the new library and permission configuration; this change is not an OTA release or a TestFlight upload.
+- [ ] Physical-device acceptance: full/limited/denied access, Settings revocation, iCloud-only and deleted photos, correct capture orientation, and the final exported PNG through iOS/Android share sheets.
+
+## Roam suggestions and readable tour stops — 2026-10-05
+
+Implemented locally; not deployed.
+
+- Nearby optional suggestions remain on the active home and player maps, including while the first stop's story plays. Tapping a suggestion previews its card; choosing the next destination is available after the story.
+- Continuing without a choice still narrates worthwhile places automatically. Places actually heard while passing remain on the map and in local history, even outside the exact arrival radius.
+- Visited map pins and finished-tour pins/list rows open saved written stories without changing the current playback or route. Saved text survives finishing and session recovery; older records can load source-backed place information.
+- Validation passed: 319 mobile tests, the final 28-test roam regression run, mobile TypeScript, targeted ESLint, formatting and web export.
+- Regression coverage includes automatic onward roaming, interrupted and unavailable audio, history persistence/recovery, and legacy place text. Browser automation was unavailable for visual acceptance; native map taps, reading-sheet dismissal and large text still need device verification.
+
 ## Expo Hosting preview refreshed — 2026-10-05
 
 The current web preview is live at **[tuur--preview.expo.app](https://tuur--preview.expo.app)**. EAS Hosting deployment [`fjgdnnav8i`](https://tuur--fjgdnnav8i.expo.app) uses the existing `preview` alias and environment for `noehxpo/tuur`, from source commit `f8e6453b1fea70227656ec5f17c17416db0b0abc`. This supersedes the older web-preview deployment below and includes the personal tour context, category colors, horizontal badges, history deletion and map pause menu/picker.

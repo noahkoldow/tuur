@@ -10,6 +10,8 @@ import { LOCATE_ZOOM, ROUTE_DONE_COLOR, type TuurMapProps } from './mapTypes';
 import { useReduceMotion } from '../motion';
 import { MapRouteLegend } from './MapRouteLegend';
 import { navigationCenter } from './mapNavigation';
+import { useHeading } from '../location/useHeading';
+import { useNavigationBearing } from './useNavigationBearing';
 
 /** Light, muted Google style for Android so the red route dominates (spec 2.2); iOS uses Apple's muted map type. */
 const LIGHT_STYLE: MapStyleElement[] = [
@@ -35,6 +37,7 @@ const LOCATE_ALTITUDE = 1200;
 export function TuurMap({
   center,
   zoom = 14,
+  scrollEnabled = true,
   user,
   stops = [],
   route,
@@ -64,12 +67,42 @@ export function TuurMap({
   const delta = 360 / 2 ** (followUser ? Math.max(zoom, 16) : zoom);
   const navigating = Boolean(leg && leg.length > 1);
   const [mapZoom, setMapZoom] = useState(zoom);
+  const [mapBearing, setMapBearing] = useState(0);
+  const compassHeading = useHeading(Boolean(user));
+  const followBearing = useNavigationBearing(followUser, user?.heading, user?.speed);
+  const cameraRead = useRef({ running: false, requested: false });
   const clusters = useMemo(() => clusterByGrid(spots, cellDegForZoom(mapZoom)), [spots, mapZoom]);
   const followCenter = user ? navigationCenter(user, leg) : undefined;
   const followLat = followCenter?.lat;
   const followLng = followCenter?.lng;
 
-  useEffect(() => {
+  // Region events omit rotation; read the camera on both Apple and Google Maps.
+  // Coalesce changes while a native read is pending, retaining the final bearing.
+  const updateMapBearing = useCallback(() => {
+    const map = ref.current;
+    if (!map) return;
+    const read = cameraRead.current;
+    read.requested = true;
+    if (read.running) return;
+    read.running = true;
+    const refresh = async () => {
+      try {
+        do {
+          read.requested = false;
+          const camera = await map.getCamera();
+          if (ref.current !== map) return;
+          if (Number.isFinite(camera.heading)) setMapBearing(camera.heading);
+        } while (read.requested);
+      } catch {
+        // The camera can be unavailable while the native map is mounting.
+      } finally {
+        read.running = false;
+      }
+    };
+    void refresh();
+  }, []);
+
+  const follow = useCallback(() => {
     if (
       !followUser ||
       !following.current ||
@@ -78,10 +111,15 @@ export function TuurMap({
       fit?.length
     )
       return;
-    const center = { latitude: followLat, longitude: followLng };
-    if (reduceMotion) ref.current?.setCamera({ center });
-    else ref.current?.animateCamera({ center }, { duration: 300 });
-  }, [followUser, followLat, followLng, reduceMotion, fit?.length]);
+    const camera = {
+      center: { latitude: followLat, longitude: followLng },
+      ...(followBearing !== undefined ? { heading: followBearing } : {}),
+    };
+    if (reduceMotion) ref.current?.setCamera(camera);
+    else ref.current?.animateCamera(camera, { duration: 300 });
+  }, [followUser, followLat, followLng, followBearing, reduceMotion, fit?.length]);
+
+  useEffect(follow, [follow]);
 
   useEffect(() => {
     if (!fit?.length) return;
@@ -123,12 +161,12 @@ export function TuurMap({
       center: { latitude: locateLat, longitude: locateLng },
       zoom: LOCATE_ZOOM,
       altitude: LOCATE_ALTITUDE,
-      heading: 0,
+      heading: followUser ? (followBearing ?? mapBearing) : 0,
       pitch: 0,
     };
     if (reduceMotion) ref.current?.setCamera(camera);
     else ref.current?.animateCamera(camera, { duration: 300 });
-  }, [locateLat, locateLng, reduceMotion]);
+  }, [locateLat, locateLng, followUser, followBearing, mapBearing, reduceMotion]);
 
   const previousRecenterKey = useRef(recenterKey);
   useEffect(() => {
@@ -150,8 +188,17 @@ export function TuurMap({
         showsCompass={false}
         toolbarEnabled={false}
         pitchEnabled={false}
+        scrollEnabled={scrollEnabled}
         mapPadding={{ top: 0, left: 0, right: 0, bottom: cameraBottom }}
-        onRegionChangeComplete={(r) => setMapZoom(Math.log2(360 / Math.max(r.longitudeDelta, 1e-6)))}
+        onMapReady={() => {
+          follow();
+          updateMapBearing();
+        }}
+        onRegionChange={updateMapBearing}
+        onRegionChangeComplete={(r) => {
+          setMapZoom(Math.log2(360 / Math.max(r.longitudeDelta, 1e-6)));
+          updateMapBearing();
+        }}
         onPanDrag={() => {
           following.current = false;
         }}
@@ -272,7 +319,11 @@ export function TuurMap({
         ))}
         {user ? (
           <Marker coordinate={toCoord(user)} anchor={{ x: 0.5, y: 0.5 }} zIndex={20}>
-            <UserPositionMarker heading={user.heading} label={t('map.position')} />
+            <UserPositionMarker
+              heading={compassHeading ?? user.heading}
+              mapBearing={mapBearing}
+              label={t('map.position')}
+            />
           </Marker>
         ) : null}
       </MapView>

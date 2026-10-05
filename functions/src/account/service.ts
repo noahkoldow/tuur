@@ -29,6 +29,8 @@ const RATE_LIMIT_PREFIXES = [
   'narr_user_',
   'narr_dl_',
   'route_user_',
+  'navigation_minute_',
+  'navigation_hour_',
   'ensureArea_',
   'feedback_',
   'redeem_token_',

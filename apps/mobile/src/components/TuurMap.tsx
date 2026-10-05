@@ -18,6 +18,8 @@ import { useTranslation } from 'react-i18next';
 import { useReduceMotion } from '../motion';
 import { MapRouteLegend } from './MapRouteLegend';
 import { navigationCenter } from './mapNavigation';
+import { useHeading } from '../location/useHeading';
+import { useNavigationBearing } from './useNavigationBearing';
 
 const line = (pts: LatLng[] | undefined) => ({
   type: 'Feature' as const,
@@ -33,6 +35,7 @@ const line = (pts: LatLng[] | undefined) => ({
 export function TuurMap({
   center,
   zoom = 14,
+  scrollEnabled = true,
   user,
   stops = [],
   route,
@@ -76,6 +79,9 @@ export function TuurMap({
   );
   const navigating = Boolean(leg && leg.length > 1);
   const [mapZoom, setMapZoom] = useState(zoom);
+  const [mapBearing, setMapBearing] = useState(0);
+  const compassHeading = useHeading(Boolean(user));
+  const followBearing = useNavigationBearing(followUser, user?.heading, user?.speed);
   const clusters = useMemo(() => clusterByGrid(spots, cellDegForZoom(mapZoom)), [spots, mapZoom]);
   const routeGeo = useMemo(() => line(route), [route]);
   const doneGeo = useMemo(() => line(routeDone), [routeDone]);
@@ -100,10 +106,11 @@ export function TuurMap({
       return;
     cameraRef.current?.easeTo({
       center: [followLng, followLat],
+      ...(followBearing !== undefined ? { bearing: followBearing } : {}),
       padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
       duration: reduceMotion ? 0 : 300,
     });
-  }, [followUser, followLat, followLng, cameraBottom, reduceMotion, fit?.length]);
+  }, [followUser, followLat, followLng, followBearing, cameraBottom, reduceMotion, fit?.length]);
 
   useEffect(() => {
     if (!fit?.length) return;
@@ -136,12 +143,12 @@ export function TuurMap({
     cameraRef.current?.easeTo({
       center: [locateLng, locateLat],
       zoom: LOCATE_ZOOM,
-      bearing: 0,
+      bearing: followUser ? (followBearing ?? mapBearing) : 0,
       pitch: 0,
       padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
       duration: reduceMotion ? 0 : 300,
     });
-  }, [locateLng, locateLat, cameraBottom, reduceMotion]);
+  }, [locateLng, locateLat, followUser, followBearing, mapBearing, cameraBottom, reduceMotion]);
 
   const previousRecenterKey = useRef(recenterKey);
   useEffect(() => {
@@ -155,6 +162,7 @@ export function TuurMap({
       <Map
         style={{ flex: 1 }}
         mapStyle={style as never}
+        dragPan={scrollEnabled}
         logo
         attribution
         compass={false}
@@ -162,13 +170,18 @@ export function TuurMap({
         onRegionWillChange={(e) => {
           if (e.nativeEvent.userInteraction) following.current = false;
         }}
-        onRegionDidChange={(e) => setMapZoom(e.nativeEvent.zoom)}
+        onRegionIsChanging={(e) => setMapBearing(e.nativeEvent.bearing)}
+        onRegionDidChange={(e) => {
+          setMapZoom(e.nativeEvent.zoom);
+          setMapBearing(e.nativeEvent.bearing);
+        }}
       >
         <Camera
           ref={cameraRef}
           initialViewState={{
             center: [(user ?? center).lng, (user ?? center).lat],
             zoom: followUser ? Math.max(zoom, 16) : zoom,
+            ...(followUser && !fit?.length && followBearing !== undefined ? { bearing: followBearing } : {}),
             padding: { top: 96, left: 24, right: 24, bottom: cameraBottom + 48 },
           }}
         />
@@ -275,7 +288,11 @@ export function TuurMap({
         ))}
         {user ? (
           <ViewAnnotation id="me" lngLat={[user.lng, user.lat]} anchor="center">
-            <UserPositionMarker heading={user.heading} label={t('map.position')} />
+            <UserPositionMarker
+              heading={compassHeading ?? user.heading}
+              mapBearing={mapBearing}
+              label={t('map.position')}
+            />
           </ViewAnnotation>
         ) : null}
       </Map>

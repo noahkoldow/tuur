@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTourScript, encodePolyline, TourSchema, type SessionCheckpoint } from '@tuur/shared';
-import type { AudioEngine } from '../audio/types';
+import {
+  createTourScript,
+  destinationPoint,
+  encodePolyline,
+  TourSchema,
+  type SessionCheckpoint,
+} from '@tuur/shared';
+import type { AudioEngine, AudioListener } from '../audio/types';
+import type { TourRecord } from '../state/history';
 
 const mocks = vi.hoisted(() => {
   type User = { uid: string } | null;
@@ -19,11 +26,14 @@ const mocks = vi.hoisted(() => {
   const audioInit = vi.fn<() => Promise<void>>();
   const audioPlay = vi.fn<AudioEngine['play']>();
   const audioDestroy = vi.fn<() => Promise<void>>();
+  const audioListener = { current: undefined as AudioListener | undefined };
   const audioFactory = vi.fn((): AudioEngine => ({
     init: audioInit,
     play: audioPlay,
     destroy: audioDestroy,
-    setListener: vi.fn(),
+    setListener: vi.fn((listener: AudioListener) => {
+      audioListener.current = listener;
+    }),
     setRemoteHandlers: vi.fn(),
     pause: vi.fn(async () => undefined),
     resume: vi.fn(async () => undefined),
@@ -46,8 +56,25 @@ const mocks = vi.hoisted(() => {
     },
     claimTourStart: vi.fn(async () => undefined),
     leaveGroup: vi.fn(async () => undefined),
+    getNarration: vi.fn(async ({ poiId }: { poiId: string }) => ({
+      key: `${poiId}:heard-story`,
+      title: poiId,
+      text: 'This is the story heard on the walk.',
+      paragraphs: [{ text: 'This is the story heard on the walk.', startMs: 0, durationMs: 30_000 }],
+      keyFacts: ['A remembered fact.'],
+      audioPath: `audio:${poiId}`,
+      audioDurationMs: 30_000,
+      images: [],
+      cached: true,
+      aiGenerated: true as const,
+    })),
+    audioUrl: vi.fn(async (path: string) => path),
+    recordVisit: vi.fn(async () => undefined),
+    getPois: vi.fn(async () => []),
+    ensureArea: vi.fn(async () => undefined),
   };
   const history = {
+    records: [] as TourRecord[],
     start: vi.fn(),
     addStop: vi.fn(),
     addTrackPoint: vi.fn(),
@@ -62,6 +89,7 @@ const mocks = vi.hoisted(() => {
     audioInit,
     audioPlay,
     audioDestroy,
+    audioListener,
     audioFactory,
     subscribeLocation,
     unsubscribeLocation,
@@ -203,6 +231,8 @@ beforeEach(async () => {
   mocks.audioInit.mockReset().mockResolvedValue(undefined);
   mocks.audioPlay.mockReset().mockResolvedValue(undefined);
   mocks.audioDestroy.mockReset().mockResolvedValue(undefined);
+  mocks.audioListener.current = undefined;
+  mocks.history.records = [];
   mocks.permission.mockReset().mockResolvedValue('foreground');
   mocks.storage.removeItem.mockReset().mockImplementation(async (key) => {
     mocks.disk.delete(key);
@@ -226,6 +256,63 @@ afterEach(async () => {
 });
 
 describe('session recovery orchestration', () => {
+  it('persists a roaming place only after confirmed narration, even when walking nearby', async () => {
+    const roaming = await session.startRoamSession({
+      start: first,
+      lang: 'en',
+      frequency: 'normal',
+      interests: ['history'],
+    });
+    roaming.runtime.setRoute([{ id: 'gate', name: 'Gate', location: first }], 0, true);
+    const nearby = destinationPoint(first, 180, 80);
+    const now = Date.now();
+    for (let i = 0; i < 3; i++)
+      roaming.runtime.onFix({ ...nearby, ts: now + i * 5000, accuracy: 5, speed: 1.3 });
+    await vi.waitFor(() => expect(mocks.audioPlay).toHaveBeenCalledOnce());
+    expect(mocks.history.addStop).not.toHaveBeenCalled();
+    expect(roaming.runtime.getState().reached.gate).toBeUndefined();
+    const item = mocks.audioPlay.mock.calls[0]![0];
+    mocks.audioListener.current!.onProgress(item.id, 1000);
+    expect(mocks.history.addStop).toHaveBeenCalledWith(
+      expect.objectContaining({ id: roaming.recordId }),
+      expect.objectContaining({
+        id: 'gate',
+        name: 'Gate',
+        location: first,
+        narration: expect.objectContaining({ text: 'This is the story heard on the walk.' }),
+      }),
+    );
+    mocks.audioListener.current!.onProgress(item.id, 2000);
+    expect(mocks.history.addStop).toHaveBeenCalledOnce();
+  });
+
+  it('restores saved place information without fetching or replaying its narration', async () => {
+    const narration = {
+      key: 'saved-story',
+      title: 'Gate story',
+      text: 'Previously heard text.',
+      tier: 'short' as const,
+      images: [],
+      aiGenerated: true as const,
+    };
+    mocks.history.records = [
+      {
+        id: saved.recordId,
+        mode: 'tour',
+        startedAt: saved.startedAt,
+        updatedAt: saved.savedAt,
+        stops: [{ id: 'gate', name: 'Gate', location: first, narration }],
+        stopsVisited: 1,
+        center: first,
+        track: [],
+      },
+    ];
+    const restored = await session.resumeSavedSession();
+    expect(restored.runtime.getStopNarration('gate')).toEqual(narration);
+    expect(mocks.backend.getNarration).not.toHaveBeenCalled();
+    expect(mocks.audioPlay).not.toHaveBeenCalled();
+  });
+
   it('creates a new personal script for independent starts of the same tour and retains a saved download instance', async () => {
     const first = await session.startTourSession({ tour: saved.tour!, lang: saved.lang });
     const second = await session.startTourSession({ tour: saved.tour!, lang: saved.lang });

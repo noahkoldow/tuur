@@ -71,10 +71,6 @@ export default function Fork() {
     }));
     // A throw-away controller only for computing the first options (runtime is created on start).
     const tmp = new ForkController({
-      runtime: {
-        getSnapshot: () => ({ user: position }),
-        getState: () => ({ route: [], visited: [], skipped: [] }),
-      } as never,
       backend,
       pool,
       lang: language,

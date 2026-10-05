@@ -14,7 +14,7 @@ export default function Legal() {
   const { t } = useTranslation();
   const language = useSettings((s) => s.language);
   const id: LegalDocId = LEGAL_DOCS.includes(doc as LegalDocId) ? (doc as LegalDocId) : 'privacy';
-  const d = getLegalDocument(id, language, { ...config.operator, webBaseUrl: config.legal.webBaseUrl });
+  const d = getLegalDocument(id, language, { ...config.operator, webBaseUrl: config.legal.documentsBaseUrl });
   return (
     <>
       <Stack.Screen

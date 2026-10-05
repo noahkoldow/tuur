@@ -100,7 +100,7 @@ export const de = {
     interestsHint: 'Optional. Ohne Auswahl gibt es einen ausgewogenen Mix.',
     permissionsTitle: 'Standort für deine Führung',
     permissionsBody:
-      'tuur nutzt deinen Standort auf dem Gerät, um passende Geschichten genau dann zu erzählen, wenn du an einem Ort ankommst. Für die Inhalte geht nur ein grobes Kartenquadrat an unsere Server. Nur bei einer geplanten Route oder beim Einlösen eines Partnerangebots wird einmalig eine Position übermittelt.',
+      'tuur nutzt deinen Standort auf dem Gerät, um Geschichten beim Ankommen zu erzählen. Für Inhalte wird nur ein grobes Kartenquadrat an unsere Server gesendet. Für die Wegführung, auch beim Abweichen von der Route, werden dein aktueller Standort und das Ziel an unseren Routingdienst übermittelt, ohne einen Standortverlauf zu speichern. Beim Einlösen eines Partnerangebots wird deine Position einmalig übermittelt.',
     permissionsBackground:
       'Damit die Führung auch bei ausgeschaltetem Bildschirm weiterläuft, brauchen wir „Immer erlauben“. Das fragen wir erst, wenn du eine Tour startest.',
     allowLocation: 'Standort erlauben',
@@ -337,6 +337,13 @@ export const de = {
     onlineOnly: 'Gruppen-Touren funktionieren nur mit Internetverbindung.',
     invalid: 'Dieser Link ist nicht gültig.',
   },
+  stopInfo: {
+    title: 'Über diesen Ort',
+    unavailable: 'Für diesen Stopp wurden keine schriftlichen Informationen gespeichert.',
+    source: 'Quelle lesen',
+    loading: 'Informationen zum Ort werden geladen…',
+    loadError: 'Die Informationen zu diesem Ort konnten nicht geladen werden.',
+  },
   summary: {
     open: 'Zusammenfassung ansehen',
     missing: 'Diese Tour wurde nicht gespeichert.',
@@ -347,6 +354,30 @@ export const de = {
     stopsTitle: 'Deine Stationen',
     newBadge: 'Neues Badge!',
     cardTitle: 'Zum Teilen',
+    addPhotos: 'Fotos der Aktivität hinzufügen',
+    refreshPhotos: 'Fotos erneut suchen',
+    withoutPhotos: 'Karte ohne Fotos verwenden',
+    photosHint:
+      'Mit deiner Erlaubnis ergänzen bis zu vier Fotos aus dieser Aktivität deine Karte. Die Fotos bleiben auf deinem Gerät, bis du die Karte teilst.',
+    photosReview:
+      'Prüfe deine Collage vor dem Teilen. Die Fotonummern laufen von links nach rechts und von oben nach unten.',
+    photoLabel: 'Foto der Aktivität {{number}}',
+    removePhoto: 'Foto {{number}} entfernen',
+    photosPreparing: 'Deine Fotos werden vorbereitet…',
+    photos_empty:
+      'Keine freigegebenen Fotos aus dieser Aktivität gefunden. Du kannst deine Route und Statistiken trotzdem teilen.',
+    photos_denied:
+      'Der Fotozugriff wurde nicht erlaubt oder hat sich geändert. Du kannst die Karte weiterhin ohne Fotos teilen.',
+    photos_error: 'Deine Fotos konnten nicht geladen werden. Versuche es erneut oder teile ohne Fotos.',
+    photos_unavailable:
+      'Fotos der Aktivität sind hier nicht verfügbar. Du kannst weiterhin ohne Fotos teilen.',
+    photosLimited:
+      'Es werden nur freigegebene Fotos verwendet. Ändere den Fotozugriff in den Einstellungen und suche danach erneut.',
+    photoSettings: 'Fotozugriff einstellen',
+    photoSettingsError:
+      'Die Einstellungen konnten nicht geöffnet werden. Du kannst den Fotozugriff in den Geräteeinstellungen ändern.',
+    photosFailed: 'Einige Fotos konnten nicht angezeigt werden und wurden aus der Karte entfernt.',
+    shareError: 'Die Karte konnte nicht geteilt werden. Bitte versuche es erneut.',
     share: 'Tour teilen',
     shareText: 'Ich war mit tuur unterwegs: {{title}}, {{km}} km, {{stops}} Stationen.',
     mode_tour: 'Tour',
@@ -385,6 +416,10 @@ export const de = {
     settings: 'Einstellungen, Datenschutz & Rechtliches',
   },
   cards: {
+    showInfo: 'Tippen für Ortsinfos',
+    showPhoto: 'Foto anzeigen',
+    navigate: 'Zu {{name}} navigieren',
+    noInfo: 'Für diesen Ort gibt es noch keine Kurzbeschreibung.',
     info: 'Quellen und Lizenzen',
     image: 'Bild',
     text: 'Text',
@@ -400,6 +435,14 @@ export const de = {
   player: {
     closePlace: 'Ortsauswahl schließen',
     straightLineDistance: '{{distance}} Luftlinie',
+    routeDistance: '{{distance}} entlang der Route',
+    routeLocation: 'Wir warten auf einen genauen Standort für die Wegführung.',
+    routeLoading: 'Route über Straßen und Wege wird berechnet…',
+    routeOffline: 'Neue Wegführung braucht eine Verbindung. Bereits geladene Wege bleiben offline verfügbar.',
+    routeOutsideArea: 'Dieser Ort liegt außerhalb des aktuell verfügbaren Navigationsgebiets.',
+    routeRateLimited: 'Die Wegführung ist gerade ausgelastet. Versuche es in Kürze erneut.',
+    routeUnavailable: 'Gerade ist keine Route verfügbar. Prüfe deine Verbindung und versuche es erneut.',
+    routeRetry: 'Wegführung erneut laden',
     reportFailed: 'Deine Meldung wurde nicht gesendet. Bitte versuche es erneut.',
     exploreInstead: 'Zu Explore wechseln',
     exploreHint:
@@ -503,6 +546,8 @@ export const de = {
     loadingTeasers: 'Kurze Infos werden geladen…',
   },
   roam: {
+    suggestionsHint:
+      'Wähle einen Ort in der Nähe auf der Karte oder geh einfach weiter. Tuu fügt interessante Orte zu deiner Tour hinzu, sobald du von ihnen hörst.',
     startMissing:
       'Dieser Ort ist hier nicht verfügbar. Wähle einen Ort in deiner Nähe oder lade die Vorschläge erneut.',
     chooseAnother: 'Andere Orte entdecken',
@@ -582,6 +627,15 @@ export const de = {
       'Dieser Text wird vom Betreiber bereitgestellt. Die aktuelle Fassung findest du unter {{url}} oder per E-Mail an {{email}}.',
   },
   paywall: {
+    pricingTitle: 'Preise & Abos',
+    pricingHint: 'Einzelne Touren mit Guthaben oder alle Touren und Modi im Abo.',
+    offersUnavailable: 'Gerade sind keine Preise verfügbar. Versuche es erneut.',
+    demoNotice:
+      'Demo: Hier kannst du die Preise ansehen und Käufe kostenlos ausprobieren. Es wird kein Geld abgebucht.',
+    demoAction: 'Kostenloser Demo-Kauf; es wird kein Geld abgebucht.',
+    demoPurchased: 'Demo-Kauf abgeschlossen. Es wurde kein Geld abgebucht.',
+    demoSubDisclosure:
+      'Das Abo umfasst alle Touren und Modi ohne Werbung. In dieser Demo wird es nur simuliert: keine Zahlung, keine automatische Verlängerung.',
     titleDownload: 'Tour offline speichern',
     subtitleDownload:
       'Mit Premium oder einer bezahlten Freischaltung kannst du diese Tour herunterladen und in tuur abspielen. Werbe- und Einladungsfreigaben enthalten keinen Download.',

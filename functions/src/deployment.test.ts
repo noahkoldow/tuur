@@ -48,8 +48,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-// Import the actual SDK endpoint definitions; their first cold import includes the provider SDKs.
-describe('function deployment boundaries', { timeout: 30_000 }, () => {
+// The first cold import includes provider SDKs and can exceed 30 s on a synced Windows workspace.
+describe('function deployment boundaries', { timeout: 90_000 }, () => {
   it('uses no provider credentials for bounded beta snapshot lookup', async () => {
     vi.stubEnv('TUUR_BETA_SNAPSHOT_TILES', 'u33dbb');
     const functions = await import('./index');
@@ -65,6 +65,7 @@ describe('function deployment boundaries', { timeout: 30_000 }, () => {
     expect(secrets(functions.getTransition)).toEqual(['GEMINI_API_KEY']);
     expect(secrets(functions.generateAutoTours)).toEqual(['GEMINI_API_KEY', 'ORS_API_KEY']);
     expect(secrets(functions.composePlannedRoute)).toEqual(['GEMINI_API_KEY', 'ORS_API_KEY']);
+    expect(secrets(functions.getWalkingRoute)).toEqual(['ORS_API_KEY']);
     expect(secrets(functions.getTeaser)).toEqual(['GEMINI_API_KEY']);
     expect(secrets(functions.selectNearby)).toEqual(['GEMINI_API_KEY']);
     expect(secrets(functions.reportNarration)).toEqual([]);
@@ -113,6 +114,7 @@ describe('function deployment boundaries', { timeout: 30_000 }, () => {
       functions.getTransition,
       functions.generateAutoTours,
       functions.composePlannedRoute,
+      functions.getWalkingRoute,
       functions.getTeaser,
       functions.selectNearby,
       functions.ingestArea,
@@ -149,6 +151,14 @@ describe('function deployment boundaries', { timeout: 30_000 }, () => {
       'user-1',
       input,
     );
+  });
+
+  it('requires authentication before constructing a walking-route provider', async () => {
+    vi.stubEnv('TUUR_ROUTING_PROVIDER', 'invalid');
+    const { getWalkingRoute } = await import('./index');
+    await expect(
+      getWalkingRoute.run({ data: {} } as Parameters<typeof getWalkingRoute.run>[0]),
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
   });
 
   it('constructs teaser dependencies without configuring TTS or an audio encoder/store', async () => {

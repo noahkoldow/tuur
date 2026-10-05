@@ -36,6 +36,9 @@ export function memoryFirestore() {
     id: path.split('/').at(-1)!,
     collection: (name: string) => collection(`${path}/${name}`),
     get: async () => snapshot({ path, id: path.split('/').at(-1)! }),
+    delete: async () => {
+      docs.delete(path);
+    },
     set: async (data: Data, options?: { merge: boolean }) => {
       write({ path, id: '' }, data, options?.merge);
     },
@@ -48,7 +51,13 @@ export function memoryFirestore() {
           (q.group
             ? parts.at(-2) === q.group
             : path.startsWith(`${q.path}/`) && parts.length === q.path.split('/').length + 1) &&
-          q.filters.every(([key, op, v]) => (op === '>' ? Number(value[key]) > Number(v) : value[key] === v))
+          q.filters.every(([key, op, v]) =>
+            op === '>'
+              ? Number(value[key]) > Number(v)
+              : op === 'in'
+                ? (v as unknown[]).includes(value[key])
+                : value[key] === v,
+          )
         );
       })
       .slice(0, q.count ?? Infinity)
@@ -59,7 +68,7 @@ export function memoryFirestore() {
     ...q,
     doc: (id = `auto-${++nextId}`) => doc(`${q.path}/${id}`),
     where: (key: string, op: string, value: unknown) => {
-      if (op !== '==' && op !== '>') throw new Error(`Unsupported memory query: ${op}`);
+      if (op !== '==' && op !== '>' && op !== 'in') throw new Error(`Unsupported memory query: ${op}`);
       return query({ ...q, filters: [...q.filters, [key, op, value]] });
     },
     limit: (count: number) => query({ ...q, count }),

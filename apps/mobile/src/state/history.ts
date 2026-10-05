@@ -10,6 +10,15 @@ import {
   type TrackTotals,
   type WalkedTour,
 } from '@tuur/shared';
+import { preferStopNarration, type StopNarration } from '../guide/stopNarration';
+
+export interface TourRecordStop {
+  id: string;
+  name: string;
+  location: LatLng;
+  /** Absent on older records, which still retain their place name and location. */
+  narration?: StopNarration;
+}
 
 export interface TourRecord extends WalkedTour {
   mode: 'tour' | 'planned' | 'fork' | 'roam';
@@ -18,7 +27,7 @@ export interface TourRecord extends WalkedTour {
   updatedAt: number;
   /** Set when the tour was ended (button or finished); open records belong to a running or aborted session. */
   endedAt?: number;
-  stops: { id: string; name: string; location: LatLng }[];
+  stops: TourRecordStop[];
   /** Walked GPS track, thinned (device only, never uploaded). */
   track: TrackPoint[];
   /** Includes segments removed from the display track, so long car/transit tours keep accurate totals. */
@@ -44,7 +53,7 @@ interface HistoryState {
   deletedIds: string[];
   /** Creates the record when a session starts (idempotent). */
   start(session: RecordStart): void;
-  addStop(session: RecordStart, stop: { id: string; name: string; location: LatLng }): void;
+  addStop(session: RecordStart, stop: TourRecordStop): void;
   addTrackPoint(id: string, p: TrackPoint): void;
   /** Ends the record; records without stops and without real walking are dropped (noise). */
   finish(id: string, endedAt: number): TourRecord | undefined;
@@ -100,8 +109,13 @@ export const useHistory = create<HistoryState>()(
         set((s) => {
           if (s.deletedIds.includes(session.id)) return s;
           const cur = s.records.find((r) => r.id === session.id) ?? fresh(session, Date.now());
-          if (cur.stops.some((x) => x.id === stop.id)) return s;
-          const stops = [...cur.stops, stop];
+          const previous = cur.stops.find((x) => x.id === stop.id);
+          const narration = preferStopNarration(previous?.narration, stop.narration);
+          if (previous && narration === previous.narration) return s;
+          const saved = { ...stop, ...(narration ? { narration } : {}) };
+          const stops = previous
+            ? cur.stops.map((x) => (x.id === stop.id ? saved : x))
+            : [...cur.stops, saved];
           return {
             records: upsert(s.records, {
               ...cur,

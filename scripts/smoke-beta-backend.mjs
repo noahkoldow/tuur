@@ -1,6 +1,7 @@
 // Default: print a plan only. Run explicitly after deployment: node scripts/smoke-beta-backend.mjs --run
 // Optional --tour-id=<existing-standard-tour> adds read-only checks of that tour's download gate.
-// Optional --content generates reusable real OSM tours and verifies Gemini audio and signed Storage URLs.
+// Optional --content verifies real OSM walking routes and one personal Gemini recording with cache reuse.
+// Optional --content-poi-id=<canonical-stop> selects a public stop in one of the returned tours.
 // This checks server behavior with seeded entitlements, NOT StoreKit/RevenueCat purchases or native attestation.
 // REST references:
 // https://firebase.google.com/docs/reference/appcheck/rest/v1/projects.apps.debugTokens/create
@@ -39,6 +40,7 @@ const knownCallables = [
   'selectNearby',
   'generateAutoTours',
   'composePlannedRoute',
+  'getWalkingRoute',
   'reportNarration',
   'exportMyData',
   'deleteAccount',
@@ -79,10 +81,40 @@ function requireCondition(condition, code, status) {
 function statusOf(error) {
   return Number.isInteger(error?.status) ? error.status : undefined;
 }
+/** Fixed reason allowlist exposes budget brakes without copying provider errors or request data. */
+function callableFailureCode(prefix, response) {
+  const reason = response.data?.error?.details?.reason;
+  const safeReasons = [
+    'daily_budget',
+    'area_budget',
+    'kill_switch',
+    'input_too_large',
+    'grounding_budget_unsupported',
+    'routing_unavailable',
+    'beta_area_unavailable',
+    'beta_snapshot_unavailable',
+    'insufficient_sources',
+    'unverifiable',
+  ];
+  const status = response.data?.error?.status;
+  const safeStatuses = [
+    'UNAVAILABLE',
+    'FAILED_PRECONDITION',
+    'RESOURCE_EXHAUSTED',
+    'PERMISSION_DENIED',
+    'UNAUTHENTICATED',
+    'INVALID_ARGUMENT',
+    'INTERNAL',
+    'NOT_FOUND',
+    'DEADLINE_EXCEEDED',
+  ];
+  return `${prefix}_${safeReasons.includes(reason) ? reason : safeStatuses.includes(status) ? status : response.status}`;
+}
 function value(field) {
   if (field?.stringValue !== undefined) return field.stringValue;
   if (field?.booleanValue !== undefined) return field.booleanValue;
   if (field?.integerValue !== undefined) return Number(field.integerValue);
+  if (field?.doubleValue !== undefined) return Number(field.doubleValue);
   return undefined;
 }
 
@@ -90,6 +122,7 @@ function value(field) {
 export async function runSmoke({
   apiKey,
   tourId,
+  contentPoiId,
   content = false,
   cloudApi = cloud,
   fetchApi = fetch,
@@ -99,6 +132,10 @@ export async function runSmoke({
 }) {
   requireCondition(typeof apiKey === 'string' && apiKey.length > 10, 'missing_beta_api_key');
   requireCondition(tourId === undefined || /^[A-Za-z0-9_-]{1,200}$/.test(tourId), 'invalid_standard_tour_id');
+  requireCondition(
+    contentPoiId === undefined || (content && /^[A-Za-z0-9_-]{1,160}$/.test(contentPoiId)),
+    'invalid_content_poi_id',
+  );
   const runId = `beta-smoke-${randomUUID()}`;
   const uid = runId;
   const email = `${runId}@example.invalid`;
@@ -110,6 +147,7 @@ export async function runSmoke({
   let authAttempted = false;
   let idToken;
   let appCheckToken;
+  let personalContentAttempted = false;
   let stage = 'preflight';
   const ownedDocs = new Set();
   const report = {
@@ -213,7 +251,10 @@ export async function runSmoke({
         .map((fn) => [fn.name.split('/').at(-1), fn]),
     );
     requireCondition(
-      active.has('ensureArea') && active.has('prepareTourDownload'),
+      active.has('ensureArea') &&
+        active.has('prepareTourDownload') &&
+        active.has('getWalkingRoute') &&
+        (!content || active.has('deleteAccount')),
       'required_backend_not_active',
     );
     const env = active.get('ensureArea').serviceConfig?.environmentVariables ?? {};
@@ -312,6 +353,12 @@ export async function runSmoke({
     await step('prepareTourDownload:invalid_auth', async () =>
       expectDenied(await callable('prepareTourDownload', {}, { idToken: 'invalid', appCheckToken }), 401),
     );
+    await step('getWalkingRoute:invalid_app_check', async () =>
+      expectDenied(await callable('getWalkingRoute', {}, { idToken, appCheckToken: 'invalid' }), 401),
+    );
+    await step('getWalkingRoute:invalid_auth', async () =>
+      expectDenied(await callable('getWalkingRoute', {}, { idToken: 'invalid', appCheckToken }), 401),
+    );
 
     // ensureArea is the only successful tested callable that writes state; track its exact private counter first.
     const ratePath = `rateLimits/ensureArea_${uid}`;
@@ -404,8 +451,15 @@ export async function runSmoke({
       });
     }
     if (content) {
-      // Real reusable beta tours/audio remain; only this test user's grants and counters are removed.
-      for (const prefix of ['tours_user_', 'narr_user_', 'narr_dl_']) {
+      // Public beta tours remain. The temporary user's personal recording is deleted in finally.
+      for (const prefix of [
+        'tours_user_',
+        'narr_user_',
+        'narr_dl_',
+        'navigation_minute_',
+        'navigation_hour_',
+        'delete_account_',
+      ]) {
         const path = `rateLimits/${prefix}${uid}`;
         try {
           await cloudApi('GET', `${firestoreBase}/${path}`);
@@ -433,23 +487,110 @@ export async function runSmoke({
         );
         report.content = { tourCount: generated.tours.length, placeId: generated.placeId };
       });
-      const realTourId = generated.tours[0].id;
-      const realTour = await cloudApi('GET', `${firestoreBase}/tours/${realTourId}`);
-      const poiId = value(realTour.fields?.stops?.arrayValue?.values?.[0]?.mapValue?.fields?.poiId);
+      let realTourId = generated.tours[0].id;
+      let realTour = await cloudApi('GET', `${firestoreBase}/tours/${encodeURIComponent(realTourId)}`);
+      if (contentPoiId) {
+        const containsStop = (tour) =>
+          tour.fields?.stops?.arrayValue?.values?.some(
+            (stop) => value(stop.mapValue?.fields?.poiId) === contentPoiId,
+          );
+        for (const candidate of generated.tours.slice(1)) {
+          if (containsStop(realTour)) break;
+          realTourId = candidate.id;
+          realTour = await cloudApi('GET', `${firestoreBase}/tours/${encodeURIComponent(realTourId)}`);
+        }
+        requireCondition(containsStop(realTour), 'content_poi_not_in_public_tour');
+      }
+      const stops = realTour.fields?.stops?.arrayValue?.values ?? [];
+      const targetIndex = contentPoiId
+        ? stops.findIndex((stop) => value(stop.mapValue?.fields?.poiId) === contentPoiId)
+        : 0;
+      const poiId = value(stops[targetIndex]?.mapValue?.fields?.poiId);
       requireCondition(typeof poiId === 'string', 'generated_route_has_no_stop');
+      if (contentPoiId) {
+        const poi = await cloudApi('GET', `${firestoreBase}/pois/${encodeURIComponent(poiId)}`);
+        const poiTile = value(poi.fields?.tile);
+        requireCondition(
+          value(poi.fields?.id) === poiId &&
+            value(poi.fields?.hidden) === false &&
+            value(poi.fields?.accessible) === true &&
+            tiles.includes(poiTile),
+          'content_poi_unavailable',
+        );
+        report.content.samplePoiId = poiId;
+        report.content.sampleTile = poiTile;
+      }
       report.content.routingSource = value(realTour.fields?.routingSource);
+      await step('content:real_point_to_point_walking_route', async () => {
+        // Public tour positions only: no tester GPS coordinates enter this smoke test.
+        const originFields =
+          stops[targetIndex === 0 ? 1 : targetIndex - 1]?.mapValue?.fields?.location?.mapValue?.fields;
+        const origin = { lat: value(originFields?.lat), lng: value(originFields?.lng) };
+        requireCondition(
+          Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
+          'walking_route_origin_missing',
+        );
+        const response = await callable('getWalkingRoute', { origin, poiId, profile: 'foot-walking' });
+        const route = response.data?.result;
+        requireCondition(
+          response.status === 200 &&
+            route?.routingSource === 'ors' &&
+            route.poiId === poiId &&
+            route.profile === 'foot-walking' &&
+            Array.isArray(route.path) &&
+            route.path.length >= 2 &&
+            route.path.length <= 20_000 &&
+            route.path.every(
+              (point) =>
+                Array.isArray(point) &&
+                point.length === 2 &&
+                Number.isFinite(point[0]) &&
+                Math.abs(point[0]) <= 90 &&
+                Number.isFinite(point[1]) &&
+                Math.abs(point[1]) <= 180,
+            ) &&
+            Number.isFinite(route.distanceMeters) &&
+            route.distanceMeters > 0 &&
+            Number.isFinite(route.durationSeconds) &&
+            route.durationSeconds > 0,
+          callableFailureCode('walking_route_failed', response),
+        );
+        Object.assign(report.content, {
+          walkingRoutePoints: route.path.length,
+          walkingRouteMeters: route.distanceMeters,
+          walkingRouteDurationSeconds: route.durationSeconds,
+          walkingRouteSource: route.routingSource,
+        });
+      });
       await step('content:real_gemini_audio_and_signed_url', async () => {
-        const response = await callable('getNarration', {
+        const request = {
           poiId,
           lang: 'de',
           lengthTier: 'short',
           download: true,
           access: { tourId: realTourId, mode: 'tour' },
-        });
+          context: {
+            chapter: 1,
+            script: {
+              version: 1,
+              id: 'beta-smoke-story-v1',
+              instanceId: runId,
+              title: 'Berlin entdecken',
+              question: 'Welche Spuren der Geschichte entdecken wir an diesem Ort?',
+              opening: 'Wir entdecken Berlin Schritt für Schritt.',
+              closing: 'Welche Beobachtung bleibt dir in Erinnerung?',
+              interests: ['history'],
+            },
+          },
+        };
+        personalContentAttempted = true;
+        report.fixtures.personalRecordingOwner = uid;
+        await saveState();
+        const response = await callable('getNarration', request);
         const narration = response.data?.result;
         requireCondition(
           response.status === 200 && narration?.audioUrl && narration.text?.length > 30,
-          `real_audio_failed_${response.data?.error?.status ?? response.status}`,
+          callableFailureCode('real_audio_failed', response),
         );
         const audio = await fetchApi(narration.audioUrl, { signal: AbortSignal.timeout(30_000) });
         requireCondition(
@@ -458,10 +599,29 @@ export async function runSmoke({
         );
         const bytes = await audio.arrayBuffer();
         requireCondition(bytes.byteLength > 1000 && narration.audioDurationMs > 0, 'generated_audio_empty');
+        requireCondition(
+          typeof narration.key === 'string' && /^personal__[a-f0-9]{64}$/.test(narration.key),
+          'recording_not_personal',
+        );
+        const stored = await cloudApi('GET', `${firestoreBase}/narrations/${narration.key}`);
+        requireCondition(
+          value(stored.fields?.ownerUid) === uid && value(stored.fields?.scriptInstanceId) === runId,
+          'personal_recording_owner_mismatch',
+        );
+        // Same owner and script instance must reuse the recording, with no second Gemini/TTS generation.
+        const replay = await callable('getNarration', request);
+        requireCondition(
+          replay.status === 200 &&
+            replay.data?.result?.key === narration.key &&
+            replay.data.result.cached === true,
+          'personal_recording_cache_miss',
+        );
         Object.assign(report.content, {
           audioBytes: bytes.byteLength,
           audioDurationMs: narration.audioDurationMs,
           narrationKey: narration.key,
+          personalRecording: true,
+          personalRecordingReused: true,
         });
       });
       await step('content:real_tour_premium_download', async () => {
@@ -514,13 +674,36 @@ export async function runSmoke({
         });
       }
     };
+    if (personalContentAttempted)
+      await cleanup('personal_recording_and_account', async () => {
+        const lookup = await cloudApi('POST', `${authBase}/accounts:lookup`, { localId: [uid] });
+        requireCondition(
+          lookup.users?.length === 1 &&
+            lookup.users[0].localId === uid &&
+            lookup.users[0].email === email &&
+            lookup.users[0].displayName === runId,
+          'cleanup_auth_owner_mismatch',
+        );
+        const response = await callable('deleteAccount', {});
+        requireCondition(
+          response.status === 200 && response.data?.result?.deleted === true,
+          'personal_recording_cleanup_failed',
+          response.status,
+        );
+      });
     for (const path of [...ownedDocs].reverse()) {
       await cleanup(`document:${path}`, async () => {
         requireCondition(
           path.startsWith(`users/${uid}/`) ||
-            ['ensureArea_', 'tours_user_', 'narr_user_', 'narr_dl_'].some(
-              (prefix) => path === `rateLimits/${prefix}${uid}`,
-            ),
+            [
+              'ensureArea_',
+              'tours_user_',
+              'narr_user_',
+              'narr_dl_',
+              'navigation_minute_',
+              'navigation_hour_',
+              'delete_account_',
+            ].some((prefix) => path === `rateLimits/${prefix}${uid}`),
           'cleanup_path_outside_test_user',
         );
         try {
@@ -577,7 +760,12 @@ async function main() {
   const args = process.argv.slice(2);
   requireCondition(
     args.every(
-      (arg) => arg === '--run' || arg === '--plan' || arg === '--content' || arg.startsWith('--tour-id='),
+      (arg) =>
+        arg === '--run' ||
+        arg === '--plan' ||
+        arg === '--content' ||
+        arg.startsWith('--tour-id=') ||
+        arg.startsWith('--content-poi-id='),
     ),
     'unknown_argument',
   );
@@ -599,6 +787,9 @@ async function main() {
       apiKey: env.EXPO_PUBLIC_FIREBASE_API_KEY,
       content: args.includes('--content'),
       tourId: args.find((arg) => arg.startsWith('--tour-id='))?.slice('--tour-id='.length),
+      contentPoiId: args
+        .find((arg) => arg.startsWith('--content-poi-id='))
+        ?.slice('--content-poi-id='.length),
       interrupted: () => interrupted,
       onState: async (state) => {
         const path = resolve(root, '.firebase', `${state.runId}.json`);

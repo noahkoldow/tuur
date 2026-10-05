@@ -92,6 +92,7 @@ export function Button({
 export function IconButton({
   icon,
   label,
+  hint,
   onPress,
   size = HIT,
   primary,
@@ -100,6 +101,7 @@ export function IconButton({
 }: {
   icon: string;
   label: string;
+  hint?: string;
   onPress: () => void;
   size?: number;
   primary?: boolean;
@@ -120,6 +122,7 @@ export function IconButton({
       scaleTo={0.92}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityHint={hint}
       accessibilityState={{ disabled: Boolean(disabled) }}
       disabled={disabled}
       onPress={onPress}

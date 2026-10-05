@@ -12,6 +12,7 @@ function fixture(options = {}) {
   const docs = new Map();
   const debug = new Map();
   const calls = [];
+  const callableCalls = [];
   const states = [];
   let uid;
   let version = 0;
@@ -27,7 +28,14 @@ function fixture(options = {}) {
       return { signIn: { email: { enabled: !options.providerDisabled, passwordRequired: true } } };
     if (path.endsWith('/functions'))
       return {
-        functions: ['ensureArea', 'prepareTourDownload', 'getNarration'].map((name) => ({
+        functions: [
+          'ensureArea',
+          'prepareTourDownload',
+          'getNarration',
+          'getWalkingRoute',
+          'generateAutoTours',
+          'deleteAccount',
+        ].map((name) => ({
           name: `projects/${projectId}/locations/europe-west1/functions/${name}`,
           state: 'ACTIVE',
           serviceConfig: {
@@ -70,7 +78,23 @@ function fixture(options = {}) {
       const docPath = path.split('/documents/')[1];
       if (docPath === 'areas/u33dbf') return document({ locked: true, status: 'ready', placeId: 'berlin' });
       if (docPath === 'tours/existing') return document({ source: 'auto', locked: false });
-      assert.ok(docPath.startsWith(`users/${uid}/`) || docPath === `rateLimits/ensureArea_${uid}`);
+      if (docPath === 'pois/gate')
+        return document({ id: 'gate', tile: 'u33dbf', hidden: false, accessible: true });
+      if (docPath === 'tours/real-tour')
+        return document({
+          source: 'auto',
+          locked: false,
+          routingSource: 'ors',
+          stops: [
+            { poiId: 'gate', location: { lat: 52.5163, lng: 13.3777 } },
+            { poiId: 'square', location: { lat: 52.5161, lng: 13.3769 } },
+          ],
+        });
+      assert.ok(
+        docPath.startsWith(`users/${uid}/`) ||
+          (docPath.startsWith('rateLimits/') && docPath.endsWith(uid)) ||
+          docPath === `narrations/personal__${'a'.repeat(64)}`,
+      );
       if (method === 'GET') {
         if (!docs.has(docPath)) throw notFound();
         return docs.get(docPath);
@@ -99,6 +123,9 @@ function fixture(options = {}) {
     new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   const fetchApi = async (rawUrl, init) => {
     const url = new URL(rawUrl);
+    if (url.hostname === 'smoke-audio.example') {
+      return new Response(new Uint8Array(2048), { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+    }
     const body = JSON.parse(init.body);
     assert.equal(init.redirect, 'error');
     if (url.pathname.endsWith(':exchangeDebugToken')) return response(200, { token: 'private-debug-token' });
@@ -118,6 +145,7 @@ function fixture(options = {}) {
     )
       return response(401, { error: { status: 'UNAUTHENTICATED' } });
     const name = url.pathname.slice(1);
+    callableCalls.push({ name, data: body.data });
     if (name === 'ensureArea') {
       docs.set(`rateLimits/ensureArea_${uid}`, document({ count: 1 }));
       if (body.data.geohash === 'u33dbf')
@@ -126,10 +154,68 @@ function fixture(options = {}) {
         error: { status: 'FAILED_PRECONDITION', details: { reason: 'beta_area_unavailable' } },
       });
     }
+    if (name === 'generateAutoTours') {
+      docs.set(`rateLimits/tours_user_${uid}`, document({ count: 1 }));
+      return response(200, { result: { status: 'ready', tours: [{ id: 'real-tour' }], placeId: 'berlin' } });
+    }
+    if (name === 'getWalkingRoute') {
+      docs.set(`rateLimits/navigation_minute_${uid}`, document({ count: 1 }));
+      docs.set(`rateLimits/navigation_hour_${uid}`, document({ count: 1 }));
+      if (options.routeFailure) return response(503, { error: { status: 'UNAVAILABLE' } });
+      assert.deepEqual(body.data, {
+        origin: { lat: 52.5161, lng: 13.3769 },
+        poiId: 'gate',
+        profile: 'foot-walking',
+      });
+      return response(200, {
+        result: {
+          poiId: 'gate',
+          profile: 'foot-walking',
+          routingSource: options.mockRoute ? 'mock' : 'ors',
+          path: [
+            [52.5161, 13.3769],
+            [52.5163, 13.3769],
+            [52.5163, 13.3777],
+          ],
+          distanceMeters: 80,
+          durationSeconds: 62,
+        },
+      });
+    }
+    if (name === 'getNarration') {
+      docs.set(`rateLimits/narr_dl_${uid}`, document({ count: 1 }));
+      assert.equal(body.data.context.script.instanceId, uid);
+      const key = `personal__${'a'.repeat(64)}`;
+      const cached = docs.has(`narrations/${key}`);
+      docs.set(`narrations/${key}`, document({ ownerUid: uid, scriptInstanceId: uid }));
+      if (options.areaBudget)
+        return response(503, { error: { status: 'UNAVAILABLE', details: { reason: 'area_budget' } } });
+      if (options.privateError)
+        return response(503, {
+          error: { status: 'private-auth-token', details: { reason: 'private-password' } },
+        });
+      if (options.audioFailure) return response(503, { error: { status: 'UNAVAILABLE' } });
+      return response(200, {
+        result: {
+          key,
+          text: 'A verified personal narration with more than thirty characters.',
+          audioUrl: 'https://smoke-audio.example/personal.mp3',
+          audioDurationMs: 30000,
+          cached: options.cacheMiss ? false : cached,
+        },
+      });
+    }
+    if (name === 'deleteAccount') {
+      for (const path of docs.keys()) docs.delete(path);
+      users.delete(uid);
+      return response(200, { result: { deleted: true, summary: { personalNarrations: 1 } } });
+    }
     assert.equal(name, 'prepareTourDownload');
     if (options.downloadFailure) return response(500, { error: { message: 'private-auth-token' } });
     const fields = docs.get(`users/${uid}/entitlements/smoke`)?.fields;
     if (fields?.type?.stringValue === 'subscription' && Number(fields.expiresAt.integerValue) > Date.now())
+      return response(200, { result: { ...body.data, grantedAt: Date.now(), expiresAt: null } });
+    if (fields?.type?.stringValue === 'tour' && fields.source?.stringValue === 'credit')
       return response(200, { result: { ...body.data, grantedAt: Date.now(), expiresAt: null } });
     return response(403, {
       error: { status: 'PERMISSION_DENIED', details: { reason: 'download_requires_purchase' } },
@@ -140,6 +226,7 @@ function fixture(options = {}) {
     docs,
     debug,
     calls,
+    callableCalls,
     states,
     run: (extra = {}) =>
       runSmoke({
@@ -160,6 +247,12 @@ test('runs both authorization gates and seeded download checks; removes only own
   const result = await f.run({ tourId: 'existing' });
   assert.equal(result.status, 'passed');
   assert.ok(result.checks.some((check) => check.name === 'getNarration:missing_app_check'));
+  for (const suffix of ['missing_auth', 'missing_app_check', 'invalid_auth', 'invalid_app_check'])
+    assert.ok(result.checks.some((check) => check.name === `getWalkingRoute:${suffix}`));
+  assert.equal(
+    f.callableCalls.some((call) => call.name === 'getWalkingRoute' || call.name === 'getNarration'),
+    false,
+  );
   for (const mode of ['planned', 'tour'])
     for (const suffix of [
       'free_denied',
@@ -186,6 +279,62 @@ test('runs both authorization gates and seeded download checks; removes only own
     assert.equal(serialized.includes(secret), false);
 });
 
+test('content checks real public walking geometry and one personal recording, verifies reuse and deletes private content', async () => {
+  const f = fixture();
+  const result = await f.run({ content: true });
+  assert.equal(result.status, 'passed', JSON.stringify(result.failure));
+  assert.equal(result.content.walkingRouteSource, 'ors');
+  assert.equal(result.content.walkingRoutePoints, 3);
+  assert.equal(result.content.personalRecording, true);
+  assert.equal(result.content.personalRecordingReused, true);
+  assert.equal(f.callableCalls.filter((call) => call.name === 'getWalkingRoute').length, 1);
+  assert.equal(f.callableCalls.filter((call) => call.name === 'getNarration').length, 2);
+  assert.deepEqual(
+    f.callableCalls.filter((call) => call.name === 'getNarration')[0].data,
+    f.callableCalls.filter((call) => call.name === 'getNarration')[1].data,
+  );
+  assert.ok(result.cleanup.some((entry) => entry.name === 'personal_recording_and_account' && entry.passed));
+  assert.equal(f.users.size + f.docs.size + f.debug.size, 0);
+  assert.equal(JSON.stringify([result, ...f.states]).includes('private-auth-token'), false);
+});
+
+test('selects an explicitly requested canonical public POI without changing area budgets', async () => {
+  const f = fixture();
+  const result = await f.run({ content: true, contentPoiId: 'gate' });
+  assert.equal(result.status, 'passed', JSON.stringify(result.failure));
+  assert.equal(result.content.samplePoiId, 'gate');
+  assert.equal(result.content.sampleTile, 'u33dbf');
+  assert.equal(
+    f.calls.some((call) => call.method !== 'GET' && call.path.endsWith('/config/ai')),
+    false,
+  );
+  assert.equal(f.users.size + f.docs.size + f.debug.size, 0);
+});
+
+test('rejects a sample outside the public tours before generating or calling providers', async () => {
+  const f = fixture();
+  const result = await f.run({ content: true, contentPoiId: 'missing-poi' });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failure.code, 'content_poi_not_in_public_tour');
+  assert.equal(
+    f.callableCalls.some((call) => ['getWalkingRoute', 'getNarration'].includes(call.name)),
+    false,
+  );
+  assert.equal(f.users.size + f.docs.size + f.debug.size, 0);
+});
+
+for (const option of ['routeFailure', 'mockRoute', 'audioFailure', 'cacheMiss', 'areaBudget', 'privateError'])
+  test(`content fails honestly and cleans private fixtures on ${option}`, async () => {
+    const f = fixture({ [option]: true });
+    const result = await f.run({ content: true });
+    assert.equal(result.status, 'failed');
+    assert.equal(f.users.size + f.docs.size + f.debug.size, 0);
+    assert.ok(result.cleanup.every((entry) => entry.passed));
+    if (option === 'areaBudget') assert.equal(result.failure.code, 'real_audio_failed_area_budget');
+    assert.equal(JSON.stringify(result).includes('private-password'), false);
+    assert.equal(JSON.stringify(result).includes('private-auth-token'), false);
+  });
+
 for (const option of ['wrongEnvironment', 'providerDisabled', 'debugForbidden'])
   test(`stops safely without creating auth/doc fixtures on ${option}`, async () => {
     const f = fixture({ [option]: true });
@@ -208,6 +357,10 @@ for (const option of ['lostDebugResponse', 'signInFailure', 'downloadFailure'])
 test('rejects path injection before doing any request', async () => {
   const f = fixture();
   await assert.rejects(() => f.run({ tourId: '../other-user' }), /invalid_standard_tour_id/);
+  await assert.rejects(
+    () => f.run({ content: true, contentPoiId: '../other-user' }),
+    /invalid_content_poi_id/,
+  );
   assert.equal(f.calls.length, 0);
 });
 

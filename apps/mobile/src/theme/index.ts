@@ -166,8 +166,13 @@ export const mapMarker = {
   inset: 10,
   discMin: 32,
   discMax: 40,
-  positionSize: 40,
-  positionCore: 24,
+  positionSize: 72,
+  positionCore: 20,
+  positionHalo: 36,
+  // Location keeps the familiar blue/white treatment on light and dark maps.
+  positionBlue: '#007AFF',
+  positionRing: '#FFFFFF',
+  positionHaloColor: 'rgba(0, 122, 255, 0.12)',
   shadow: '0 2px 7px rgba(0, 0, 0, 0.12)',
   selectedShadow: '0 3px 10px rgba(0, 0, 0, 0.18)',
 } as const;

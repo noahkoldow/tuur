@@ -1,6 +1,7 @@
 import { formatKm } from '../format';
 import type { GuideUi } from '../guide/runtime';
 import type { SessionMode } from '../guide/session';
+import type { NavigationRouteState } from '../guide/navigation-route';
 
 /** Only presentation data crosses into the widget; route and user coordinates stay in the app. */
 export interface LiveActivityContent {
@@ -23,6 +24,7 @@ export interface LiveActivityOptions {
   lang: string;
   /** The app cannot currently provide a fresh position, e.g. backgrounded without permission. */
   locationStale?: boolean;
+  navigation?: Pick<NavigationRouteState, 'status' | 'distanceM'>;
 }
 
 const copy = {
@@ -42,7 +44,9 @@ const copy = {
     choose: 'Choose your next stop in tuur',
     exploring: 'Looking for nearby stories',
     arrived: 'You have arrived',
-    straightLine: 'straight-line',
+    route: 'along route',
+    routing: 'Finding a route',
+    routeUnavailable: 'Open tuur to retry directions',
     compactPaused: 'Pause',
     compactListening: 'Audio',
     compactChoose: 'Choose',
@@ -67,7 +71,9 @@ const copy = {
     choose: 'Nächste Station in tuur wählen',
     exploring: 'Suche nach Geschichten in der Nähe',
     arrived: 'Du bist angekommen',
-    straightLine: 'Luftlinie',
+    route: 'entlang der Route',
+    routing: 'Route wird berechnet',
+    routeUnavailable: 'Wegführung in tuur erneut laden',
     compactPaused: 'Pause',
     compactListening: 'Audio',
     compactChoose: 'Wählen',
@@ -114,7 +120,7 @@ export function buildLiveActivityContent(
     narrating && ui.narration?.kind === 'stop' && (!target || ui.narration.poiId === target.id)
       ? ui.narration
       : undefined;
-  const meters = target?.distanceM;
+  const meters = target ? options.navigation?.distanceM : undefined;
   const validDistance =
     !options.locationStale && meters !== undefined && Number.isFinite(meters) && meters >= 0;
   const distanceText = validDistance ? shortDistance(meters, lang) : '';
@@ -122,7 +128,7 @@ export function buildLiveActivityContent(
     title: label(currentNarration?.title) || label(target?.name) || sessionTitle,
     subtitle: sessionTitle,
     status: t.next,
-    distance: distanceText ? `${distanceText} · ${t.straightLine}` : '',
+    distance: distanceText ? `${distanceText} · ${t.route}` : '',
     progress: openRoute ? t.visited(visited) : t.completed(completed, total),
     progressValue: total === 0 ? 0 : completed / total,
     symbol: 'location.fill',
@@ -156,10 +162,15 @@ export function buildLiveActivityContent(
     result.symbol = 'figure.walk';
     result.compactText = t.compactExplore;
   } else if (!validDistance) {
-    result.status = t.waiting;
-    result.symbol = 'location.slash';
-    result.compactText = 'GPS';
-  } else if (meters < 25) {
+    const waitingLocation = options.navigation?.status === 'waiting_location';
+    result.status = waitingLocation
+      ? t.waiting
+      : options.navigation?.status === 'error'
+        ? t.routeUnavailable
+        : t.routing;
+    result.symbol = waitingLocation ? 'location.slash' : 'arrow.triangle.turn.up.right.diamond';
+    result.compactText = waitingLocation ? 'GPS' : '…';
+  } else if (target.distanceM !== undefined && target.distanceM < 25) {
     result.status = t.arrived;
     result.symbol = 'mappin.and.ellipse';
     result.compactText = t.compactArrived;

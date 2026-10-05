@@ -143,17 +143,19 @@ describe('generateAutoTours', () => {
     ).toBe('area_not_ready');
   });
 
-  it('falls back to approximate routing and flags the tour when the routing service fails', async () => {
+  it('keeps tours unavailable instead of creating straight-line directions when routing fails', async () => {
     const broken: RoutingProvider = {
       source: 'ors',
       matrix: async () => Promise.reject(new Error('ors down')),
       directions: async () => Promise.reject(new Error('ors down')),
     };
     const { deps } = mk({ routing: broken });
-    await generateAutoTours(deps, 'u1', req);
+    await expect(generateAutoTours(deps, 'u1', req)).rejects.toMatchObject({
+      code: 'unavailable',
+      details: { reason: 'routing_unavailable' },
+    });
     const docs = (await db.collection('tours').get()).docs;
-    expect(docs.length).toBeGreaterThan(0);
-    expect(docs.every((d) => d.get('routingSource') === 'approx')).toBe(true);
+    expect(docs).toHaveLength(0);
   });
 
   it('replaces markup-laden model output by a safe fallback and ignores implausible suggested orders', async () => {

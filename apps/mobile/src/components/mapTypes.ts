@@ -10,7 +10,7 @@ export interface MapStop {
   partner?: boolean;
 }
 
-/** A place other users explored (anonymous aggregate); marker size follows popularity. */
+/** A nearby suggestion or explored place; marker size can reflect anonymous popularity. */
 export interface MapSpot {
   id: string;
   location: LatLng;
@@ -25,7 +25,9 @@ export interface TuurMapProps {
   /** Initial/fallback center. */
   center: LatLng;
   zoom?: number;
-  user?: { lat: number; lng: number; heading?: number } | undefined;
+  /** Allow map panning. Disable inside a scrolling overview so vertical drags scroll the screen. */
+  scrollEnabled?: boolean;
+  user?: { lat: number; lng: number; heading?: number; speed?: number } | undefined;
   stops?: MapStop[];
   /** Route polyline in brand red (whole route, or the part after the current leg while navigating). */
   route?: LatLng[];
@@ -33,7 +35,7 @@ export interface TuurMapProps {
   routeDone?: LatLng[];
   /** Current navigation leg (user -> next stop), drawn prominently; when set, `route` is drawn lighter. */
   leg?: LatLng[];
-  /** Animate the native camera with GPS updates. A map gesture suspends following; locate resumes it. */
+  /** Follow GPS position and movement direction. A map gesture suspends following; locate resumes it. */
   followUser?: boolean;
   /** Explain walked/current/upcoming line styles above the player sheet. */
   showRouteLegend?: boolean;

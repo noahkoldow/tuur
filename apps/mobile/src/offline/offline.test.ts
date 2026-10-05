@@ -528,6 +528,7 @@ describe('offline downloads', () => {
       getTour: dead,
       getPois: dead,
       selectNearby: dead,
+      getWalkingRoute: dead,
       getExploredSpots: dead,
       composePlannedRoute: dead,
       getTeaser: dead,

@@ -26,22 +26,28 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     ...(expoGoPreview ? { runtimeVersion: { policy: 'appVersion' as const } } : {}),
     bundleIdentifier: 'com.tuurapp',
+    appleTeamId: '4GXK973R2W',
     supportsTablet: false,
     usesAppleSignIn: true,
+    entitlements: {
+      // Firebase App Check rejects attestations from Apple's sandbox environment.
+      'com.apple.developer.devicecheck.appattest-environment': 'production',
+    },
     associatedDomains: ['applinks:tuur.app'],
     ...(googleServicesIos ? { googleServicesFile: googleServicesIos } : {}),
     infoPlist: {
       NSSupportsLiveActivities: true,
       UIBackgroundModes: ['audio', 'location'],
       NSLocationWhenInUseUsageDescription:
-        'tuur uses your location on your device to tell you the right story when you arrive at a place.',
+        'tuur uses your location to guide you along paths and tell you the right story at each place. To calculate directions, your current location and destination are sent to our servers and routing provider without being stored.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
-        'tuur keeps your audio tour going while the screen is off. Your position is processed on your device. Only a coarse map square is sent to our servers, plus a one-time position for route planning or offer redemption.',
+        'tuur keeps navigation and your audio tour going while the screen is off. To calculate directions, your current location and destination are sent to our servers and routing provider without being stored. Nearby content uses a coarse map square; redeeming an offer sends a one-time position.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
     package: 'app.tuur.guide',
+    blockedPermissions: ['android.permission.WRITE_EXTERNAL_STORAGE'],
     adaptiveIcon: {
       foregroundImage: `${brand}/adaptive-icon-foreground.png`,
       monochromeImage: `${brand}/adaptive-icon-monochrome.png`,
@@ -77,6 +83,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ['expo-widgets', { bundleIdentifier: 'com.tuurapp.widgets', groupIdentifier: 'group.com.tuurapp' }],
     'expo-font',
     [
+      'expo-media-library',
+      {
+        photosPermission:
+          'Allow tuur to find photos taken during your activity for an optional share-card collage.',
+        savePhotosPermission: false,
+        granularPermissions: ['photo'],
+        isAccessMediaLocationEnabled: false,
+        preventAutomaticLimitedAccessAlert: true,
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         image: `${brand}/splash-mark.png`,
@@ -89,9 +106,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-location',
       {
-        locationAlwaysAndWhenInUsePermission: 'tuur keeps your audio tour going while the screen is off.',
+        locationAlwaysAndWhenInUsePermission:
+          'tuur keeps navigation and your audio tour going while the screen is off. To calculate directions, your current location and destination are sent to our servers and routing provider without being stored. Nearby content uses a coarse map square; redeeming an offer sends a one-time position.',
         locationWhenInUsePermission:
-          'tuur uses your location to tell you the right story at the right place.',
+          'tuur uses your location to guide you along paths and tell you the right story at each place. To calculate directions, your current location and destination are sent to our servers and routing provider without being stored.',
         isIosBackgroundLocationEnabled: true,
         isAndroidBackgroundLocationEnabled: true,
         isAndroidForegroundServiceEnabled: true,

@@ -1,4 +1,6 @@
+import { useId } from 'react';
 import { View } from 'react-native';
+import Svg, { Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import { categoryColors, mapMarker, radii, sys } from '../theme';
 import { IconButton } from './Button';
@@ -100,12 +102,26 @@ export function ClusterMarker({ count, hot }: { count: number; hot: boolean }) {
   );
 }
 
-/** A shared location puck; a real heading arrow replaces the former rotating circular dot. */
-export function UserPositionMarker({ heading, label }: { heading?: number | undefined; label: string }) {
+/** Blue location dot with a compass cone, kept aligned with north when the map rotates. */
+export function UserPositionMarker({
+  heading,
+  mapBearing = 0,
+  label,
+}: {
+  heading?: number | undefined;
+  mapBearing?: number;
+  label: string;
+}) {
+  const gradientId = `position-heading-${useId().replace(/:/g, '')}`;
+  const hasHeading = heading !== undefined && Number.isFinite(heading) && heading >= 0;
+  const rotation = hasHeading ? heading - (Number.isFinite(mapBearing) ? mapBearing : 0) : 0;
   return (
     <View
       accessible
+      accessibilityRole="image"
       accessibilityLabel={label}
+      pointerEvents="none"
+      collapsable={false}
       style={{
         width: mapMarker.positionSize,
         height: mapMarker.positionSize,
@@ -113,13 +129,30 @@ export function UserPositionMarker({ heading, label }: { heading?: number | unde
         justifyContent: 'center',
       }}
     >
+      {hasHeading ? (
+        <Svg
+          width={mapMarker.positionSize}
+          height={mapMarker.positionSize}
+          viewBox="0 0 72 72"
+          style={{ position: 'absolute', transform: [{ rotate: `${rotation}deg` }] }}
+        >
+          <Defs>
+            <RadialGradient id={gradientId} cx="36" cy="36" r="34" gradientUnits="userSpaceOnUse">
+              <Stop offset="0" stopColor={mapMarker.positionBlue} stopOpacity={0.45} />
+              <Stop offset="0.55" stopColor={mapMarker.positionBlue} stopOpacity={0.25} />
+              <Stop offset="1" stopColor={mapMarker.positionBlue} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Path d="M36 36 L16.5 8.15 A34 34 0 0 1 55.5 8.15 Z" fill={`url(#${gradientId})`} />
+        </Svg>
+      ) : null}
       <View
         style={{
           position: 'absolute',
-          inset: 0,
+          width: mapMarker.positionHalo,
+          height: mapMarker.positionHalo,
           borderRadius: radii.pill,
-          backgroundColor: sys.elevated,
-          opacity: 0.6,
+          backgroundColor: mapMarker.positionHaloColor,
         }}
       />
       <View
@@ -128,18 +161,11 @@ export function UserPositionMarker({ heading, label }: { heading?: number | unde
           height: mapMarker.positionCore,
           borderRadius: radii.pill,
           borderWidth: 2,
-          borderColor: sys.elevated,
-          backgroundColor: sys.label,
-          alignItems: 'center',
-          justifyContent: 'center',
+          borderColor: mapMarker.positionRing,
+          backgroundColor: mapMarker.positionBlue,
           boxShadow: mapMarker.shadow,
-          transform: [{ rotate: `${heading ?? 0}deg` }],
         }}
-      >
-        {heading !== undefined ? (
-          <Icon name="navigation-variant" size={14} color={sys.background} weight="semibold" />
-        ) : null}
-      </View>
+      />
     </View>
   );
 }

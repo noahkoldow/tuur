@@ -41,7 +41,10 @@ export const config = {
   /** Shown in legal/settings screens; set by the operator. */
   legal: {
     supportEmail: process.env.EXPO_PUBLIC_SUPPORT_EMAIL ?? 'support@tuur.app',
+    /** App/share landing pages; keep separate from a static legal-only host. */
     webBaseUrl: process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'https://tuur.app',
+    documentsBaseUrl:
+      process.env.EXPO_PUBLIC_LEGAL_BASE_URL ?? process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'https://tuur.app',
   },
 } as const;
 

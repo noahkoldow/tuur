@@ -51,6 +51,8 @@ vi.mock('../state/settings', () => ({
 
 function guideSession(patch: Partial<ActiveSession> = {}) {
   const listeners = new Set<() => void>();
+  const routeListeners = new Set<() => void>();
+  const route = { status: 'ready', distanceM: 240 };
   const ui: GuideUi = {
     phase: 'approaching',
     stops: [{ id: 'square', name: 'Square', location: { lat: 52.5, lng: 13.4 }, state: 'current' }],
@@ -77,9 +79,25 @@ function guideSession(patch: Partial<ActiveSession> = {}) {
         return () => listeners.delete(listener);
       },
     },
+    navigation: {
+      getSnapshot: () => route,
+      subscribe: (listener: () => void) => {
+        routeListeners.add(listener);
+        return () => routeListeners.delete(listener);
+      },
+    },
     ...patch,
   } as unknown as ActiveSession;
-  return { session, ui, state, listeners, emit: () => listeners.forEach((listener) => listener()) };
+  return {
+    session,
+    ui,
+    state,
+    listeners,
+    route,
+    routeListeners,
+    emit: () => listeners.forEach((listener) => listener()),
+    emitRoute: () => routeListeners.forEach((listener) => listener()),
+  };
 }
 
 function changeAppState(state: string) {
@@ -155,7 +173,7 @@ describe('session-owned iOS Live Activities', () => {
         title: 'Square',
         subtitle: 'Berliner Geschichten',
         status: 'Nächste Station',
-        distance: '240 m · Luftlinie',
+        distance: '240 m · entlang der Route',
       }),
     );
   });
@@ -191,7 +209,7 @@ describe('session-owned iOS Live Activities', () => {
     });
     expect(mocks.activity.setForeground).toHaveBeenLastCalledWith(false);
     changeAppState('active');
-    expect(latestContent()?.distance).toBe('240 m · Luftlinie');
+    expect(latestContent()?.distance).toBe('240 m · entlang der Route');
     expect(mocks.activity.setForeground).toHaveBeenLastCalledWith(true);
   });
 
@@ -199,22 +217,23 @@ describe('session-owned iOS Live Activities', () => {
     const guide = guideSession();
     attach(guide.session);
     vi.advanceTimersByTime(60_000);
-    expect(latestContent()?.distance).toBe('240 m · Luftlinie');
+    expect(latestContent()?.distance).toBe('240 m · entlang der Route');
     vi.advanceTimersByTime(15_000);
     expect(latestContent()).toMatchObject({ distance: '', compactText: 'GPS' });
     guide.state.travel.last.ts = Date.now();
     guide.ui.target!.distanceM = 90;
+    guide.route.distanceM = 90;
     guide.emit();
-    expect(latestContent()?.distance).toBe('90 m · Luftlinie');
+    expect(latestContent()?.distance).toBe('90 m · entlang der Route');
   });
 
   it('continues processing session events while the app has no visible player screen', () => {
     const guide = guideSession();
     attach(guide.session);
     changeAppState('background');
-    guide.ui.target!.distanceM = 70;
-    guide.emit();
-    expect(latestContent()?.distance).toBe('70 m · Luftlinie');
+    guide.route.distanceM = 70;
+    guide.emitRoute();
+    expect(latestContent()?.distance).toBe('70 m · entlang der Route');
     guide.ui.phase = 'paused';
     guide.emit();
     expect(latestContent()?.status).toBe('Tour pausiert');
@@ -229,7 +248,7 @@ describe('session-owned iOS Live Activities', () => {
     expect(latestContent()).toMatchObject({
       subtitle: 'Berlin stories',
       status: 'Next stop',
-      distance: '240 m · straight-line',
+      distance: '240 m · along route',
     });
   });
 
@@ -240,6 +259,7 @@ describe('session-owned iOS Live Activities', () => {
     stop();
     expect(mocks.activity.endSession).toHaveBeenCalledWith(guide.session.recordId);
     expect(guide.listeners.size).toBe(0);
+    expect(guide.routeListeners.size).toBe(0);
     expect(mocks.settingsListeners.size).toBe(0);
     expect(mocks.stateListeners.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);

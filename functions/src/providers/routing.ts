@@ -7,12 +7,31 @@ import {
   type TravelMatrix,
 } from '@tuur/shared';
 import { fetchJson } from '../util/http';
+import { z } from 'zod';
+import { BudgetError } from '../util/usage';
 
 export interface Directions {
   /** [lat, lng] pairs */
   path: [number, number][];
   meters: number;
   minutes: number;
+}
+
+const DirectionsSchema = z.object({
+  path: z
+    .array(z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)]))
+    .min(2)
+    .max(20_000),
+  meters: z.number().finite().nonnegative(),
+  minutes: z.number().finite().nonnegative(),
+});
+
+export class RoutingUnavailableError extends Error {
+  readonly code = 'unavailable';
+  readonly details = { reason: 'routing_unavailable' };
+  constructor() {
+    super('A route along streets and paths is currently unavailable');
+  }
 }
 
 export type RoutingSource = 'ors' | 'approx' | 'mock';
@@ -99,17 +118,17 @@ export class OrsRoutingProvider implements RoutingProvider {
     });
     const f = json.features[0];
     if (!f) throw new Error('ORS returned no route');
-    return {
+    return DirectionsSchema.parse({
       path: f.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]),
       meters: f.properties.summary.distance,
       minutes: f.properties.summary.duration / 60,
-    };
+    });
   }
 }
 
 /**
- * Wraps a provider with a Firestore cache (matrices and directions rarely change; 30 days) and degrades to
- * offline estimates if the upstream service fails, reporting `approx` so callers can flag the result.
+ * Caches provider results for 30 days. Matrix estimates may degrade, but route geometry must come
+ * from the configured provider: unavailable directions never become straight-line navigation.
  */
 export class CachedRoutingProvider implements RoutingProvider {
   private used: RoutingSource;
@@ -120,6 +139,7 @@ export class CachedRoutingProvider implements RoutingProvider {
     private readonly db: Firestore,
     private readonly now: () => number = Date.now,
     private readonly ttlMs = 30 * 24 * 3600_000,
+    private readonly cacheDirections = true,
   ) {
     this.used = inner.source;
   }
@@ -128,7 +148,9 @@ export class CachedRoutingProvider implements RoutingProvider {
   }
 
   async matrix(points: LatLng[], profile: RoutingProfile): Promise<TravelMatrix> {
-    const ref = this.db.collection('routingCache').doc(`m_${matrixCacheKey(points, profile)}`);
+    const ref = this.db
+      .collection('routingCache')
+      .doc(`m_${this.inner.source}_${matrixCacheKey(points, profile)}`);
     const hit = await ref.get();
     if (hit.exists && Number(hit.get('expiresAt')) > this.now()) {
       return JSON.parse(hit.get('data') as string) as TravelMatrix;
@@ -142,29 +164,38 @@ export class CachedRoutingProvider implements RoutingProvider {
         expireAt: new Date(this.now() + this.ttlMs),
       });
       return m;
-    } catch {
+    } catch (error) {
+      if (error instanceof BudgetError) throw error;
       this.used = 'approx';
       return haversineMatrix(points, profile);
     }
   }
 
   async directions(points: LatLng[], profile: RoutingProfile): Promise<Directions> {
-    const ref = this.db.collection('routingCache').doc(`d_${matrixCacheKey(points, profile)}`);
-    const hit = await ref.get();
-    if (hit.exists && Number(hit.get('expiresAt')) > this.now())
-      return JSON.parse(hit.get('data') as string) as Directions;
+    // Navigation origins stay transient; ordinary tour routes retain their provider-separated cache.
+    const ref = this.cacheDirections
+      ? this.db.collection('routingCache').doc(`d_${this.inner.source}_${matrixCacheKey(points, profile)}`)
+      : undefined;
+    const hit = await ref?.get();
+    if (hit?.exists && Number(hit.get('expiresAt')) > this.now()) {
+      try {
+        return DirectionsSchema.parse(JSON.parse(hit.get('data') as string));
+      } catch {
+        // Discard malformed/old data and re-fetch a validated route.
+      }
+    }
     try {
       this.upstreamCalls++;
-      const d = await this.inner.directions(points, profile);
-      await ref.set({
+      const d = DirectionsSchema.parse(await this.inner.directions(points, profile));
+      await ref?.set({
         data: JSON.stringify(d),
         expiresAt: this.now() + this.ttlMs,
         expireAt: new Date(this.now() + this.ttlMs),
       });
       return d;
-    } catch {
-      this.used = 'approx';
-      return new MockRoutingProvider().directions(points, profile);
+    } catch (error) {
+      if (error instanceof BudgetError) throw error;
+      throw new RoutingUnavailableError();
     }
   }
 }

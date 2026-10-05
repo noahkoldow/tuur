@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OrsRoutingProvider } from './routing';
+import {
+  CachedRoutingProvider,
+  MockRoutingProvider,
+  OrsRoutingProvider,
+  type RoutingProvider,
+} from './routing';
+import { memoryFirestore } from '../../test/memoryFirestore';
+import { BudgetError } from '../util/usage';
 
 const points = [
   { lat: 52.52, lng: 13.405 },
@@ -114,5 +121,52 @@ describe('HeiGIT routing gateway', () => {
       'https://routing.example/ors/v2/matrix/foot-walking',
       expect.anything(),
     );
+  });
+});
+
+describe('route geometry cache', () => {
+  it('keeps mock cached paths out of the live provider namespace', async () => {
+    const { db } = memoryFirestore();
+    await new CachedRoutingProvider(new MockRoutingProvider(), db).directions(points, 'foot-walking');
+    const directions = vi.fn(async () => ({
+      path: [
+        [52.52, 13.405],
+        [52.52, 13.407],
+        [52.521, 13.407],
+      ] as [number, number][],
+      meters: 250,
+      minutes: 3,
+    }));
+    const provider: RoutingProvider = { source: 'ors', directions, matrix: new MockRoutingProvider().matrix };
+    const cached = new CachedRoutingProvider(provider, db);
+    const route = await cached.directions(points, 'foot-walking');
+    expect(route.path).toHaveLength(3);
+    expect(await cached.directions(points, 'foot-walking')).toEqual(route);
+    expect(directions).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects provider failures and malformed paths without caching fabricated geometry', async () => {
+    const { db, docs } = memoryFirestore();
+    const directions = vi.fn().mockRejectedValue(new Error('offline'));
+    const provider: RoutingProvider = { source: 'ors', directions, matrix: new MockRoutingProvider().matrix };
+    const cached = new CachedRoutingProvider(provider, db);
+    await expect(cached.directions(points, 'foot-walking')).rejects.toMatchObject({ code: 'unavailable' });
+    directions.mockResolvedValue({ path: [[52.52, 13.405]], meters: 10, minutes: 1 });
+    await expect(cached.directions(points, 'foot-walking')).rejects.toMatchObject({ code: 'unavailable' });
+    expect(docs.size).toBe(0);
+  });
+
+  it('does not swallow budget brakes into matrix or directions estimates', async () => {
+    const { db } = memoryFirestore();
+    const fail = async () => {
+      throw new BudgetError('daily_budget');
+    };
+    const cached = new CachedRoutingProvider({ source: 'ors', directions: fail, matrix: fail }, db);
+    await expect(cached.matrix(points, 'foot-walking')).rejects.toMatchObject({
+      details: { reason: 'daily_budget' },
+    });
+    await expect(cached.directions(points, 'foot-walking')).rejects.toMatchObject({
+      details: { reason: 'daily_budget' },
+    });
   });
 });

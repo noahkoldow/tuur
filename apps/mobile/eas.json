@@ -2,7 +2,7 @@
   "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
   "build": {
     "base": {
-      "node": "22.12.0",
+      "node": "22.14.0",
       "pnpm": "10.33.0",
       "env": { "EXPO_PUBLIC_BACKEND": "firebase" }
     },
@@ -36,7 +36,7 @@
   },
   "submit": {
     "testflight": {
-      "ios": { "ascAppId": "6817677603" }
+      "ios": { "ascAppId": "6817677603", "appleTeamId": "4GXK973R2W" }
     },
     "production": {
       "ios": { "ascAppId": "6817677603" },

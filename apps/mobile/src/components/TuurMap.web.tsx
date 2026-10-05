@@ -11,6 +11,7 @@ import { useReduceMotion } from '../motion';
 import { MapRouteLegend } from './MapRouteLegend';
 import { mapMarker } from '../theme';
 import { navigationCenter } from './mapNavigation';
+import { useNavigationBearing } from './useNavigationBearing';
 
 /**
  * Web preview stand-in for the native MapLibre view (no WebGL native module on web): a light schematic canvas
@@ -48,6 +49,11 @@ export function TuurMap({
   const [locatedCenter, setLocatedCenter] = useState<LatLng | null>(null);
   const previousRecenterKey = useRef(recenterKey);
   const target = user ? (followUser ? navigationCenter(user, leg) : user) : center;
+  const navigationBearing = useNavigationBearing(followUser, user?.heading, user?.speed);
+  const following = followUser && (!fit?.length || locatedCenter !== null);
+  const mapBearing = following ? (navigationBearing ?? 0) : 0;
+  const canvasWidth = Math.max(1, mapWidth - 48);
+  const canvasHeight = Math.max(1, mapHeight - 96 - canvasBottom);
 
   useEffect(() => {
     setLocatedCenter(null);
@@ -69,12 +75,11 @@ export function TuurMap({
     ...(user ? [user] : []),
   ];
   const bounds = (() => {
-    if (locatedCenter) {
-      const focus = followUser ? target : locatedCenter;
+    if (locatedCenter || following) {
+      const focus = following ? target : locatedCenter!;
       const degreesPerPixel = 360 / (512 * 2 ** LOCATE_ZOOM);
-      const lngSpan = Math.max(1, mapWidth - 48) * degreesPerPixel;
-      const latSpan =
-        Math.max(1, mapHeight - 96 - canvasBottom) * degreesPerPixel * Math.cos((focus.lat * Math.PI) / 180);
+      const lngSpan = canvasWidth * degreesPerPixel;
+      const latSpan = canvasHeight * degreesPerPixel * Math.cos((focus.lat * Math.PI) / 180);
       return {
         s: focus.lat - latSpan / 2,
         n: focus.lat + latSpan / 2,
@@ -93,10 +98,20 @@ export function TuurMap({
       e: Math.max(...lngs) + pad,
     };
   })();
-  const project = (p: { lat: number; lng: number }) => ({
-    x: ((p.lng - bounds.w) / (bounds.e - bounds.w)) * 100,
-    y: (1 - (p.lat - bounds.s) / (bounds.n - bounds.s)) * 100,
-  });
+  const rotation = (mapBearing * Math.PI) / 180;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const project = (p: LatLng) => {
+    const x = (p.lng - bounds.w) / (bounds.e - bounds.w) - 0.5;
+    const y = 0.5 - (p.lat - bounds.s) / (bounds.n - bounds.s);
+    // Rotate pixels, not percentages, so the course stays vertical on rectangular maps.
+    const dx = x * canvasWidth;
+    const dy = y * canvasHeight;
+    return {
+      x: 50 + ((dx * cos + dy * sin) / canvasWidth) * 100,
+      y: 50 + ((dy * cos - dx * sin) / canvasHeight) * 100,
+    };
+  };
   const points = (l: LatLng[]) => l.map((p) => `${project(p).x},${project(p).y}`).join(' ');
   const stroke = (l: LatLng[] | undefined, color: string, width: number, dashed = false) =>
     l && l.length > 1 ? (
@@ -254,7 +269,7 @@ export function TuurMap({
               transitionTimingFunction: 'cubic-bezier(0.77, 0, 0.175, 1)',
             }}
           >
-            <UserPositionMarker heading={user.heading} label={t('map.position')} />
+            <UserPositionMarker heading={user.heading} mapBearing={mapBearing} label={t('map.position')} />
           </div>
         ) : null}
       </View>

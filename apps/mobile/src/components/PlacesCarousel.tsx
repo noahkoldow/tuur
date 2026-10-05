@@ -21,7 +21,8 @@ interface Props {
   position?: LatLng | null;
   navigate?: boolean;
   disabled?: boolean;
-  onPlacePress: (poi: Poi) => void;
+  /** Only the card's navigation button chooses a destination; tapping its body flips it. */
+  onNavigate: (poi: Poi) => void;
   /** A map selection scrolls the matching card into view without starting its activity. */
   selectedId?: string | null | undefined;
   /** Increment when selecting the same map pin again after manually browsing cards. */
@@ -34,7 +35,7 @@ export function PlacesCarousel({
   position,
   navigate = false,
   disabled = false,
-  onPlacePress,
+  onNavigate,
   selectedId,
   selectionKey,
 }: Props) {
@@ -191,7 +192,7 @@ export function PlacesCarousel({
             position={position}
             navigate={navigate}
             disabled={disabled}
-            onPress={() => onPlacePress(poi)}
+            onNavigate={() => onNavigate(poi)}
           />
         ))}
       </Animated.ScrollView>
@@ -209,7 +210,7 @@ function CarouselPlace({
   position,
   navigate,
   disabled,
-  onPress,
+  onNavigate,
 }: {
   poi: Poi;
   index: number;
@@ -220,7 +221,7 @@ function CarouselPlace({
   position: LatLng | null | undefined;
   navigate: boolean;
   disabled: boolean;
-  onPress: () => void;
+  onNavigate: () => void;
 }) {
   const style = useAnimatedStyle(() => {
     const input = [(index - 1) * interval, index * interval, (index + 1) * interval];
@@ -248,7 +249,7 @@ function CarouselPlace({
         minutes={minutes}
         navigate={navigate}
         disabled={disabled}
-        onPress={onPress}
+        onNavigate={onNavigate}
       />
     </Animated.View>
   );

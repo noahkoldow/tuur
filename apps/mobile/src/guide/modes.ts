@@ -22,18 +22,24 @@ import { config } from '../config';
 import type { GuideRuntime } from './runtime';
 import { LiveCuration } from './curation';
 
-function curationContext(runtime: GuideRuntime, lang: string | undefined, interests: Interest[]) {
-  const state = runtime.getState();
-  const previousPoiName = state.route
+function curationContext(
+  runtime: GuideRuntime | undefined,
+  lang: string | undefined,
+  interests: Interest[],
+  fallbackAccess?: AccessInfo,
+) {
+  const state = runtime?.getState();
+  const previousPoiName = state?.route
     .slice(0, state.index)
     .filter((s) => !state.skipped.includes(s.id))
     .at(-1)
     ?.name.slice(0, 120);
-  const access = runtime.getAccess();
+  const access = runtime?.getAccess() ?? fallbackAccess;
+  const thread = runtime?.getScript().question;
   return {
     lang: NARRATION_LANGS.find((l) => l === lang) ?? 'en',
     interests,
-    thread: runtime.getScript().question,
+    ...(thread ? { thread } : {}),
     ...(previousPoiName ? { previousPoiName } : {}),
     ...(access ? { access } : {}),
   };
@@ -105,7 +111,8 @@ export interface ForkSnapshot {
 }
 
 interface ForkOpts {
-  runtime: GuideRuntime;
+  /** Omit for the first-choice preview, before a guide session exists. */
+  runtime?: GuideRuntime;
   backend: Backend;
   pool: PoiPool;
   lang: string;
@@ -143,7 +150,7 @@ export class ForkController {
   }
 
   attach() {
-    this.unsub = this.o.runtime.addCommandListener((c) => {
+    this.unsub = this.o.runtime?.addCommandListener((c) => {
       if (c.type === 'waypoint' || c.type === 'needNext') void this.compute();
     });
   }
@@ -155,13 +162,13 @@ export class ForkController {
   /** Options for the current position (also used before the first stop). */
   async compute(at?: LatLng): Promise<ForkChoice[]> {
     const revision = ++this.revision;
-    const here = at ?? this.o.runtime.getSnapshot().user;
+    const here = at ?? this.o.runtime?.getSnapshot().user;
     if (!here) return [];
     const tile = encodeGeohash(here.lat, here.lng, config.tilePrecision);
     await this.o.pool.load(tilesAround(tile, 2));
     const used = (this.clock.now() - this.startedAt) / 60_000;
-    const st = this.o.runtime.getState();
-    const visitedIds = [...new Set([...st.route.map((r) => r.id), ...st.visited, ...st.skipped])];
+    const st = this.o.runtime?.getState();
+    const visitedIds = st ? [...new Set([...st.route.map((r) => r.id), ...st.visited, ...st.skipped])] : [];
     const input = {
       here,
       candidates: this.o.pool.all(),
@@ -182,7 +189,7 @@ export class ForkController {
     this.set({ ...this.snap, loading: true });
     const ranked = await this.curation.rank(
       choices.map((choice) => choice.poi),
-      curationContext(this.o.runtime, this.o.lang, this.o.interests),
+      curationContext(this.o.runtime, this.o.lang, this.o.interests, this.o.access),
     );
     if (revision !== this.revision) return [];
     const first = choices.find((choice) => choice.poi.id === ranked[0]?.id);
@@ -227,7 +234,7 @@ export class ForkController {
 
   choose(poiId: string) {
     const opt = this.snap.options.find((x) => x.poi.id === poiId);
-    if (!opt) return;
+    if (!opt || !this.o.runtime) return;
     this.revision++;
     this.o.runtime.appendStop({ id: opt.poi.id, name: opt.poi.name, location: opt.poi.location });
     this.set({ options: [], loading: false });
@@ -316,9 +323,13 @@ export class RoamController {
     if (target?.id === poi.id) return true;
     const stop = { id: poi.id, name: poi.name, location: poi.location };
     if (st.awaitingRoute) rt.appendStop(stop);
-    // Keep a reached/heard stop until the engine handles its departure or waypoint.
+    // Keep heard places in the walk. A story heard from nearby need not wait for an exact arrival.
     else if (target && (st.reached[target.id] || st.narrated.includes(target.id)))
-      rt.setRoute([...st.route.slice(0, st.index + 1), stop], st.index, true);
+      rt.setRoute(
+        [...st.route.slice(0, st.index + 1), stop],
+        st.reached[target.id] ? st.index : st.index + 1,
+        true,
+      );
     else rt.retarget(stop);
     return true;
   }
@@ -432,6 +443,10 @@ export class RoamController {
     if (!idle && target && this.stillAhead(pos, heading, target.location)) return;
     const stop = { id: next.id, name: next.name, location: next.location };
     if (st.awaitingRoute) rt.appendStop(stop);
+    // Roam can tell a story from the passing street, outside the physical arrival radius.
+    // Retain that point for the map and reading history when the listener changes direction.
+    else if (st.route[st.index] && rt.getStopNarration(st.route[st.index]!.id))
+      rt.setRoute([...st.route.slice(0, st.index + 1), stop], st.index + 1, true);
     else rt.retarget(stop);
   }
 

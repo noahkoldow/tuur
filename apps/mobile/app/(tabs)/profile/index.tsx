@@ -92,6 +92,15 @@ export default function Profile() {
           </View>
         </Pressable>
 
+        <ListGroup>
+          <ListRow
+            icon="tag"
+            label={t('paywall.pricingTitle')}
+            hint={t('paywall.pricingHint')}
+            onPress={() => router.push({ pathname: '/paywall', params: { intent: 'pricing' } })}
+          />
+        </ListGroup>
+
         <View
           style={{
             flexDirection: 'row',

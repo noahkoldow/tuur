@@ -76,8 +76,8 @@ function sourceOf(ref: WikipediaRef): string | undefined {
   return `https://${locale}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, '_'))}`;
 }
 
-/** A short source-backed introduction, in the UI language when an extract exists. */
-export function placeSummary(poi: Poi, lang: string): { text: string; sourceUrl?: string } | undefined {
+/** Full, readable source text, in the UI language when an extract exists. */
+export function placeInformation(poi: Poi, lang: string): { text: string; sourceUrl?: string } | undefined {
   const baseLanguage = lang.trim().toLowerCase().split(/[-_]/)[0];
   const available = poi.sources.wikipedia
     .map((ref) => ({ ref, text: cleanExtract(ref.extract ?? '') }))
@@ -88,5 +88,11 @@ export function placeSummary(poi: Poi, lang: string): { text: string; sourceUrl?
     available[0];
   if (!best) return undefined;
   const sourceUrl = sourceOf(best.ref);
-  return { text: shorten(best.text), ...(sourceUrl ? { sourceUrl } : {}) };
+  return { text: best.text, ...(sourceUrl ? { sourceUrl } : {}) };
+}
+
+/** A short source-backed introduction for cards. Reading a past stop uses the full information above. */
+export function placeSummary(poi: Poi, lang: string): { text: string; sourceUrl?: string } | undefined {
+  const information = placeInformation(poi, lang);
+  return information ? { ...information, text: shorten(information.text) } : undefined;
 }

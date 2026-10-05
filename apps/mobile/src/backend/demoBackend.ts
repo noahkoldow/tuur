@@ -428,6 +428,24 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       const keys = new Set(tiles.map((t) => tileRegion.get(t)).filter(Boolean));
       return [...regions.values()].filter((r) => keys.has(r.key)).flatMap((r) => r.pois);
     },
+    async getWalkingRoute(req) {
+      const destination = req.destination ?? (req.poiId ? poiIndex.get(req.poiId)?.location : undefined);
+      if (!destination) throw new BackendError('not_found', 'Destination not found');
+      const points = await previewWalkingPath([req.origin, destination]);
+      if (!points || points.length < 2)
+        throw new BackendError('unavailable', 'Preview directions unavailable');
+      const distance = points.slice(1).reduce((sum, point, i) => sum + distanceMeters(points[i]!, point), 0);
+      return {
+        ...(req.poiId ? { poiId: req.poiId } : {}),
+        origin: points[0]!,
+        destination,
+        path: points.map((point) => [point.lat, point.lng] as [number, number]),
+        distanceMeters: distance,
+        durationSeconds: distance / 1.3,
+        routingSource: 'mock',
+        profile: req.profile ?? 'foot-walking',
+      };
+    },
     async selectNearby(req) {
       return {
         poiIds: req.candidateIds.filter((id) => {

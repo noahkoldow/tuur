@@ -3,12 +3,14 @@ import { Animated, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { ImageRef, Interest, Poi } from '@tuur/shared';
 import { formatKm } from '../format';
-import { colors, radii, shadow } from '../theme';
+import { colors, radii, shadow, sys } from '../theme';
 import { CategoryBadge } from './category-badge';
+import { FlipCard } from './flip-card';
+import { Icon } from './Icon';
 import { INTEREST_ICON } from './icons';
 import { PlacePhoto } from './PlacePhoto';
 import { PhotoInfo, type PhotoTextSource } from './photo-info';
-import { placeSummary } from './placeDetails';
+import { placeInformation, placeSummary } from './placeDetails';
 import { SnapCarousel, type SnapCarouselItem } from './SnapCarousel';
 import { Text } from './Text';
 
@@ -50,6 +52,7 @@ export function StopCards({
   const interest = interestOf(poi);
   const images = narrationImages?.length ? narrationImages : (poi?.imageRefs ?? []);
   const extract = poi ? placeSummary(poi, lang) : undefined;
+  const information = poi ? placeInformation(poi, lang) : undefined;
   const distance =
     distanceM === undefined
       ? undefined
@@ -64,7 +67,15 @@ export function StopCards({
       key: 'hero',
       label: name,
       node: (
-        <HeroCard name={name} interest={interest} image={images[0]} distance={distance} summary={extract} />
+        <HeroCard
+          identity={id}
+          name={name}
+          interest={interest}
+          image={images[0]}
+          distance={distance}
+          information={information}
+          keyFacts={keyFacts}
+        />
       ),
     },
   ];
@@ -74,11 +85,23 @@ export function StopCards({
       label: t('cards.ahead'),
       node: <PromptCard prompt={t('cards.ahead')} body={extract.text} summary={extract} />,
     });
-  images
-    .slice(1, 3)
-    .forEach((img, i) =>
-      items.push({ key: `img-${i}`, label: name, node: <PhotoCard image={img} name={name} /> }),
-    );
+  images.slice(1, 3).forEach((img, i) =>
+    items.push({
+      key: `img-${i}`,
+      label: name,
+      node: (
+        <PhotoCard
+          identity={id}
+          image={img}
+          name={name}
+          interest={interest}
+          distance={distance}
+          information={information}
+          keyFacts={keyFacts}
+        />
+      ),
+    }),
+  );
   if (keyFacts?.length)
     items.push({
       key: 'facts',
@@ -107,57 +130,125 @@ const cardStyle = {
   ...shadow.card,
 };
 
+interface StopCardInformation {
+  identity: string;
+  name: string;
+  interest?: Interest | undefined;
+  distance?: string | undefined;
+  information?: PhotoTextSource | undefined;
+  keyFacts?: string[] | undefined;
+}
+
 function HeroCard({
+  identity,
   name,
   interest,
   image,
   distance,
-  summary,
-}: {
-  name: string;
-  interest?: Interest | undefined;
+  information,
+  keyFacts,
+}: StopCardInformation & {
   image?: CardImage | undefined;
-  distance?: string | undefined;
-  summary?: PhotoTextSource | undefined;
 }) {
+  const { t } = useTranslation();
   return (
-    <View style={[cardStyle, { paddingTop: 64, justifyContent: 'flex-end' }]}>
-      <PlacePhoto
-        image={image}
-        name={name}
-        icon={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
-        showInfo={false}
-        style={{ position: 'absolute', inset: 0 }}
-      />
-      <View
-        style={{
-          padding: 14,
-          gap: 6,
-          backgroundColor: 'rgba(17,17,17,0.76)',
-        }}
-      >
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-          {interest ? <CategoryBadge interest={interest} /> : null}
-          {distance ? (
-            <Text variant="caption" style={{ color: '#FFFFFF' }}>
-              {distance}
+    <FlipCard
+      identity={identity}
+      style={cardStyle}
+      frontStyle={{ minHeight: CARD_H, paddingTop: 64, justifyContent: 'flex-end' }}
+      frontAccessibilityLabel={name}
+      front={
+        <>
+          <PlacePhoto
+            image={image}
+            name={name}
+            icon={interest ? INTEREST_ICON[interest] : 'map-marker-radius'}
+            showInfo={false}
+            style={{ position: 'absolute', inset: 0 }}
+          />
+          <View style={{ padding: 14, gap: 6, backgroundColor: 'rgba(17,17,17,0.76)' }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              {interest ? <CategoryBadge interest={interest} /> : null}
+              {distance ? (
+                <Text variant="caption" style={{ color: '#FFFFFF' }}>
+                  {distance}
+                </Text>
+              ) : null}
+            </View>
+            <Text variant="title" numberOfLines={2} style={{ color: '#FFFFFF' }}>
+              {name}
             </Text>
-          ) : null}
-        </View>
-        <Text variant="title" numberOfLines={2} style={{ color: '#FFFFFF' }}>
-          {name}
-        </Text>
-      </View>
-      <PhotoInfo image={image} name={name} summary={summary} />
-    </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Icon name="book-open" size={14} color="#FFFFFF" />
+              <Text variant="caption" color="#FFFFFF">
+                {t('cards.showInfo')}
+              </Text>
+            </View>
+          </View>
+        </>
+      }
+      back={
+        <StopDetails
+          name={name}
+          interest={interest}
+          distance={distance}
+          information={information}
+          keyFacts={keyFacts}
+        />
+      }
+      overlay={<PhotoInfo image={image} name={name} summary={information} />}
+    />
   );
 }
 
-function PhotoCard({ image, name }: { image: CardImage; name: string }) {
+function PhotoCard({ image, identity, name, ...information }: StopCardInformation & { image: CardImage }) {
   return (
-    <View style={[cardStyle, { height: CARD_H }]}>
-      <PlacePhoto image={image} name={name} />
-    </View>
+    <FlipCard
+      identity={identity}
+      style={cardStyle}
+      frontStyle={{ height: CARD_H }}
+      frontAccessibilityLabel={name}
+      front={<PlacePhoto image={image} name={name} showInfo={false} />}
+      back={<StopDetails name={name} {...information} />}
+      overlay={<PhotoInfo image={image} name={name} summary={information.information} />}
+    />
+  );
+}
+
+function StopDetails({
+  name,
+  interest,
+  distance,
+  information,
+  keyFacts,
+}: Omit<StopCardInformation, 'identity'>) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Text variant="headline" style={{ paddingRight: 44 }}>
+        {name}
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        {interest ? <CategoryBadge interest={interest} /> : null}
+        {distance ? <Text variant="caption">{distance}</Text> : null}
+      </View>
+      {keyFacts?.length ? (
+        <>
+          {keyFacts.slice(0, 3).map((fact, index) => (
+            <Text key={index} variant="body">
+              {fact}
+            </Text>
+          ))}
+          <Text variant="caption">{t('player.aiGenerated')}</Text>
+        </>
+      ) : information ? (
+        <Text variant="body">{information.text}</Text>
+      ) : (
+        <Text variant="body" color={sys.labelSecondary}>
+          {t('stopInfo.unavailable')}
+        </Text>
+      )}
+    </>
   );
 }
 

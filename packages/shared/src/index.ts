@@ -36,6 +36,7 @@ export * from './routing/autoTours';
 export * from './routing/tourPrompt';
 export * from './routing/polyline';
 export * from './routing/legs';
+export * from './routing/navigation';
 export * from './guide/travel';
 export * from './guide/pacing';
 export * from './guide/engine';

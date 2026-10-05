@@ -11,6 +11,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import { useHistory } from './history';
+import type { StopNarration } from '../guide/stopNarration';
 
 const start = { lat: 52.5163, lng: 13.3777 };
 const record = { id: 'car-tour', mode: 'roam' as const, startedAt: 0 };
@@ -107,5 +108,56 @@ describe('bounded tour history for car and public transport', () => {
     useHistory.getState().addTrackPoint(record.id, { ...end, ts: 20_000 });
     expect(useHistory.getState().records[0]?.trackTotals?.distanceM).toBeCloseTo(400, 0);
     expect(useHistory.getState().records[0]?.trackTotals?.movingMs).toBe(20_000);
+  });
+});
+
+describe('readable places in local tour history', () => {
+  const stop = { id: 'gate', name: 'Gate', location: start };
+  const narration: StopNarration = {
+    key: 'gate:short',
+    title: 'A gate with a story',
+    text: 'This is the actual story heard during the walk.',
+    tier: 'short',
+    images: [],
+    keyFacts: ['A remembered fact.'],
+    aiGenerated: true,
+    grounding: { queries: 1, sources: [{ uri: 'https://example.org/gate', title: 'Gate archive' }] },
+  };
+
+  it('enriches a visited place without duplicating it and restores the same text after finishing', async () => {
+    useHistory.getState().addStop(record, stop);
+    useHistory.getState().addStop(record, { ...stop, narration });
+    useHistory.getState().finish(record.id, 30_000);
+    const persisted = storage.get('tuur.history.v1')!;
+    useHistory.setState({ records: [] });
+    storage.set('tuur.history.v1', persisted);
+    await useHistory.persist.rehydrate();
+    const restored = useHistory.getState().records[0]!;
+    expect(restored.stops).toEqual([{ ...stop, narration }]);
+    expect(restored.stopsVisited).toBe(1);
+    expect(restored.endedAt).toBe(30_000);
+  });
+
+  it('keeps the longest heard story when replaying or recovering a stop', () => {
+    useHistory.getState().addStop(record, { ...stop, narration });
+    const longer: StopNarration = { ...narration, key: 'gate:long', tier: 'long', text: 'A longer story.' };
+    useHistory.getState().addStop(record, { ...stop, narration: longer });
+    useHistory.getState().addStop(record, { ...stop, narration });
+    useHistory.getState().addStop(record, stop);
+    expect(useHistory.getState().records[0]?.stops).toEqual([{ ...stop, narration: longer }]);
+    expect(useHistory.getState().records[0]?.stopsVisited).toBe(1);
+  });
+
+  it('keeps older saved places readable by name without requiring a narration', async () => {
+    const existing = useHistory.getState().records[0]!;
+    storage.set(
+      'tuur.history.v1',
+      JSON.stringify({
+        version: 3,
+        state: { records: [{ ...existing, stops: [stop], stopsVisited: 1 }], deletedIds: [] },
+      }),
+    );
+    await useHistory.persist.rehydrate();
+    expect(useHistory.getState().records[0]?.stops).toEqual([stop]);
   });
 });

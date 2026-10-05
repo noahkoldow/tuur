@@ -105,6 +105,15 @@ export default function Settings() {
       {!config.paywall ? <Banner icon="unlock" text={t('settings.previewNotice')} /> : null}
       {notice ? <Banner tone={notice.tone} text={notice.text} /> : null}
 
+      <ListGroup>
+        <ListRow
+          icon="tag"
+          label={t('paywall.pricingTitle')}
+          hint={t('paywall.pricingHint')}
+          onPress={() => router.push({ pathname: '/paywall', params: { intent: 'pricing' } })}
+        />
+      </ListGroup>
+
       <ListGroup title={t('settings.sectionTour')}>
         <ChoiceRows
           icon="globe"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PoiSchema, type WikipediaRef } from '@tuur/shared';
-import { placeSummary } from './placeDetails';
+import { placeInformation, placeSummary } from './placeDetails';
 
 const place = (wikipedia: WikipediaRef[]) =>
   PoiSchema.parse({
@@ -60,6 +60,19 @@ describe('place summary', () => {
     const first = 'Der Fernsehturm steht in Berlin. Er prägt die Skyline.';
     const extract = `${first} ${'Dieser weitere Satz ist sehr lang und enthält viele Details '.repeat(5)}.`;
     expect(placeSummary(place([ref('de', extract)]), 'de')?.text).toBe(first);
+  });
+
+  it('keeps the full sanitized extract when reading a past stop', () => {
+    const text =
+      'The tower overlooks the city. ' +
+      'It has a viewing platform with views in every direction. '.repeat(8);
+    const poi = place([ref('en', `<p>${text}</p><script>hidden()</script>`)]);
+
+    expect(placeInformation(poi, 'en')).toEqual({
+      text: text.trim(),
+      sourceUrl: 'https://en.wikipedia.org/wiki/Berliner_Fernsehturm',
+    });
+    expect(placeSummary(poi, 'en')!.text.length).toBeLessThan(placeInformation(poi, 'en')!.text.length);
   });
 
   it('truncates an oversized first sentence at a word boundary', () => {

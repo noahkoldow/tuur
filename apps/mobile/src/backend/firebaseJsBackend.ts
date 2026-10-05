@@ -269,6 +269,7 @@ export function createFirebaseJsBackend(): Backend {
     },
     getPois,
     selectNearby: (req) => call('selectNearby', req),
+    getWalkingRoute: (req) => call('getWalkingRoute', req),
     async getExploredSpots(tiles) {
       // `poiStats` holds anonymous aggregates written by Cloud Functions (see functions/src/stats).
       const stats: PoiStats[] = [];

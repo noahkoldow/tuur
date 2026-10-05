@@ -14,6 +14,8 @@ import type {
   OfflineDownloadAccess,
   SelectNearbyRequest,
   SelectNearbyResult,
+  GetWalkingRouteRequest,
+  WalkingRouteResult,
 } from '@tuur/shared';
 
 export type Unsubscribe = () => void;
@@ -114,6 +116,8 @@ export interface Backend {
   getPois(tiles: string[]): Promise<Poi[]>;
   /** Gemini curates real candidates as the walk progresses; no precise GPS is sent. */
   selectNearby(req: SelectNearbyRequest): Promise<SelectNearbyResult>;
+  /** Transient origin/target coordinates for directions; never a location history. */
+  getWalkingRoute(req: GetWalkingRouteRequest): Promise<WalkingRouteResult>;
   /** Places other users explored in these tiles (anonymous aggregates, k-anonymity threshold applied). */
   getExploredSpots(tiles: string[]): Promise<ExploredSpot[]>;
   /** Personal route (spec 5.2): re-checks the client plan with routing times and adds the narrative thread. */

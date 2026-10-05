@@ -208,7 +208,8 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
                 selectedId={selected.poiId}
                 selectionKey={selectionKey}
                 position={position}
-                onPlacePress={(poi) => void openPlace(poi.id)}
+                navigate
+                onNavigate={(poi) => void openPlace(poi.id)}
               />
             </View>
           ) : null}
@@ -258,7 +259,8 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
                     selectedId={selected?.poiId}
                     selectionKey={selectionKey}
                     position={position}
-                    onPlacePress={(poi) => void openPlace(poi.id)}
+                    navigate
+                    onNavigate={(poi) => void openPlace(poi.id)}
                   />
                 </View>
               ) : poolReady || slow ? (

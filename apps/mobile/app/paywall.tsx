@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Wordmark } from '../src/components/Brand';
 import { Checkbox } from '../src/components/Checkbox';
 import { yearlyValue } from '../src/billing/pricing';
+import { paywallContext, type PaywallParams } from '../src/billing/paywall-context';
 import { useBackend, BackendError } from '../src/backend';
 import { Banner } from '../src/components/Banner';
 import { Button, Row } from '../src/components/Button';
@@ -13,59 +14,50 @@ import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import type { Offer } from '../src/billing/types';
-import {
-  canDownloadTour,
-  canStartTour,
-  canUseSession,
-  getAds,
-  getBilling,
-  subscribed,
-  useEntitlementStore,
-} from '../src/billing/entitlements';
+import { getAds, getBilling, subscribed, useEntitlementStore } from '../src/billing/entitlements';
 import { metrics, sys } from '../src/theme';
-
-type Params = {
-  kind?: 'tour' | 'session';
-  tourId?: string;
-  placeId?: string;
-  mode?: 'planned' | 'fork' | 'roam';
-  intent?: 'download';
-};
 
 /**
  * Paywall (spec 6): credit, subscription (with the full disclosure required by the stores), rewarded ad (tours only)
- * and restore. Entitlements are only ever read from the server; this screen closes itself once access exists.
+ * and restore. Contextual gates close once access exists; the price overview remains open for browsing.
  */
 export default function Paywall() {
-  const { kind = 'tour', tourId, placeId, mode = 'planned', intent } = useLocalSearchParams<Params>();
+  const params = useLocalSearchParams<PaywallParams>();
+  const { kind = 'tour', tourId, placeId } = params;
   const { t, i18n } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
   const ent = useEntitlementStore();
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [offersStatus, setOffersStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [offersAttempt, setOffersAttempt] = useState(0);
   const [busy, setBusy] = useState<string | undefined>();
   const [message, setMessage] = useState<{ text: string; tone: 'info' | 'warning' | 'error' } | undefined>();
   const [waitingReward, setWaitingReward] = useState(false);
   const [consent, setConsent] = useState(false);
 
-  const downloading = intent === 'download';
-  const unlocked = downloading
-    ? canDownloadTour(ent, {
-        ...(tourId ? { tourId } : {}),
-        ...(placeId ? { placeId } : {}),
-        mode: kind === 'tour' ? 'tour' : mode,
-      })
-    : kind === 'tour' && tourId
-      ? canStartTour(ent, tourId, false)
-      : canUseSession(ent, mode, placeId);
+  const { browsing, downloading, unlocked } = paywallContext(ent, params);
+  const demo = backend.kind === 'demo' || config.backend === 'demo' || Platform.OS === 'web';
   const isSub = subscribed(ent);
+  const close = () => (router.canGoBack() ? router.back() : router.replace('/profile'));
 
   useEffect(() => {
+    let active = true;
+    setOffersStatus('loading');
     void getBilling()
       .offers()
-      .then(setOffers)
-      .catch(() => setMessage({ text: t('paywall.failed'), tone: 'warning' }));
-  }, [t]);
+      .then((next) => {
+        if (!active) return;
+        setOffers(next);
+        setOffersStatus('ready');
+      })
+      .catch(() => {
+        if (active) setOffersStatus('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [offersAttempt]);
 
   useEffect(() => {
     if (unlocked) router.back();
@@ -101,6 +93,7 @@ export default function Paywall() {
   const total = ent.wallet.balance + (kind === 'tour' && !downloading ? ent.wallet.rewardBalance : 0);
   const spend = () =>
     run('spend', async () => {
+      if (browsing) return;
       await backend.spendCredit(
         kind === 'tour'
           ? { kind: 'tour', tourId: tourId!, ...(downloading ? { paidOnly: true } : {}) }
@@ -110,11 +103,14 @@ export default function Paywall() {
 
   const buy = (o: Offer) =>
     run(o.id, async () => {
-      if (!consent) return setMessage({ text: t('paywall.consentNeeded'), tone: 'warning' });
-      // express consent to immediate delivery is recorded server-side before the store sheet opens (Sec. 356(5) BGB)
-      await backend.recordPurchaseConsent(o.id);
+      if (!demo) {
+        if (!consent) return setMessage({ text: t('paywall.consentNeeded'), tone: 'warning' });
+        // Express consent is recorded before the real store sheet opens (Sec. 356(5) BGB).
+        await backend.recordPurchaseConsent(o.id);
+      }
       const r = await getBilling().purchase(o.id);
-      if (r === 'purchased') setMessage({ text: t('paywall.purchasePending'), tone: 'info' });
+      if (r === 'purchased')
+        setMessage({ text: t(demo ? 'paywall.demoPurchased' : 'paywall.purchasePending'), tone: 'info' });
     });
 
   const watchAd = () =>
@@ -151,7 +147,7 @@ export default function Paywall() {
   const monthly = subs.find((o) => o.period === 'month');
   const yearly = subs.find((o) => o.period === 'year');
   const value = yearlyValue(monthly, yearly, i18n.language);
-  const open = (doc: string) => void Linking.openURL(`${config.legal.webBaseUrl}/legal/${doc}`);
+  const open = (doc: string) => void Linking.openURL(`${config.legal.documentsBaseUrl}/legal/${doc}`);
   const manageSubs = () =>
     void Linking.openURL(
       Platform.OS === 'ios'
@@ -167,29 +163,48 @@ export default function Paywall() {
           title: '',
           headerShadowVisible: false,
           headerStyle: { backgroundColor: sys.grouped as string },
-          headerRight: () => <CloseButton label={t('paywall.close')} onPress={() => router.back()} />,
+          headerRight: () => <CloseButton label={t('paywall.close')} onPress={close} />,
         }}
       />
       <ScrollScreen>
         <View style={{ gap: 8 }}>
           <Wordmark width={72} />
           <Text variant="title1" accessibilityRole="header">
-            {downloading
-              ? t('paywall.titleDownload')
-              : kind === 'tour'
-                ? t('paywall.title')
-                : t('paywall.titleSession')}
+            {browsing
+              ? t('paywall.pricingTitle')
+              : downloading
+                ? t('paywall.titleDownload')
+                : kind === 'tour'
+                  ? t('paywall.title')
+                  : t('paywall.titleSession')}
           </Text>
           <Text variant="body" color={sys.labelSecondary}>
-            {downloading
-              ? t('paywall.subtitleDownload')
-              : kind === 'tour'
-                ? t('paywall.subtitleTour')
-                : t('paywall.subtitleSession')}
+            {browsing
+              ? t('paywall.pricingHint')
+              : downloading
+                ? t('paywall.subtitleDownload')
+                : kind === 'tour'
+                  ? t('paywall.subtitleTour')
+                  : t('paywall.subtitleSession')}
           </Text>
         </View>
+        {demo ? <Banner text={t('paywall.demoNotice')} icon="info" /> : null}
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
+        {offersStatus === 'loading' && !offers.length ? <Text>{t('common.loading')}</Text> : null}
+        {offersStatus === 'error' || (offersStatus === 'ready' && !offers.length) ? (
+          <Card>
+            <Banner
+              text={t(offersStatus === 'error' ? 'paywall.failed' : 'paywall.offersUnavailable')}
+              tone="warning"
+            />
+            <Button
+              variant="secondary"
+              label={t('common.retry')}
+              onPress={() => setOffersAttempt((attempt) => attempt + 1)}
+            />
+          </Card>
+        ) : null}
 
         {total > 0 ? (
           <Card>
@@ -199,29 +214,38 @@ export default function Paywall() {
                 {t('paywall.balanceReward', { count: ent.wallet.rewardBalance })}
               </Text>
             ) : null}
-            <Button
-              label={busy === 'spend' ? t('paywall.unlocking') : t('paywall.unlockWithCredit')}
-              loading={busy === 'spend'}
-              onPress={() => void spend()}
-            />
+            {!browsing ? (
+              <Button
+                label={busy === 'spend' ? t('paywall.unlocking') : t('paywall.unlockWithCredit')}
+                loading={busy === 'spend'}
+                disabled={Boolean(busy)}
+                onPress={() => void spend()}
+              />
+            ) : null}
           </Card>
         ) : null}
 
-        <Checkbox checked={consent} onChange={setConsent} label={t('paywall.withdrawal')} />
+        {!demo && offers.length ? (
+          <Checkbox checked={consent} onChange={setConsent} label={t('paywall.withdrawal')} />
+        ) : null}
 
-        <Card>
-          {credits.map((o) => (
-            <Button
-              key={o.id}
-              // one filled primary on the screen: the single credit; everything else is secondary
-              variant={o.credits === 5 || total > 0 ? 'secondary' : 'primary'}
-              label={`${o.credits === 5 ? t('paywall.buyCredits5') : t('paywall.buyCredit')} · ${o.priceString}`}
-              loading={busy === o.id}
-              onPress={() => void buy(o)}
-            />
-          ))}
-          <Text variant="footnote">{t('paywall.creditHint')}</Text>
-        </Card>
+        {credits.length ? (
+          <Card>
+            {credits.map((o) => (
+              <Button
+                key={o.id}
+                // one filled primary on the screen: the single credit; everything else is secondary
+                variant={o.credits === 5 || total > 0 ? 'secondary' : 'primary'}
+                label={`${o.credits === 5 ? t('paywall.buyCredits5') : t('paywall.buyCredit')} · ${o.priceString}`}
+                accessibilityHint={demo ? t('paywall.demoAction') : undefined}
+                loading={busy === o.id}
+                disabled={Boolean(busy)}
+                onPress={() => void buy(o)}
+              />
+            ))}
+            <Text variant="footnote">{t('paywall.creditHint')}</Text>
+          </Card>
+        ) : null}
 
         {subs.length ? (
           <Card>
@@ -243,6 +267,8 @@ export default function Paywall() {
                       price: o.priceString,
                     })}
                     loading={busy === o.id}
+                    disabled={Boolean(busy) || isSub}
+                    accessibilityHint={demo ? t('paywall.demoAction') : undefined}
                     onPress={() => void buy(o)}
                   />
                   {o.period === 'year' && value ? (
@@ -250,12 +276,14 @@ export default function Paywall() {
                   ) : null}
                 </View>
               ))}
-            <Text variant="footnote">{t('paywall.subDisclosure')}</Text>
-            <Button variant="ghost" size="regular" label={t('paywall.manageSubs')} onPress={manageSubs} />
+            <Text variant="footnote">{t(demo ? 'paywall.demoSubDisclosure' : 'paywall.subDisclosure')}</Text>
+            {!demo ? (
+              <Button variant="ghost" size="regular" label={t('paywall.manageSubs')} onPress={manageSubs} />
+            ) : null}
           </Card>
         ) : null}
 
-        {kind === 'tour' && !isSub && !downloading ? (
+        {!browsing && kind === 'tour' && !isSub && !downloading ? (
           <Card>
             <Button
               variant="secondary"
@@ -268,12 +296,15 @@ export default function Paywall() {
           </Card>
         ) : null}
 
-        <Button
-          variant="ghost"
-          label={t('paywall.restore')}
-          loading={busy === 'restore'}
-          onPress={() => void restore()}
-        />
+        {!demo ? (
+          <Button
+            variant="ghost"
+            label={t('paywall.restore')}
+            loading={busy === 'restore'}
+            disabled={Boolean(busy)}
+            onPress={() => void restore()}
+          />
+        ) : null}
         <Row gap={8} style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
           <Button variant="ghost" size="regular" label={t('paywall.terms')} onPress={() => open('terms')} />
           <Button

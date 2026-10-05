@@ -76,10 +76,11 @@ async function markOn(size, ratio, fill, background) {
     .png();
 }
 
-await (
-  await markOn(1024, 0.58, '#FFFFFF', RED)
-)
+// Flatten after compositing; flattening the input canvas alone leaves an alpha channel
+// on the final composite, which App Store Connect rejects for the default app icon.
+await sharp(await (await markOn(1024, 0.58, '#FFFFFF', RED)).toBuffer())
   .flatten({ background: RED })
+  .removeAlpha()
   .toFile(out('app/icon-ios-1024.png'));
 await (await markOn(1024, 0.5, '#FFFFFF')).toFile(out('app/adaptive-icon-foreground.png'));
 await (await markOn(1024, 0.5, '#000000')).toFile(out('app/adaptive-icon-monochrome.png'));

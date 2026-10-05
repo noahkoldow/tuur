@@ -53,10 +53,12 @@ export function attachTourLiveActivity(
         lang,
         ...(title ? { title } : {}),
         locationStale,
+        ...(current.navigation ? { navigation: current.navigation.getSnapshot() } : {}),
       }),
     );
   };
   const unsubscribe = runtime.subscribe(publish);
+  const unsubscribeNavigation = session.navigation?.subscribe(publish);
   const unsubscribeSettings = useSettings.subscribe((next, previous) => {
     if (next.language !== previous.language) publish();
   });
@@ -72,6 +74,7 @@ export function attachTourLiveActivity(
   return () => {
     stopped = true;
     unsubscribe();
+    unsubscribeNavigation?.();
     unsubscribeSettings();
     appStateSubscription.remove();
     clearInterval(freshnessTimer);

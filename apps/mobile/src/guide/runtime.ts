@@ -26,6 +26,7 @@ import type { AudioEngine, AudioItem } from '../audio/types';
 import { realClock, type Clock } from '../audio/simulatedEngine';
 import { BackendError, type AccessInfo, type Backend } from '../backend/types';
 import type { LocationSource } from '../location/types';
+import { preferStopNarration, type StopNarration } from './stopNarration';
 
 export type Notice = 'finished' | 'unavailable' | 'generation_paused' | 'rate_limited' | 'locked' | 'offline';
 
@@ -63,7 +64,7 @@ export interface GuideUi {
   travelMode: TravelMode;
   /** Open routes (crossroads, roam): the last stop is done and the next one has to be chosen. */
   awaitingRoute: boolean;
-  user?: { lat: number; lng: number; heading?: number };
+  user?: { lat: number; lng: number; heading?: number; speed?: number; accuracy?: number; ts?: number };
 }
 
 export interface RuntimeDeps {
@@ -107,8 +108,19 @@ export class GuideRuntime {
   };
   private readonly listeners = new Set<() => void>();
   private readonly narrations = new Map<string, NarrationResponse>();
+  private readonly heardNarrations = new Map<string, StopNarration>();
+  private readonly narrationListeners = new Set<(poiId: string, narration: StopNarration) => void>();
   private readonly inflight = new Map<string, Promise<NarrationResponse | undefined>>();
-  private items = new Map<string, { poiId: string; kind: 'stop' | 'transition'; tier: LengthTier }>();
+  private items = new Map<
+    string,
+    {
+      poiId: string;
+      kind: 'stop' | 'transition';
+      tier: LengthTier;
+      narration?: StopNarration;
+      startMs?: number;
+    }
+  >();
   private itemCounter = 0;
   private playToken = 0;
   private unsubLocation: (() => void) | undefined;
@@ -129,11 +141,15 @@ export class GuideRuntime {
     deps.audio.setListener({
       onEnded: (id, completed) => {
         const meta = this.items.get(id);
-        if (!meta) return;
+        if (!meta || this.disposed) return;
+        if (completed && meta.narration) this.rememberNarration(meta.poiId, meta.narration);
         this.dispatch({ type: 'ended', poiId: meta.poiId, kind: meta.kind, completed, ts: this.clock.now() });
       },
       onProgress: (id, positionMs) => {
-        if (!this.items.has(id)) return;
+        const meta = this.items.get(id);
+        if (!meta || this.disposed) return;
+        if (meta.narration && positionMs > (meta.startMs ?? 0))
+          this.rememberNarration(meta.poiId, meta.narration);
         this.dispatch({ type: 'progress', positionMs, ts: this.clock.now() });
       },
       onError: (id) => {
@@ -158,6 +174,14 @@ export class GuideRuntime {
   getSnapshot = () => this.ui;
   getState = () => this.state;
   getScript = (): TourScript => this.script;
+  /** Returns heard content only; prefetching a suggestion never creates a readable tour stop. */
+  getStopNarration = (poiId: string): StopNarration | undefined => this.heardNarrations.get(poiId);
+  /** Rehydrate only saved heard stories; this never fetches or starts playback. */
+  restoreStopNarrations(stops: { id: string; narration?: StopNarration }[]) {
+    for (const stop of stops) {
+      if (stop.narration) this.heardNarrations.set(stop.id, stop.narration);
+    }
+  }
   getProgress = (): GuideProgress => {
     const s = this.state;
     const playback = s.playback?.kind === 'stop' ? s.playback : undefined;
@@ -205,13 +229,16 @@ export class GuideRuntime {
         name: r.name,
         location: r.location,
         ...(r.navigationOnly ? { navigationOnly: true } : {}),
-        state: s.skipped.includes(r.id)
-          ? 'skipped'
-          : i === s.index && !s.finished
-            ? 'current'
-            : s.visited.includes(r.id)
-              ? 'visited'
-              : 'upcoming',
+        state:
+          this.access?.mode === 'roam' && i < s.index && this.heardNarrations.has(r.id)
+            ? 'visited'
+            : s.skipped.includes(r.id)
+              ? 'skipped'
+              : i === s.index && !s.finished
+                ? 'current'
+                : s.visited.includes(r.id)
+                  ? 'visited'
+                  : 'upcoming',
       })),
       ...(target
         ? {
@@ -330,6 +357,18 @@ export class GuideRuntime {
     this.commandListeners.add(cb);
     return () => void this.commandListeners.delete(cb);
   }
+  addNarrationListener(cb: (poiId: string, narration: StopNarration) => void) {
+    this.narrationListeners.add(cb);
+    return () => void this.narrationListeners.delete(cb);
+  }
+
+  private rememberNarration(poiId: string, narration: StopNarration) {
+    const previous = this.heardNarrations.get(poiId);
+    const next = preferStopNarration(previous, narration);
+    if (!next || next === previous) return;
+    this.heardNarrations.set(poiId, next);
+    this.narrationListeners.forEach((listener) => listener(poiId, next));
+  }
   /** Access context sent with content requests (a host opening a live group adds the group id). */
   getAccess(): AccessInfo | undefined {
     return this.access;
@@ -347,7 +386,14 @@ export class GuideRuntime {
     if (this.disposed) return;
     this.ui = {
       ...this.ui,
-      user: { lat: fix.lat, lng: fix.lng, ...(fix.heading !== undefined ? { heading: fix.heading } : {}) },
+      user: {
+        lat: fix.lat,
+        lng: fix.lng,
+        ts: fix.ts,
+        ...(fix.accuracy !== undefined ? { accuracy: fix.accuracy } : {}),
+        ...(fix.heading !== undefined ? { heading: fix.heading } : {}),
+        ...(fix.speed !== undefined ? { speed: fix.speed } : {}),
+      },
     };
     this.dispatch({ type: 'location', fix });
     this.fixListeners.forEach((l) => l(fix));
@@ -517,7 +563,18 @@ export class GuideRuntime {
     const startIdx = skipMs ? resumeParagraphIndex(n.paragraphs, skipMs) : 0;
     const startMs = n.paragraphs[startIdx]?.startMs ?? 0;
     const id = `stop:${poiId}:${tier}:${++this.itemCounter}`;
-    this.items.set(id, { poiId, kind: 'stop', tier });
+    const narration: StopNarration = {
+      key: n.key,
+      title: n.title,
+      text: n.text,
+      tier,
+      images: n.images,
+      keyFacts: n.keyFacts,
+      aiGenerated: true,
+      ...(n.sponsored ? { sponsored: true } : {}),
+      ...(n.grounding ? { grounding: n.grounding } : {}),
+    };
+    this.items.set(id, { poiId, kind: 'stop', tier, narration, startMs });
     const item: AudioItem = {
       id,
       kind: 'stop',

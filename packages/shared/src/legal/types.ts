@@ -28,7 +28,7 @@ export interface LegalDocument {
   sections: LegalSection[];
 }
 
-export const LEGAL_VERSION = '2026-09-30';
+export const LEGAL_VERSION = '2026-10-05';
 
 /** Marker used where the operator has not supplied a value yet; release checks fail while any marker is present. */
 export const MISSING = '⟦operator data missing⟧';

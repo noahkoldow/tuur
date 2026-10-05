@@ -57,6 +57,7 @@ export function releaseProblems(env, { target = 'all', channel = 'production' } 
       }
     }
     https('EXPO_PUBLIC_WEB_BASE_URL');
+    if (env.EXPO_PUBLIC_LEGAL_BASE_URL !== undefined) https('EXPO_PUBLIC_LEGAL_BASE_URL');
     if (channel === 'beta') {
       need('EXPO_PUBLIC_BETA_FIREBASE_PROJECT_ID', 'isolated TestFlight backend');
       if (
@@ -165,12 +166,26 @@ export function nativeFirebaseProblems(env, target, read = readFileSync, exists 
     }
     try {
       const content = read(file, 'utf8');
+      const plistValue = (name) =>
+        new RegExp(`<key>${name}</key>\\s*<string>([^<]+)</string>`).exec(content)?.[1];
       const nativeProject =
-        platform === 'ios'
-          ? /<key>PROJECT_ID<\/key>\s*<string>([^<]+)<\/string>/.exec(content)?.[1]
-          : JSON.parse(content).project_info?.project_id;
+        platform === 'ios' ? plistValue('PROJECT_ID') : JSON.parse(content).project_info?.project_id;
       if (!env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || nativeProject !== env.EXPO_PUBLIC_FIREBASE_PROJECT_ID)
         problems.push(`${key} project does not match EXPO_PUBLIC_FIREBASE_PROJECT_ID`);
+      if (platform === 'ios') {
+        if (plistValue('BUNDLE_ID') !== 'com.tuurapp') problems.push(`${key} bundle ID must be com.tuurapp`);
+        if (!plistValue('GOOGLE_APP_ID'))
+          problems.push(`${key} is missing GOOGLE_APP_ID for phone verification`);
+        const clientId = plistValue('CLIENT_ID');
+        const reversedClientId = plistValue('REVERSED_CLIENT_ID');
+        if (!clientId || !reversedClientId)
+          problems.push(`${key} is missing Google Sign-In client IDs; refresh it after enabling Google Auth`);
+        else if (
+          reversedClientId !== clientId.split('.').reverse().join('.') ||
+          reversedClientId !== env.GOOGLE_IOS_URL_SCHEME
+        )
+          problems.push(`${key} Google Sign-In client IDs must match GOOGLE_IOS_URL_SCHEME`);
+      }
     } catch {
       problems.push(`${key} could not be validated`);
     }

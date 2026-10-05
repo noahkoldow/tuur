@@ -22,16 +22,35 @@ function snapshot(patch: Partial<GuideUi> = {}): GuideUi {
   };
 }
 
-const options = { mode: 'tour' as const, title: 'Berlin stories', lang: 'en' };
+const options = {
+  mode: 'tour' as const,
+  title: 'Berlin stories',
+  lang: 'en',
+  navigation: { status: 'ready' as const, distanceM: 243 },
+};
 
 describe('Live Activity presentation', () => {
+  it('uses the routed distance and shows no straight-line fallback while directions fail', () => {
+    expect(
+      buildLiveActivityContent(snapshot(), {
+        ...options,
+        navigation: { status: 'ready', distanceM: 610 },
+      }),
+    ).toMatchObject({ distance: '610 m · along route', compactText: '610 m' });
+    expect(
+      buildLiveActivityContent(snapshot(), {
+        ...options,
+        navigation: { status: 'error' },
+      }),
+    ).toMatchObject({ distance: '', status: 'Open tuur to retry directions' });
+  });
   it('shows the next stop, qualified distance and route progress without location data', () => {
     const result = buildLiveActivityContent(snapshot(), options)!;
     expect(result).toMatchObject({
       title: 'Square',
       subtitle: 'Berlin stories',
       status: 'Next stop',
-      distance: '240 m · straight-line',
+      distance: '240 m · along route',
       compactText: '240 m',
       progress: '1 of 3 stops done',
       progressValue: 1 / 3,
@@ -48,12 +67,12 @@ describe('Live Activity presentation', () => {
   it('localises regional German tags and kilometre decimals', () => {
     const result = buildLiveActivityContent(
       snapshot({ target: { id: 'b', name: 'Platz', distanceM: 1234 } }),
-      { ...options, lang: 'de-DE' },
+      { ...options, lang: 'de-DE', navigation: { status: 'ready', distanceM: 1234 } },
     );
     expect(result).toMatchObject({
       title: 'Platz',
       status: 'Nächste Station',
-      distance: '1,2 km · Luftlinie',
+      distance: '1,2 km · entlang der Route',
       compactText: '1,2 km',
       progress: '1 von 3 Stationen erledigt',
       staleStatus: 'tuur für ein Update öffnen',
@@ -79,19 +98,21 @@ describe('Live Activity presentation', () => {
   it.each([undefined, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     'treats an unusable distance (%s) as awaiting GPS',
     (distanceM) => {
-      const result = buildLiveActivityContent(
-        snapshot({ target: { id: 'b', name: 'Square', distanceM } }),
-        options,
-      );
+      const result = buildLiveActivityContent(snapshot({ target: { id: 'b', name: 'Square', distanceM } }), {
+        ...options,
+        navigation: { status: 'waiting_location', distanceM },
+      });
       expect(result).toMatchObject({ status: 'Waiting for GPS', distance: '', compactText: 'GPS' });
     },
   );
 
   it('shows arrival only with a fresh nearby fix', () => {
     const ui = snapshot({ target: { id: 'b', name: 'Square', distanceM: 0 } });
-    expect(buildLiveActivityContent(ui, options)).toMatchObject({
+    expect(
+      buildLiveActivityContent(ui, { ...options, navigation: { status: 'ready', distanceM: 0 } }),
+    ).toMatchObject({
       status: 'You have arrived',
-      distance: '0 m · straight-line',
+      distance: '0 m · along route',
       compactText: 'Here',
     });
     expect(buildLiveActivityContent(ui, { ...options, locationStale: true })?.status).toBe(
@@ -178,7 +199,7 @@ describe('Live Activity presentation', () => {
     );
     expect(result).toMatchObject({
       title: 'Square',
-      distance: '240 m · straight-line',
+      distance: '240 m · along route',
       status: 'Guide speaking',
     });
   });

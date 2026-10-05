@@ -31,6 +31,8 @@ import {
 } from './config';
 import { generateAutoTours as runGenerateTours, TourError } from './tours/service';
 import { composePlannedRoute as runComposeRoute } from './tours/planned';
+import { getWalkingRoute as runGetWalkingRoute, NavigationError } from './navigation/service';
+import { RoutingUnavailableError } from './providers/routing';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
@@ -287,7 +289,7 @@ export const generateAutoTours = onCall(
         p.data,
       );
     } catch (e) {
-      if (e instanceof TourError || e instanceof BudgetError)
+      if (e instanceof TourError || e instanceof BudgetError || e instanceof RoutingUnavailableError)
         throw new HttpsError(e.code, e.message, e.details);
       throw e;
     }
@@ -307,9 +309,31 @@ export const composePlannedRoute = onCall(
     try {
       return await runComposeRoute(plannedRouteDeps(), request.auth.uid, request.data);
     } catch (e) {
-      if (e instanceof TourError || e instanceof BudgetError)
+      if (e instanceof TourError || e instanceof BudgetError || e instanceof RoutingUnavailableError)
         throw new HttpsError(e.code, e.message, e.details);
       throw e;
+    }
+  },
+);
+
+export const getWalkingRoute = onCall(
+  { enforceAppCheck, serviceAccount: aiServiceAccount, secrets: [ORS_API_KEY], timeoutSeconds: 45 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runGetWalkingRoute(
+        { db: db(), routing: routing(), now: Date.now },
+        request.auth.uid,
+        request.data,
+      );
+    } catch (error) {
+      if (
+        error instanceof NavigationError ||
+        error instanceof BudgetError ||
+        error instanceof RoutingUnavailableError
+      )
+        throw new HttpsError(error.code, error.message, error.details);
+      throw error;
     }
   },
 );

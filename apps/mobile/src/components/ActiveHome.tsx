@@ -1,26 +1,25 @@
-import { useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
-import { PixelRatio, Platform, ScrollView, View, useWindowDimensions } from 'react-native';
+import { useReducer, useRef, useState, useSyncExternalStore } from 'react';
+import { PixelRatio, Platform, View, useWindowDimensions, type ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { navigationView, REGION_FIXTURES } from '@tuur/shared';
+import { REGION_FIXTURES } from '@tuur/shared';
 import type { ForkSnapshot } from '../guide/modes';
-import { nearbyRoamPlaces } from '../guide/nearbyPlaces';
-import { tourPath, type ActiveSession } from '../guide/session';
-import { usePoiPool } from '../hooks/usePoiPool';
+import type { ActiveSession } from '../guide/session';
+import { useNavigationRoute } from '../guide/use-navigation-route';
+import { useRoamSuggestions } from '../hooks/use-roam-suggestions';
 import { useStopPois } from '../hooks/useStopPois';
 import { useHistory } from '../state/history';
 import { useSettings } from '../state/settings';
 import { metrics, sys } from '../theme';
-import { Banner } from './Banner';
 import { WordmarkPill } from './Brand';
 import { Button, IconButton } from './Button';
 import { MapActionControls } from './MapActionControls';
 import { PauseFinder } from './PauseFinder';
 import { Mascot } from './Mascot';
 import { OptionCard } from './OptionCard';
-import { PlaceCardSkeleton } from './PlaceCard';
-import { PlacesCarousel } from './PlacesCarousel';
+import { RoamSuggestions } from './roam-suggestions';
+import { StopInfoSheet } from './stop-info-sheet';
 import { ProgressBar } from './ProgressBar';
 import { RunningTour } from './RunningTour';
 import { Sheet } from './Sheet';
@@ -29,6 +28,7 @@ import { CategoryBadge } from './category-badge';
 import { Text } from './Text';
 import { TravelModeChip } from './TravelModeChip';
 import { TuurMap } from './TuurMap';
+import { NavigationRouteNotice } from './navigation-route-notice';
 
 const NO_FORK: ForkSnapshot = { options: [], loading: false };
 const noopSubscribe = () => () => undefined;
@@ -41,9 +41,9 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { runtime, fork } = session;
-  const interests = useSettings((s) => s.interests);
   const lang = useSettings((s) => s.language);
   const walked = useHistory((s) => s.records.find((record) => record.id === session.recordId)?.track);
+  const savedStops = useHistory((s) => s.records.find((record) => record.id === session.recordId)?.stops);
   const ui = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   const forkState = useSyncExternalStore(
     fork?.subscribe ?? noopSubscribe,
@@ -52,67 +52,24 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
   );
   const roaming = session.mode === 'roam';
   const finished = ui.phase === 'finished';
-  const { pois, count, ready, error, reload } = usePoiPool(
-    roaming && !finished ? (ui.user ?? null) : null,
-    2,
-  );
-  const state = runtime.getState();
-  const places = useMemo(
-    () =>
-      roaming && ui.user && !finished && count > 0
-        ? nearbyRoamPlaces(
-            ui.user,
-            pois,
-            [
-              ...state.visited,
-              ...state.skipped,
-              ...state.narrated,
-              // Current and explicitly queued destinations already belong to the walk.
-              ...state.route.slice(state.index).map((stop) => stop.id),
-            ],
-            8,
-            { interests, excludedPlaces: state.route },
-          )
-        : [],
-    [
-      roaming,
-      ui.user,
-      finished,
-      count,
-      pois,
-      state.visited,
-      state.skipped,
-      state.narrated,
-      state.route,
-      state.index,
-      interests,
-    ],
-  );
-  const canChoose = session.roam?.canChoose() ?? false;
+  const suggestions = useRoamSuggestions(session, ui);
   const choosingFork = !finished && (forkState.options.length > 0 || ui.awaitingRoute) && !!fork;
   const storyStops = ui.stops.filter((stop) => !stop.navigationOnly);
   const stopPois = useStopPois(storyStops);
   const [selectedStopId, setSelectedStopId] = useState<string>();
+  const [readingStopId, setReadingStopId] = useState<string>();
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string>();
+  const [suggestionSelectionKey, selectSuggestion] = useReducer((key: number) => key + 1, 0);
   const selectedStop = storyStops.find((stop) => stop.id === selectedStopId);
+  const readingStop =
+    savedStops?.find((stop) => stop.id === readingStopId) ??
+    storyStops.find((stop) => stop.id === readingStopId);
+  const savedNarration = readingStop ? runtime.getStopNarration(readingStop.id) : undefined;
   const sheetScroll = useRef<ScrollView>(null);
   const completed = storyStops.filter((stop) => stop.state === 'visited' || stop.state === 'skipped').length;
   const visited = storyStops.filter((stop) => stop.state === 'visited').length;
   const remaining = ui.stops.filter((stop) => stop.state === 'current' || stop.state === 'upcoming');
-  const path = useMemo(
-    () => (session.tour ? tourPath(session.tour) : ui.stops.map((stop) => stop.location)),
-    [session.tour, ui.stops],
-  );
-  const targetIndex = ui.awaitingRoute ? -1 : ui.stops.findIndex((stop) => stop.id === ui.target?.id);
-  const nav = useMemo(
-    () =>
-      navigationView(
-        path,
-        ui.stops.map((stop) => stop.location),
-        targetIndex < 0 ? undefined : targetIndex,
-        ui.user,
-      ),
-    [path, ui.stops, targetIndex, ui.user],
-  );
+  const nav = useNavigationRoute(session);
   const [sheetIndex, setSheetIndex] = useState(1);
   const [recenterKey, recenterMap] = useReducer((key: number) => key + 1, 0);
   const [pauseFinderOpen, setPauseFinderOpen] = useState(false);
@@ -161,8 +118,21 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
         locateButton={false}
         recenterKey={recenterKey}
         onMapPress={() => setSheetIndex(0)}
+        spots={suggestions.spots}
+        onSpotPress={(id) => {
+          setSelectedStopId(undefined);
+          setSelectedSuggestionId(id);
+          selectSuggestion();
+          setSheetIndex(1);
+          sheetScroll.current?.scrollTo({ y: 0, animated: false });
+        }}
         onStopPress={(id) => {
-          if (!storyStops.some((stop) => stop.id === id)) return;
+          const stop = storyStops.find((stop) => stop.id === id);
+          if (!stop) return;
+          if (stop.state === 'visited' || savedStops?.some((saved) => saved.id === id)) {
+            setReadingStopId(id);
+            return;
+          }
           setSelectedStopId(id);
           setSheetIndex(1);
           sheetScroll.current?.scrollTo({ y: 0, animated: false });
@@ -210,6 +180,7 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
               </Text>
               <Text variant="subheadline">{status}</Text>
             </View>
+            <NavigationRouteNotice navigation={nav} onRetry={session.navigation?.retry} />
           </View>
         }
       >
@@ -232,7 +203,7 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
                   poi={stopPois.get(selectedStop.id)}
                   name={selectedStop.name}
                   lang={lang}
-                  distanceM={selectedStop.id === ui.target?.id ? ui.target.distanceM : undefined}
+                  distanceM={selectedStop.id === ui.target?.id ? nav.distanceM : undefined}
                   images={
                     ui.narration?.kind === 'stop' && ui.narration.poiId === selectedStop.id
                       ? ui.narration.images
@@ -244,44 +215,16 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
           ) : null}
           {roaming && !finished ? (
             <View style={{ gap: 12 }}>
-              {!ui.user ? <Text variant="subheadline">{t('home.waitingForLocation')}</Text> : null}
-              {error ? (
-                <View style={{ gap: 8 }}>
-                  <Banner tone="error" text={t('errors.network')} />
-                  <Button variant="tinted" label={t('common.retry')} onPress={reload} />
-                </View>
-              ) : null}
-              {places.length > 0 ? (
-                <>
-                  {!canChoose ? <Text variant="footnote">{t('home.roamAfterStory')}</Text> : null}
-                  <View style={{ marginHorizontal: -metrics.margin }}>
-                    <PlacesCarousel
-                      places={places}
-                      position={ui.user}
-                      navigate
-                      disabled={!canChoose}
-                      onPlacePress={(poi) => {
-                        if (session.roam?.choose(poi)) router.push('/play');
-                      }}
-                    />
-                  </View>
-                </>
-              ) : ui.user && ready && !error ? (
-                <Text variant="subheadline">{t('home.roamNoPlaces')}</Text>
-              ) : ui.user && !error ? (
-                <ScrollView
-                  horizontal
-                  scrollEnabled={false}
-                  showsHorizontalScrollIndicator={false}
-                  accessibilityLabel={t('home.loadingPlaces')}
-                  style={{ marginHorizontal: -metrics.margin }}
-                  contentContainerStyle={{ gap: 12, paddingHorizontal: metrics.margin }}
-                >
-                  {[0, 1, 2].map((i) => (
-                    <PlaceCardSkeleton key={i} />
-                  ))}
-                </ScrollView>
-              ) : null}
+              <RoamSuggestions
+                showTitle={false}
+                suggestions={suggestions}
+                position={ui.user}
+                selectedId={selectedSuggestionId}
+                selectionKey={suggestionSelectionKey}
+                onChoose={(poi) => {
+                  if (session.roam?.choose(poi)) router.push('/play');
+                }}
+              />
               <Text variant="footnote">{t('home.visitedStops', { count: visited })}</Text>
             </View>
           ) : choosingFork ? (
@@ -330,6 +273,15 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
           />
         </View>
       </Sheet>
+      <StopInfoSheet
+        stop={
+          readingStop
+            ? { ...readingStop, ...(savedNarration ? { narration: savedNarration } : {}) }
+            : undefined
+        }
+        poi={readingStop ? stopPois.get(readingStop.id) : undefined}
+        onDismiss={() => setReadingStopId(undefined)}
+      />
       <PauseFinder
         open={pauseFinderOpen}
         onClose={() => setPauseFinderOpen(false)}

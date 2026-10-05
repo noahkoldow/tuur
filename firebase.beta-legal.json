@@ -1,0 +1,31 @@
+{
+  "hosting": {
+    "site": "tuur-beta-noehxpo",
+    "public": "deploy/beta-legal",
+    "ignore": [".*", "**/node_modules/**"],
+    "predeploy": ["node scripts/build-beta-legal.mjs"],
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "redirects": [
+      { "source": "/de", "destination": "/support", "type": 302 },
+      { "source": "/de/:page", "destination": "/:page", "type": 302 },
+      { "source": "/legal/:page", "destination": "/:page", "type": 302 },
+      { "source": "/en/legal/:page", "destination": "/en/:page", "type": 302 }
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=300" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          { "key": "X-Robots-Tag", "value": "noindex, follow" },
+          {
+            "key": "Content-Security-Policy",
+            "value": "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+          }
+        ]
+      }
+    ]
+  }
+}

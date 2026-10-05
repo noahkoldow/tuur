@@ -1,13 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
-import { Image, Platform, ScrollView, Share, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Linking, Platform, ScrollView, Share, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Polyline } from 'react-native-svg';
 import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
-import { CITY_BADGES, decodePolyline, earnedBadges, summarizeWalk, type LatLng } from '@tuur/shared';
-import { palette } from '@tuur/ui';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
+import { CITY_BADGES, decodePolyline, earnedBadges, summarizeWalk } from '@tuur/shared';
 import { Button, IconButton, Row } from '../../src/components/Button';
 import { FloatingAction } from '../../src/components/FloatingAction';
 import { Icon } from '../../src/components/Icon';
@@ -16,12 +14,14 @@ import { Mascot } from '../../src/components/Mascot';
 import { TuuSays } from '../../src/components/TuuSays';
 import { Text } from '../../src/components/Text';
 import { TuurMap } from '../../src/components/TuurMap';
+import { StopInfoSheet } from '../../src/components/stop-info-sheet';
 import { formatKm } from '../../src/format';
 import { goHome } from '../../src/navigation';
-import { useHistory, type TourRecord } from '../../src/state/history';
+import { useHistory } from '../../src/state/history';
 import { useSettings } from '../../src/state/settings';
 import { metrics, sys } from '../../src/theme';
-import wordmark from '../../assets/wordmark-red.png';
+import { ActivityShareCard } from '../../src/sharing/ActivityShareCard';
+import { useActivityPhotos } from '../../src/sharing/use-activity-photos';
 
 const formatDuration = (ms: number, lang: string) => {
   const min = Math.max(1, Math.round(ms / 60000));
@@ -32,11 +32,15 @@ const formatDuration = (ms: number, lang: string) => {
 
 /**
  * Tour summary (owner request 2026-10-01, Strava-like): map of the walked line, the numbers, the stops and a new
- * badge if one was earned. "Share" renders a picture card of the walk (line drawing, no map tiles, no exact
- * address), so nothing leaves the device unless the listener shares it.
+ * badge if one was earned. "Share" renders the visible route/stats card, optionally with activity photos
+ * after explicit opt-in. Photo selections are local to this screen; only the exported card is shared.
  */
 export default function Summary() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  return <SummaryContent key={id} id={id} />;
+}
+
+function SummaryContent({ id }: { id: string }) {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -45,6 +49,18 @@ export default function Summary() {
   const record = records.find((r) => r.id === id);
   const card = useRef<View>(null);
   const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState<'shareError' | 'photoSettingsError'>();
+  const shareInFlight = useRef(false);
+  const shareGeneration = useRef(0);
+  const { state: photos, selection, canShare } = useActivityPhotos(record);
+  useEffect(
+    () => () => {
+      shareGeneration.current++;
+    },
+    [record?.id],
+  );
+  const [selectedStopId, setSelectedStopId] = useState<string>();
+  const selectedStop = record?.stops.find((stop) => stop.id === selectedStopId);
 
   const stats = useMemo(
     () =>
@@ -120,7 +136,15 @@ export default function Summary() {
   ];
 
   const share = async () => {
+    if (shareInFlight.current || !canShare) return;
+    shareInFlight.current = true;
+    const generation = shareGeneration.current;
+    const current = () =>
+      generation === shareGeneration.current && useHistory.getState().records.some((r) => r.id === record.id);
     setSharing(true);
+    setShareError(undefined);
+    let capture: string | undefined;
+    let shared = false;
     try {
       const message = t('summary.shareText', {
         title,
@@ -128,222 +152,250 @@ export default function Summary() {
         stops: stats.stops,
       });
       if (Platform.OS !== 'web' && card.current && (await Sharing.isAvailableAsync())) {
-        const uri = await captureRef(card, { format: 'png', quality: 1, width: 1080 });
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: message, UTI: 'public.png' });
+        if (!(await selection.revalidate()) || !current() || !selection.canShare()) return;
+        const capturedPhotos = selection.getSnapshot().photos;
+        // Let the latest image/layout changes commit before taking the visible preview's snapshot.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        if (!current() || !selection.canShare() || selection.getSnapshot().photos !== capturedPhotos) return;
+        capture = await captureRef(card, { format: 'png', quality: 1, width: 1080 });
+        if (!current() || !selection.canShare() || selection.getSnapshot().photos !== capturedPhotos) return;
+        await Sharing.shareAsync(capture, { mimeType: 'image/png', dialogTitle: message, UTI: 'public.png' });
+        shared = true;
       } else {
+        if (!current()) return;
+        if (photos.photos.length) throw new Error('Image sharing unavailable');
         await Share.share({ message });
       }
     } catch {
-      // the share sheet was dismissed or capturing failed; nothing to recover
+      if (current()) setShareError('shareError');
     } finally {
-      setSharing(false);
+      // Android recipients may still read the temporary file after the chooser closes.
+      if (capture && (!shared || Platform.OS !== 'android')) releaseCapture(capture);
+      shareInFlight.current = false;
+      if (current()) setSharing(false);
     }
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: sys.grouped }}>
-      <View style={{ height: 300 }}>
-        <TuurMap
-          center={line[0] ?? record.center}
-          route={line}
-          fit={[...line, ...record.stops.map((s) => s.location)]}
-          bottomInset={0}
-          locateButton={false}
-          stops={record.stops.map((s, i) => ({
-            id: s.id,
-            location: s.location,
-            number: i + 1,
-            state: 'visited',
-          }))}
-        />
-        <View style={{ position: 'absolute', top: insets.top + 8, left: metrics.margin }}>
-          <IconButton icon="x" label={t('common.close')} onPress={() => goHome(router)} onMap />
-        </View>
-      </View>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title,
+          headerBackVisible: false,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: sys.grouped },
+          headerLeft: () => <IconButton icon="x" label={t('common.close')} onPress={() => goHome(router)} />,
+        }}
+      />
       <ScrollView
-        style={{
-          marginTop: -28,
-          borderTopLeftRadius: 28,
-          borderTopRightRadius: 28,
-          borderCurve: 'continuous',
-          backgroundColor: sys.grouped,
-        }}
-        contentContainerStyle={{
-          padding: metrics.margin,
-          paddingTop: 24,
-          gap: 20,
-          paddingBottom: insets.bottom + 140,
-        }}
+        testID="activity-summary-scroll"
+        style={{ flex: 1 }}
+        contentInsetAdjustmentBehavior="automatic"
+        removeClippedSubviews={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
-        <View style={{ gap: 2 }}>
-          <Text variant="footnote">{date}</Text>
-          <Text variant="title1" accessibilityRole="header">
-            {title}
-          </Text>
+        {/* A single scroll surface lets the map leave the viewport along with the summary header. */}
+        <View testID="activity-summary-map" style={{ height: 300 }}>
+          <TuurMap
+            center={line[0] ?? record.center}
+            route={line}
+            fit={[...line, ...record.stops.map((s) => s.location)]}
+            bottomInset={0}
+            locateButton={false}
+            scrollEnabled={false}
+            onStopPress={setSelectedStopId}
+            stops={record.stops.map((s, i) => ({
+              id: s.id,
+              location: s.location,
+              number: i + 1,
+              state: 'visited',
+            }))}
+          />
         </View>
-        {/* the badge card below already has Tuu celebrating; otherwise Tuu cheers here */}
-        {newBadge ? null : <TuuSays pose="celebrate" size={64} text={t('tuu.summary')} />}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          {facts.map((f) => (
-            <View
-              key={f.label}
-              accessible
-              accessibilityLabel={`${f.label}: ${f.value}`}
+        <View
+          style={{
+            marginTop: -28,
+            borderTopLeftRadius: 28,
+            borderTopRightRadius: 28,
+            borderCurve: 'continuous',
+            backgroundColor: sys.grouped,
+            padding: metrics.margin,
+            paddingTop: 24,
+            gap: 20,
+          }}
+        >
+          <View style={{ gap: 2 }}>
+            <Text variant="footnote">{date}</Text>
+            <Text variant="title1" accessibilityRole="header">
+              {title}
+            </Text>
+          </View>
+          {/* the badge card below already has Tuu celebrating; otherwise Tuu cheers here */}
+          {newBadge ? null : <TuuSays pose="celebrate" size={64} text={t('tuu.summary')} />}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {facts.map((f) => (
+              <View
+                key={f.label}
+                accessible
+                accessibilityLabel={`${f.label}: ${f.value}`}
+                style={{
+                  flexBasis: '47%',
+                  flexGrow: 1,
+                  padding: 14,
+                  gap: 4,
+                  borderRadius: metrics.radius.card,
+                  borderCurve: 'continuous',
+                  backgroundColor: sys.elevated,
+                }}
+              >
+                <Icon name={f.icon} size={20} color={sys.labelSecondary} />
+                <Text variant="title2">{f.value}</Text>
+                <Text variant="footnote">{f.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {newBadge ? (
+            <Row
+              gap={12}
               style={{
-                flexBasis: '47%',
-                flexGrow: 1,
                 padding: 14,
-                gap: 4,
                 borderRadius: metrics.radius.card,
                 borderCurve: 'continuous',
                 backgroundColor: sys.elevated,
               }}
             >
-              <Icon name={f.icon} size={20} color={sys.labelSecondary} />
-              <Text variant="title2">{f.value}</Text>
-              <Text variant="footnote">{f.label}</Text>
+              <Mascot pose="celebrate" size={72} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text variant="subheadline" style={{ color: sys.accentText, fontWeight: '600' }}>
+                  {t('summary.newBadge')}
+                </Text>
+                <Text variant="headline">
+                  {lang === 'de' ? newBadge.city.names.de : newBadge.city.names.en}
+                </Text>
+                <Text variant="footnote">
+                  {t(`profile.tier${newBadge.tier[0]!.toUpperCase()}${newBadge.tier.slice(1)}`)}
+                </Text>
+              </View>
+            </Row>
+          ) : null}
+
+          {record.stops.length ? (
+            <ListGroup title={t('summary.stopsTitle')}>
+              {record.stops.map((s, i) => (
+                <ListRow key={s.id} label={`${i + 1}. ${s.name}`} onPress={() => setSelectedStopId(s.id)} />
+              ))}
+            </ListGroup>
+          ) : null}
+
+          {/* the picture that is shared (also visible, so people see what they share) */}
+          <Text variant="footnote" style={{ textTransform: 'uppercase', paddingHorizontal: metrics.margin }}>
+            {t('summary.cardTitle')}
+          </Text>
+          {Platform.OS !== 'web' && record.endedAt != null ? (
+            <View style={{ gap: 10 }}>
+              <Text variant="footnote">{t('summary.photosHint')}</Text>
+              <Button
+                label={t(photos.photos.length ? 'summary.refreshPhotos' : 'summary.addPhotos')}
+                icon="image"
+                variant="secondary"
+                loading={photos.status === 'loading'}
+                disabled={sharing || photos.checking}
+                onPress={() => void selection.load()}
+              />
+              {photos.status === 'loading' || photos.photos.length ? (
+                <Button
+                  label={t('summary.withoutPhotos')}
+                  variant="ghost"
+                  disabled={sharing}
+                  onPress={selection.clear}
+                />
+              ) : null}
+              {photos.status === 'empty' ||
+              photos.status === 'denied' ||
+              photos.status === 'error' ||
+              photos.status === 'unavailable' ? (
+                <Text variant="footnote" selectable accessibilityLiveRegion="polite">
+                  {t(`summary.photos_${photos.status}`)}
+                </Text>
+              ) : null}
+              {photos.limited ? <Text variant="footnote">{t('summary.photosLimited')}</Text> : null}
+              {(photos.status === 'denied' && !photos.canAskAgain) || photos.limited ? (
+                <Button
+                  label={t('summary.photoSettings')}
+                  variant="ghost"
+                  disabled={sharing}
+                  onPress={() => void Linking.openSettings().catch(() => setShareError('photoSettingsError'))}
+                />
+              ) : null}
+              {photos.failed ? (
+                <Text variant="footnote" selectable accessibilityLiveRegion="polite">
+                  {t('summary.photosFailed')}
+                </Text>
+              ) : null}
             </View>
-          ))}
-        </View>
-
-        {newBadge ? (
-          <Row
-            gap={12}
-            style={{
-              padding: 14,
-              borderRadius: metrics.radius.card,
-              borderCurve: 'continuous',
-              backgroundColor: sys.elevated,
-            }}
-          >
-            <Mascot pose="celebrate" size={72} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text variant="subheadline" style={{ color: sys.accentText, fontWeight: '600' }}>
-                {t('summary.newBadge')}
-              </Text>
-              <Text variant="headline">
-                {lang === 'de' ? newBadge.city.names.de : newBadge.city.names.en}
-              </Text>
-              <Text variant="footnote">
-                {t(`profile.tier${newBadge.tier[0]!.toUpperCase()}${newBadge.tier.slice(1)}`)}
-              </Text>
+          ) : null}
+          <View collapsable={false} ref={card}>
+            <ActivityShareCard
+              record={record}
+              line={line}
+              title={title}
+              date={date}
+              facts={facts}
+              photos={photos.photos}
+              onPhotoLoad={(photoId) => {
+                const photo = photos.photos.find((item) => item.id === photoId);
+                if (photo && selection.getSnapshot().photos.includes(photo)) selection.displayed(photoId);
+              }}
+              onPhotoError={(photoId) => {
+                const photo = photos.photos.find((item) => item.id === photoId);
+                if (photo && selection.getSnapshot().photos.includes(photo)) selection.remove(photoId, true);
+              }}
+            />
+          </View>
+          {photos.photos.length ? (
+            <View style={{ gap: 6 }}>
+              <Text variant="footnote">{t('summary.photosReview')}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {photos.photos.map((photo, index) => (
+                  <Button
+                    key={photo.id}
+                    label={t('summary.removePhoto', { number: index + 1 })}
+                    icon="x"
+                    variant="secondary"
+                    size="regular"
+                    disabled={sharing}
+                    onPress={() => selection.remove(photo.id)}
+                  />
+                ))}
+              </View>
+              {!canShare ? (
+                <Text variant="footnote" accessibilityLiveRegion="polite">
+                  {t('summary.photosPreparing')}
+                </Text>
+              ) : null}
             </View>
-          </Row>
-        ) : null}
-
-        {record.stops.length ? (
-          <ListGroup title={t('summary.stopsTitle')}>
-            {record.stops.map((s, i) => (
-              <ListRow key={s.id} label={`${i + 1}. ${s.name}`} />
-            ))}
-          </ListGroup>
-        ) : null}
-
-        {/* the picture that is shared (also visible, so people see what they share) */}
-        <Text variant="footnote" style={{ textTransform: 'uppercase', paddingHorizontal: metrics.margin }}>
-          {t('summary.cardTitle')}
-        </Text>
-        <View collapsable={false} ref={card}>
-          <ShareCard record={record} line={line} title={title} date={date} facts={facts} />
+          ) : null}
+          {shareError ? (
+            <Text variant="footnote" selectable accessibilityLiveRegion="polite">
+              {t(`summary.${shareError}`)}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
       <FloatingAction>
-        <Button label={t('summary.share')} icon="share" loading={sharing} onPress={() => void share()} />
-      </FloatingAction>
-    </View>
-  );
-}
-
-function ShareCard({
-  record,
-  line,
-  title,
-  date,
-  facts,
-}: {
-  record: TourRecord;
-  line: LatLng[];
-  title: string;
-  date: string;
-  facts: { label: string; value: string }[];
-}) {
-  const pts = [...line, ...record.stops.map((s) => s.location)];
-  const lats = pts.map((p) => p.lat);
-  const lngs = pts.map((p) => p.lng);
-  const [s, n, w, e] = [Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs)];
-  // keep the aspect ratio of the walk (longitude shrinks with latitude)
-  const kx = Math.cos(((s + n) / 2) * (Math.PI / 180));
-  const spanX = Math.max((e - w) * kx, 1e-6);
-  const spanY = Math.max(n - s, 1e-6);
-  const scale = 88 / Math.max(spanX, spanY);
-  const ox = (100 - spanX * scale) / 2;
-  const oy = (100 - spanY * scale) / 2;
-  const project = (p: LatLng) => `${ox + (p.lng - w) * kx * scale},${oy + (n - p.lat) * scale}`;
-  return (
-    <View
-      style={{
-        aspectRatio: 4 / 5,
-        borderRadius: metrics.radius.card,
-        borderCurve: 'continuous',
-        padding: 20,
-        backgroundColor: palette.light.background,
-        gap: 12,
-      }}
-    >
-      <Row style={{ justifyContent: 'space-between' }}>
-        <Image
-          source={wordmark}
-          style={{ width: 70, height: 26 }}
-          resizeMode="contain"
-          accessibilityLabel="tuur"
+        <Button
+          label={t('summary.share')}
+          icon="share"
+          loading={sharing}
+          disabled={!canShare}
+          onPress={() => void share()}
         />
-        <Text variant="footnote" color={palette.light.labelSecondary}>
-          {date}
-        </Text>
-      </Row>
-      <View style={{ flex: 1 }}>
-        {pts.length > 1 ? (
-          <Svg width="100%" height="100%" viewBox="0 0 100 100">
-            <Polyline
-              points={line.map(project).join(' ')}
-              fill="none"
-              stroke={palette.light.accent}
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            {record.stops.map((st) => {
-              const [x, y] = project(st.location).split(',').map(Number);
-              return (
-                <Circle
-                  key={st.id}
-                  cx={x}
-                  cy={y}
-                  r={2.2}
-                  fill="#FFFFFF"
-                  stroke={palette.light.accent}
-                  strokeWidth={1.4}
-                />
-              );
-            })}
-          </Svg>
-        ) : null}
-      </View>
-      <Text variant="title1" numberOfLines={2} color={palette.light.label}>
-        {title}
-      </Text>
-      <Row style={{ justifyContent: 'space-between' }}>
-        {facts.map((f) => (
-          <View key={f.label} style={{ gap: 2 }}>
-            <Text variant="headline" color={palette.light.label}>
-              {f.value}
-            </Text>
-            <Text variant="caption" color={palette.light.labelSecondary}>
-              {f.label}
-            </Text>
-          </View>
-        ))}
-      </Row>
+      </FloatingAction>
+      <StopInfoSheet stop={selectedStop} onDismiss={() => setSelectedStopId(undefined)} />
     </View>
   );
 }

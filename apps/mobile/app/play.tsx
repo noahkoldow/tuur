@@ -6,8 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
-import { bearingDegrees, navigationView, type PublicOffer } from '@tuur/shared';
+import type { PublicOffer } from '@tuur/shared';
 import { Banner } from '../src/components/Banner';
+import { NavigationRouteNotice } from '../src/components/navigation-route-notice';
+import { useNavigationRoute } from '../src/guide/use-navigation-route';
 import { GroupBar } from '../src/components/GroupBar';
 import { Icon } from '../src/components/Icon';
 import { Button, IconButton, Row } from '../src/components/Button';
@@ -17,6 +19,8 @@ import { Mascot } from '../src/components/Mascot';
 import { OptionCard } from '../src/components/OptionCard';
 import { OptionCards } from '../src/components/OptionCards';
 import { ProgressBar } from '../src/components/ProgressBar';
+import { RoamSuggestions } from '../src/components/roam-suggestions';
+import { StopInfoSheet } from '../src/components/stop-info-sheet';
 import { Sheet } from '../src/components/Sheet';
 import { StopCards, interestOf } from '../src/components/StopCards';
 import { CategoryBadge } from '../src/components/category-badge';
@@ -35,6 +39,7 @@ import {
 } from '../src/guide/session';
 import { canUseSession, useEntitlementStore } from '../src/billing/entitlements';
 import { useStopPois } from '../src/hooks/useStopPois';
+import { useRoamSuggestions } from '../src/hooks/use-roam-suggestions';
 import { endTourAndShowSummary, goHome, isEndingTour } from '../src/navigation';
 import { haptics } from '../src/motion';
 import { formatKm } from '../src/format';
@@ -68,6 +73,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const { height: screenH } = useWindowDimensions();
   const entitlements = useEntitlementStore();
   const walked = useHistory((s) => s.records.find((r) => r.id === session.recordId)?.track);
+  const savedStops = useHistory((s) => s.records.find((r) => r.id === session.recordId)?.stops);
   const settingsLanguage = useSettings((s) => s.language);
   const lang = session.recovery?.lang ?? settingsLanguage;
   const highlightWords = useSettings((s) => s.highlightWords);
@@ -77,6 +83,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const userScrolledAt = useRef(0);
   const [sheet, setSheet] = useState(1);
   const [selectedStopId, setSelectedStopId] = useState<string>();
+  const [readingStopId, setReadingStopId] = useState<string>();
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string>();
+  const [suggestionSelectionKey, selectSuggestion] = useReducer((key: number) => key + 1, 0);
+  const suggestions = useRoamSuggestions(session, ui);
   const [recenterKey, recenterMap] = useReducer((key: number) => key + 1, 0);
   const [pauseFinderOpen, setPauseFinderOpen] = useState(false);
   // snap heights follow the text size so the header and controls are never cut off
@@ -111,21 +121,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
       cancelled = true;
     };
   }, [backend, sponsored, partnerPoiId, ui.narration?.key]);
-  const path = useMemo(() => (tour ? tourPath(tour) : ui.stops.map((s) => s.location)), [tour, ui.stops]);
+  const path = useMemo(() => (tour ? tourPath(tour) : []), [tour]);
   const storyStops = useMemo(() => ui.stops.filter((stop) => !stop.navigationOnly), [ui.stops]);
   const pois = useStopPois(storyStops);
-  const targetIndex = ui.target ? ui.stops.findIndex((s) => s.id === ui.target?.id) : -1;
-  // Navigation: walked part muted, the way from the user to the next stop prominent, the rest lighter.
-  const nav = useMemo(
-    () =>
-      navigationView(
-        path,
-        ui.stops.map((s) => s.location),
-        targetIndex >= 0 ? targetIndex : undefined,
-        ui.user,
-      ),
-    [path, ui.stops, targetIndex, ui.user],
-  );
+  const nav = useNavigationRoute(session);
   const text = tour ? (tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0]) : undefined;
   const n = ui.narration;
   const lastP = n?.paragraphs[n.paragraphs.length - 1];
@@ -203,12 +202,9 @@ function PlayInner({ session }: { session: ActiveSession }) {
               ? t('errors.network')
               : undefined;
 
-  const targetStop = ui.target ? ui.stops.find((s) => s.id === ui.target?.id) : undefined;
   // Without a GPS heading (standing, slow walking) a relative arrow would point anywhere: hide it then.
   const arrowDeg =
-    ui.user && targetStop && ui.user.heading !== undefined
-      ? bearingDegrees(ui.user, targetStop.location) - ui.user.heading
-      : undefined;
+    nav.bearing !== undefined && ui.user?.heading !== undefined ? nav.bearing - ui.user.heading : undefined;
   const arrow = useRef(new Animated.Value(0)).current;
   const arrowAt = useRef(0);
   useEffect(() => {
@@ -244,12 +240,12 @@ function PlayInner({ session }: { session: ActiveSession }) {
       <TuuSays pose="listen" size={64} tipId="play.listen" text={t('tuu.playListen')} />
     ) : null;
   const distanceLabel =
-    ui.target?.distanceM === undefined
+    nav.distanceM === undefined
       ? ''
-      : ui.target.distanceM >= 1000
-        ? `${formatKm(ui.target.distanceM, lang)} km`
-        : `${ui.target.distanceM >= 100 ? Math.round(ui.target.distanceM / 10) * 10 : ui.target.distanceM} m`;
-  const distanceDescription = t('player.straightLineDistance', { distance: distanceLabel });
+      : nav.distanceM >= 1000
+        ? `${formatKm(nav.distanceM, lang)} km`
+        : `${nav.distanceM >= 100 ? Math.round(nav.distanceM / 10) * 10 : nav.distanceM} m`;
+  const distanceDescription = t('player.routeDistance', { distance: distanceLabel });
   const headerPoiId = n?.kind === 'stop' ? n.poiId : ui.target?.id;
   const headerInterest = headerPoiId ? interestOf(pois.get(headerPoiId)) : undefined;
 
@@ -278,7 +274,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
         />
       </Row>
       {headerInterest && ui.phase !== 'finished' ? <CategoryBadge interest={headerInterest} /> : null}
-      {ui.target?.distanceM !== undefined && ui.phase !== 'finished' && !(n && ui.phase === 'narrating') ? (
+      {ui.target &&
+      (nav.distanceM !== undefined || arrived) &&
+      ui.phase !== 'finished' &&
+      !(n && ui.phase === 'narrating') ? (
         <View
           accessible
           accessibilityLabel={
@@ -332,6 +331,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
           )}
         </View>
       ) : null}
+      <NavigationRouteNotice navigation={nav} onRetry={session.navigation?.retry} />
       <ProgressBar value={progress} />
     </View>
   );
@@ -342,6 +342,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const cardId = inspectedStop?.id ?? (n?.kind === 'stop' ? n.poiId : ui.target?.id);
   const cardStop = cardId ? storyStops.find((s) => s.id === cardId) : undefined;
   const cardPoi = cardId ? pois.get(cardId) : undefined;
+  const readingStop =
+    savedStops?.find((stop) => stop.id === readingStopId) ??
+    storyStops.find((stop) => stop.id === readingStopId);
+  const savedNarration = readingStop ? runtime.getStopNarration(readingStop.id) : undefined;
 
   return (
     <View style={{ flex: 1, backgroundColor: sys.grouped }}>
@@ -358,8 +362,22 @@ function PlayInner({ session }: { session: ActiveSession }) {
         locateButton={false}
         recenterKey={recenterKey}
         onMapPress={() => setSheet(0)}
+        spots={suggestions.spots}
+        onSpotPress={(id) => {
+          setSelectedStopId(undefined);
+          setSelectedSuggestionId(id);
+          setShowText(false);
+          selectSuggestion();
+          setSheet(1);
+          sheetScroll.current?.scrollTo({ y: 0, animated: false });
+        }}
         onStopPress={(id) => {
-          if (!storyStops.some((stop) => stop.id === id)) return;
+          const stop = storyStops.find((stop) => stop.id === id);
+          if (!stop) return;
+          if (stop.state === 'visited' || savedStops?.some((saved) => saved.id === id)) {
+            setReadingStopId(id);
+            return;
+          }
           setSelectedStopId(id);
           setSheet(1);
           sheetScroll.current?.scrollTo({ y: 0, animated: false });
@@ -430,6 +448,21 @@ function PlayInner({ session }: { session: ActiveSession }) {
         onUserScroll={() => (userScrolledAt.current = Date.now())}
       >
         <View style={{ gap: 14 }}>
+          {session.mode === 'roam' && ui.phase !== 'finished' && !inspectedStop ? (
+            <RoamSuggestions
+              suggestions={suggestions}
+              position={ui.user}
+              selectedId={selectedSuggestionId}
+              selectionKey={suggestionSelectionKey}
+              onChoose={(poi) => {
+                if (session.roam?.choose(poi)) {
+                  setSelectedSuggestionId(undefined);
+                  setSelectedStopId(undefined);
+                  haptics.select();
+                }
+              }}
+            />
+          ) : null}
           {inspectedStop ? (
             <View style={{ alignItems: 'flex-end' }}>
               <IconButton
@@ -444,7 +477,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
               <StopCards
                 poi={cardPoi}
                 name={cardStop.name}
-                distanceM={cardStop.id === ui.target?.id ? ui.target.distanceM : undefined}
+                distanceM={cardStop.id === ui.target?.id ? nav.distanceM : undefined}
                 keyFacts={n?.kind === 'stop' && n.poiId === cardStop.id ? n.keyFacts : undefined}
                 images={n?.kind === 'stop' && n.poiId === cardStop.id ? n.images : undefined}
                 lang={lang}
@@ -622,6 +655,15 @@ function PlayInner({ session }: { session: ActiveSession }) {
           ) : null}
         </View>
       </Sheet>
+      <StopInfoSheet
+        stop={
+          readingStop
+            ? { ...readingStop, ...(savedNarration ? { narration: savedNarration } : {}) }
+            : undefined
+        }
+        poi={readingStop ? pois.get(readingStop.id) : undefined}
+        onDismiss={() => setReadingStopId(undefined)}
+      />
       <PauseFinder
         open={pauseFinderOpen}
         onClose={() => setPauseFinderOpen(false)}

@@ -1,5 +1,21 @@
 # Decisions
 
+## D67 - Optional photos on the shareable activity recap
+
+The completed-activity map and details share one scroll view: scrolling down moves the map entirely out of view, and scrolling back restores it. A compact native header keeps Close accessible, and Share remains fixed above the bottom safe area. Map panning is disabled only for this embedded recap map so vertical swipes reach the page; stop taps and zoom remain available. The map keeps its fixed rendering size while scrolling, avoiding per-frame map layout changes.
+
+Owner clarification on 2026-10-05: the Strava-style share card should include a collage of pictures taken during the activity, if the listener permits. Photo access starts only from **Add activity photos**, even when the operating system has already granted access. Match photo creation timestamps to the saved activity's inclusive start/end interval; never substitute the current time for an unfinished record. A bounded query supplies up to four chronological photos, with individual removal and a route-only option in the visible preview.
+
+The selection lives only in the recap screen. It is not saved in history, sent to the backend or added to the user's library. The operating system may retrieve iCloud originals when resolving a photo. Only the composed PNG leaves through the listener's explicit system-share action. Limited access is respected, access is checked again on return to the app and before sharing, and opt-out cancels pending discovery. Missing images and native read failures do not block sharing without photos. Image display readiness and selection checks guard the capture against incomplete or removed photos.
+
+Use the SDK-matched `expo-media-library` API and photo-only native configuration; no camera, media-location, video/audio or library-write access is added. The browser keeps text sharing. A native rebuild and device verification are needed for photo permissions and PNG sharing; this implementation does not publish an update or lift the TestFlight hold.
+
+## D66 - Browse pricing in the unlocked demo
+
+Owner feedback on 2026-10-05: Crossroads failed to load and pricing was invisible in Expo Go. The first Crossroads choices are computed before a guide session exists, without a partial runtime object. Live sessions still supply their history, access and narrative context.
+
+Profile and Settings expose **Preise & Abos / Prices & subscriptions**. This overview stays open without an unlock target, including when preview playback is unlocked or a subscription is active. Contextual tour/session paywalls still dismiss after access is granted; paid download requirements stay intact. Demo purchases grant simulated credits/subscriptions and explicitly state that no payment occurs. Existing prices are unchanged.
+
 ## D64 – A persistent tour brief, authored speech and live Gemini curation
 
 The guide retains one editorial brief (central question, character, opening and closing) for the whole session, including rerouting and cold-start recovery. Each stop receives that brief plus its chapter and neighboring itinerary names. Research material is separate from the recording script: Gemini develops spoken paragraphs from verified sources, then fact checking runs, and only the accepted spoken paragraphs reach TTS. Unchanged source documents are rejected and rewritten once. Narration cache keys include the editorial context, so another tour cannot reuse a mismatched chapter. New offline downloads retain the same brief; older downloads remain compatible.
@@ -290,6 +306,8 @@ Validation: 459 workspace unit tests and six release-check tests pass on Node 22
 
 ## D61 - Compact place cards, required accounts and transport-friendly tours
 
+Owner clarification on 2026-10-05: tapping a place card flips it to the important written information; tapping again or choosing “Show photo” returns to its image. Home, nearby-suggestion and Crossroads cards start or change navigation only through the dedicated bottom-right navigation button, which remains separate from the flip and photo-credit controls. During narration a disabled navigation action does not prevent reading the card. Tour-stop photo cards use the same flip interaction for source text or narrated key facts. Reduced Motion uses a fade.
+
 Owner feedback on 2026-10-05 supersedes optional accounts in D49 and vehicle pausing in the earlier guide behavior. Settings is available at the top right of idle and active home. Place/tour cards put their text over the image; play actions use an icon with an accessible name. A light-grey information button in the top-right image corner opens author, source and license links, including downloaded images and active-tour cards. Selecting a map spot opens its card in the existing sheet; it does not start a tour or open a separate “take me there” popup. Locate now uses zoom 15.5 instead of 16.5 (half magnification); Apple Maps altitude is doubled to 1,200 m.
 
 The mobile entry flow requires Apple, Google or email sign-in followed by a Firebase-linked mobile phone credential. Authentication hydration precedes routing, protected deep links resume after setup, and legal pages remain public. A typed number or local onboarding flag cannot grant access. Existing anonymous accounts may be linked to preserve their UID; the client never creates a new guest. This verifies the number once and is not SMS MFA on every launch. Demo authentication is explicitly simulated and uses SMS code `000000`. Production provider configuration and device verification remain release prerequisites; backend rules and partner/admin authorization are not migrated by this client change.
@@ -343,3 +361,17 @@ Home and the active player have an actions button immediately above the location
 Selecting **Weg in Google Maps öffnen** pauses the current tour and opens external walking directions to that destination. It does not rewrite the itinerary, narrate the break destination or count it as a completed story stop. A failed handoff restores the prior paused state. Returning users resume explicitly from the map menu. This is a Maps URL handoff, not a Google Places integration or internal detour-routing feature. No new partner tracking or business outreach is included. [Google's Maps URL documentation](https://developers.google.com/maps/documentation/urls/get-started) describes the directions handoff.
 
 These changes are local source changes; deploying the matching app/backend and native-device verification remain separate. D62's TestFlight hold remains in effect.
+
+Owner clarification on 2026-10-05: Just Roam keeps nearby next-stop suggestions on both active maps after arriving at the initial destination. Suggestions are optional; ignoring them continues automatic discovery and narration. A map tap previews a suggestion, and selecting a new destination waits until the current story is no longer playing or queued. Places with confirmed narration progress are retained as tour points even when the listener only passes nearby. Their personal written stories are saved locally for read-back during the walk, after finishing and after session recovery. Past map pins and finished-tour list rows open a reading sheet without changing playback or the route. Older history entries without saved stories may load existing source-backed place information; opening them does not generate a new narration.
+
+## D67 - Authorized TestFlight beta and real path navigation
+
+Later owner instruction on the same day changes the release order: push the current source to Git and publish Expo Go for review first. **TestFlight build/upload is on hold again until the owner gives a new explicit Go.** Existing preparation remains valid; the earlier authorization in this decision does not override this latest hold.
+
+On 2026-10-05 the owner explicitly requested implementation of what is needed to put the current app into TestFlight and authorized using the Edge extension to retrieve Apple setup data. This supersedes the TestFlight hold in D62, D64 and D65. Scope is the isolated beta and its native build/upload; it does not include a public App Store release or additional tester invitations. The total first-test service budget and daily admission caps remain unchanged.
+
+Active walking/cycling navigation now uses a protected point-to-point ORS endpoint and shared validated geometry. Explore, Crossroads, tours and Live Activity use path distance and the next path segment; sustained deviation triggers bounded rerouting. Failed routing cannot silently become a mock straight line in the live provider. GPS/destination requests are transient and are not persisted as a position history or route cache. Existing bounded account/tile abuse counters remain. Saved ORS tour geometry can be reused offline; this is not a downloaded basemap or car/transit routing.
+
+Native Firebase identity, EAS environment and signing must all agree on the beta project, com.tuurapp and Apple Team 4GXK973R2W. The beta permits German phone verification with a 20-request daily send quota; real-device verification remains necessary. A separate legal-document origin avoids redirecting invitation and group links to a static legal-only host. The operator must identify which address may be public before the site is published.
+
+The live smoke test verifies real Gemini audio, a stable personal recording identity/cache replay, ORS paths and server authorization using temporary test fixtures that are deleted afterwards. It does not substitute for native App Attest, StoreKit, background playback or an outdoor GPS acceptance test. See RELEASE.md for the latest verified build/upload state.

@@ -14,6 +14,7 @@ export const endpoints = [
   'reportNarration',
   'generateAutoTours',
   'composePlannedRoute',
+  'getWalkingRoute',
   'getTeaser',
   'selectNearby',
   'spendCredit',

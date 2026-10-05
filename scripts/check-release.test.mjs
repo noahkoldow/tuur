@@ -23,6 +23,20 @@ test('iOS beta accepts test ads and does not demand Android, web or server secre
   assert.deepEqual(releaseProblems(betaEnv(), { target: 'ios', channel: 'beta' }), []);
 });
 
+test('a separate legal host is optional and must be a public HTTPS URL when supplied', () => {
+  const options = { target: 'ios', channel: 'beta' };
+  assert.deepEqual(
+    releaseProblems({ ...betaEnv(), EXPO_PUBLIC_LEGAL_BASE_URL: 'https://tuur-beta.web.app' }, options),
+    [],
+  );
+  for (const url of ['', 'http://tuur-beta.web.app', 'https://localhost/legal', 'not-a-url'])
+    assert.ok(
+      releaseProblems({ ...betaEnv(), EXPO_PUBLIC_LEGAL_BASE_URL: url }, options).some((problem) =>
+        problem.includes('EXPO_PUBLIC_LEGAL_BASE_URL'),
+      ),
+    );
+});
+
 test('native online maps work without a paid key, but public tiles are not an offline source', () => {
   const env = betaEnv();
   delete env.EXPO_PUBLIC_MAPTILER_KEY;
@@ -80,11 +94,18 @@ test('production does not allow public Google test ad IDs', () => {
 });
 test('native Firebase file must identify the same isolated project as the client', () => {
   const env = betaEnv();
+  const plist = (project = 'tuur-beta') => `<plist><dict>
+    <key>PROJECT_ID</key><string>${project}</string>
+    <key>BUNDLE_ID</key><string>com.tuurapp</string>
+    <key>GOOGLE_APP_ID</key><string>1:123:ios:abc</string>
+    <key>CLIENT_ID</key><string>client.apps.googleusercontent.com</string>
+    <key>REVERSED_CLIENT_ID</key><string>com.googleusercontent.apps.client</string>
+  </dict></plist>`;
   assert.deepEqual(
     nativeFirebaseProblems(
       env,
       'ios',
-      () => '<key>PROJECT_ID</key><string>tuur-beta</string>',
+      () => plist(),
       () => true,
     ),
     [],
@@ -93,7 +114,7 @@ test('native Firebase file must identify the same isolated project as the client
     nativeFirebaseProblems(
       env,
       'ios',
-      () => '<key>PROJECT_ID</key><string>tuur-prod</string>',
+      () => plist('tuur-prod'),
       () => true,
     ).length,
     1,
@@ -106,6 +127,38 @@ test('native Firebase file must identify the same isolated project as the client
       () => false,
     ).length,
     1,
+  );
+  assert.ok(
+    nativeFirebaseProblems(
+      env,
+      'ios',
+      () => plist().replace('<key>CLIENT_ID</key>', '<key>OLD_CLIENT_ID</key>'),
+      () => true,
+    ).some((problem) => problem.includes('missing Google Sign-In')),
+  );
+  assert.ok(
+    nativeFirebaseProblems(
+      { ...env, GOOGLE_IOS_URL_SCHEME: 'com.googleusercontent.apps.other' },
+      'ios',
+      () => plist(),
+      () => true,
+    ).some((problem) => problem.includes('must match GOOGLE_IOS_URL_SCHEME')),
+  );
+  assert.ok(
+    nativeFirebaseProblems(
+      env,
+      'ios',
+      () => plist().replace('com.tuurapp', 'com.anotherapp'),
+      () => true,
+    ).some((problem) => problem.includes('bundle ID must be com.tuurapp')),
+  );
+  assert.ok(
+    nativeFirebaseProblems(
+      env,
+      'ios',
+      () => plist().replace('<key>GOOGLE_APP_ID</key>', '<key>OLD_APP_ID</key>'),
+      () => true,
+    ).some((problem) => problem.includes('missing GOOGLE_APP_ID')),
   );
 });
 test('server gate refuses implicit mock providers and public production data endpoints', () => {

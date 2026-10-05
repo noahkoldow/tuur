@@ -103,7 +103,7 @@ export const en: Widen<typeof de> = {
     interestsHint: 'Optional. Without a choice you get a balanced mix.',
     permissionsTitle: 'Location for your tour',
     permissionsBody:
-      'tuur uses your location on your device to tell the right story exactly when you arrive at a place. For content only a coarse map square is sent to our servers. Only for a planned route or when redeeming a partner offer is a position sent once.',
+      'tuur uses your location on your device to tell stories when you reach a place. For content, only a coarse map square is sent to our servers. To calculate directions, including when you leave the route, your current position and destination are sent to our routing service without saving a location history. Redeeming a partner offer also sends your position once.',
     permissionsBackground:
       'To keep the tour going while the screen is off we need “Always allow”. We only ask when you start a tour.',
     allowLocation: 'Allow location',
@@ -336,6 +336,13 @@ export const en: Widen<typeof de> = {
     onlineOnly: 'Group tours need an internet connection.',
     invalid: 'This link is not valid.',
   },
+  stopInfo: {
+    title: 'About this place',
+    unavailable: 'No written information was saved for this stop.',
+    source: 'Read source',
+    loading: 'Loading place information…',
+    loadError: 'Could not load information about this place.',
+  },
   summary: {
     open: 'View summary',
     missing: 'This tour was not saved.',
@@ -346,6 +353,27 @@ export const en: Widen<typeof de> = {
     stopsTitle: 'Your stops',
     newBadge: 'New badge!',
     cardTitle: 'To share',
+    addPhotos: 'Add activity photos',
+    refreshPhotos: 'Find photos again',
+    withoutPhotos: 'Use card without photos',
+    photosHint:
+      'With your permission, add up to four photos taken during this activity. Photos stay on your device until you share the card.',
+    photosReview: 'Review your collage before sharing. Photo numbers run left to right, top to bottom.',
+    photoLabel: 'Activity photo {{number}}',
+    removePhoto: 'Remove photo {{number}}',
+    photosPreparing: 'Preparing your photos…',
+    photos_empty:
+      'No accessible photos were found from this activity. You can still share your route and stats.',
+    photos_denied:
+      'Photo access was not granted or has changed. Your card can still be shared without photos.',
+    photos_error: 'Could not load your activity photos. Try again or share without photos.',
+    photos_unavailable: 'Activity photos are not available here. You can still share without photos.',
+    photosLimited:
+      'Only photos you have allowed are included. You can change photo access in Settings, then find photos again.',
+    photoSettings: 'Photo access settings',
+    photoSettingsError: 'Could not open Settings. You can change photo access in your device settings.',
+    photosFailed: 'Some photos could not be displayed and were removed from the card.',
+    shareError: 'Could not share the card. Please try again.',
     share: 'Share tour',
     shareText: 'I explored with tuur: {{title}}, {{km}} km, {{stops}} stops.',
     mode_tour: 'Tour',
@@ -384,6 +412,10 @@ export const en: Widen<typeof de> = {
     settings: 'Settings, privacy & legal',
   },
   cards: {
+    showInfo: 'Tap for place info',
+    showPhoto: 'Show photo',
+    navigate: 'Navigate to {{name}}',
+    noInfo: 'There is no short description for this place yet.',
     info: 'Sources and licenses',
     image: 'Image',
     text: 'Text',
@@ -399,6 +431,14 @@ export const en: Widen<typeof de> = {
   player: {
     closePlace: 'Close selected place',
     straightLineDistance: '{{distance}} straight-line distance',
+    routeDistance: '{{distance}} along the route',
+    routeLocation: 'Waiting for an accurate location to show directions.',
+    routeLoading: 'Finding a route along streets and paths…',
+    routeOffline: 'New directions need a connection. Routes already loaded remain available offline.',
+    routeOutsideArea: 'This location is outside the currently available navigation area.',
+    routeRateLimited: 'Directions are temporarily busy. Please try again shortly.',
+    routeUnavailable: 'No route is available right now. Check your connection and try again.',
+    routeRetry: 'Retry directions',
     reportFailed: 'Your report was not sent. Please try again.',
     exploreInstead: 'Switch to Explore',
     exploreHint: 'Take a different turn. Tuu follows your direction; your walk and current story continue.',
@@ -495,6 +535,8 @@ export const en: Widen<typeof de> = {
     loadingTeasers: 'Loading short infos…',
   },
   roam: {
+    suggestionsHint:
+      'Choose a nearby place on the map, or keep wandering. Tuu adds interesting places to your walk as you hear about them.',
     startMissing: 'This place is not available here. Choose a place nearby or reload the suggestions.',
     chooseAnother: 'Discover other places',
     title: 'Explore',
@@ -568,6 +610,14 @@ export const en: Widen<typeof de> = {
       'This text is provided by the operator. You can find the current version at {{url}} or by email at {{email}}.',
   },
   paywall: {
+    pricingTitle: 'Prices & subscriptions',
+    pricingHint: 'Use credits for individual tours or subscribe for all tours and modes.',
+    offersUnavailable: 'Prices are currently unavailable. Please try again.',
+    demoNotice: 'Demo: browse prices and try purchases for free. No money will be charged.',
+    demoAction: 'Free demo purchase; no money will be charged.',
+    demoPurchased: 'Demo purchase complete. No money was charged.',
+    demoSubDisclosure:
+      'The subscription includes all tours and modes without ads. In this demo it is simulated: no payment and no automatic renewal.',
     titleDownload: 'Save tour offline',
     subtitleDownload:
       'With Premium or a paid unlock, you can download this tour and play it in tuur. Ad and invitation unlocks do not include downloads.',

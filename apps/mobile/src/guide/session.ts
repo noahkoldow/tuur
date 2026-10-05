@@ -23,6 +23,7 @@ import type { AccessInfo } from '../backend/types';
 import type { LocationSource } from '../location/types';
 import { ForkController, PoiPool, RoamController } from './modes';
 import { GuideRuntime } from './runtime';
+import { NavigationRouteController } from './navigation-route';
 import { tourGuideStops } from './tourStops';
 import { SessionCheckpointStore } from './checkpointStore';
 import { config } from '../config';
@@ -35,6 +36,7 @@ export type SessionMode = 'tour' | 'planned' | 'fork' | 'roam';
 export interface ActiveSession {
   mode: SessionMode;
   runtime: GuideRuntime;
+  navigation?: NavigationRouteController;
   /** Present for standard and planned tours; crossroads and roam build their route on the way. */
   tour?: Tour;
   title?: string;
@@ -138,11 +140,25 @@ async function begin(
   };
   const ownerUid = getBackend().auth.current()?.uid;
   const session: ActiveSession = { ...s, recordId: record.id, ...(ownerUid ? { ownerUid } : {}) };
+  session.navigation = new NavigationRouteController({
+    backend: getBackend(),
+    subscribe: s.runtime.subscribe,
+    getInput: () => {
+      const current = active?.runtime === s.runtime ? active : session;
+      return {
+        ui: s.runtime.getSnapshot(),
+        profile: current.tour?.profile ?? current.recovery?.profile ?? 'foot-walking',
+        ...(current.tour ? { tour: current.tour } : {}),
+      };
+    },
+  });
   active = session;
+  session.navigation.attach();
   emit();
   const history = useHistory.getState();
   history.start(record);
   if (recovered) {
+    s.runtime.restoreStopNarrations(history.records.find((r) => r.id === record.id)?.stops ?? []);
     const progress = recovered.progress;
     for (const stop of recovered.route) {
       const explored =
@@ -154,11 +170,25 @@ async function begin(
         history.addStop(record, { id: stop.id, name: stop.name, location: stop.location });
     }
   }
+  const saveStop = (poiId: string) => {
+    const stop = s.runtime.getState().route.find((r) => r.id === poiId);
+    const narration = s.runtime.getStopNarration(poiId);
+    if (stop && !stop.navigationOnly)
+      useHistory.getState().addStop(record, {
+        id: stop.id,
+        name: stop.name,
+        location: stop.location,
+        ...(narration ? { narration } : {}),
+      });
+  };
   s.runtime.addCommandListener((c) => {
-    if (c.type !== 'visited') return;
-    const stop = s.runtime.getState().route.find((r) => r.id === c.poiId);
-    if (stop)
-      useHistory.getState().addStop(record, { id: stop.id, name: stop.name, location: stop.location });
+    if (c.type === 'visited') saveStop(c.poiId);
+  });
+  s.runtime.addNarrationListener((poiId) => {
+    // Roaming stories can describe a nearby place without walking into its arrival radius.
+    // A confirmed playback event is enough to add that place, even if no suggestion was chosen.
+    if (s.runtime.getAccess()?.mode === 'roam' || s.runtime.getState().visited.includes(poiId))
+      saveStop(poiId);
   });
   s.runtime.addFixListener((f) =>
     useHistory.getState().addTrackPoint(record.id, { lat: f.lat, lng: f.lng, ts: f.ts }),
@@ -189,10 +219,14 @@ async function startRuntime(
       detachCheckpoint = undefined;
       session.fork?.detach();
       session.roam?.detach();
+      session.navigation?.dispose();
       await session.runtime.dispose();
       useHistory.getState().finish(session.recordId, Date.now());
       emit();
-    } else await session.runtime.dispose();
+    } else {
+      session.navigation?.dispose();
+      await session.runtime.dispose();
+    }
     throw error;
   }
 }
@@ -360,6 +394,7 @@ export async function endSession(): Promise<string | undefined> {
   emit();
   cur?.fork?.detach();
   cur?.roam?.detach();
+  cur?.navigation?.dispose();
   await cur?.runtime.dispose();
   if (sessionLifecycle === lifecycle) await clearSavedSession();
   if (!cur) return undefined;
@@ -391,6 +426,7 @@ export function switchSessionToExplore(): boolean {
   void _tour;
   void _fork;
   active = { ...continuing, mode: 'roam', roam };
+  active.navigation?.update();
   if (active.recovery)
     active.recovery = { ...active.recovery, interests: settings.interests, frequency: settings.frequency };
   emit();

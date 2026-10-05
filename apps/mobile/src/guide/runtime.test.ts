@@ -31,6 +31,31 @@ async function readyBackend() {
 }
 
 describe('GuideRuntime end to end (demo backend + simulated GPS + simulated audio)', () => {
+  it('exposes current GPS course and speed so the map can hold its direction at rest', async () => {
+    const clock = new FakeClock();
+    const runtime = new GuideRuntime({
+      backend: createDemoBackend({ latencyMs: 0 }),
+      audio: new SimulatedAudioEngine(clock),
+      lang: 'de',
+      clock,
+    });
+
+    runtime.onFix({ ...berlin.center, ts: 1000, heading: 90, speed: 1.3, accuracy: 5 });
+    expect(runtime.getSnapshot().user).toEqual({
+      ...berlin.center,
+      ts: 1000,
+      heading: 90,
+      speed: 1.3,
+      accuracy: 5,
+    });
+    runtime.onFix({ ...berlin.center, ts: 2000, heading: 170, speed: 0 });
+    expect(runtime.getSnapshot().user).toEqual({ ...berlin.center, ts: 2000, heading: 170, speed: 0 });
+    runtime.onFix({ ...berlin.center, ts: 3000 });
+    expect(runtime.getSnapshot().user).toEqual({ ...berlin.center, ts: 3000 });
+
+    await runtime.dispose();
+  });
+
   it('walks a whole standard tour anywhere: every stop gets narrated, in order, then the tour finishes', async () => {
     const { backend, res } = await readyBackend();
     expect(res.status).toBe('ready');
@@ -356,5 +381,94 @@ describe('GuideRuntime teardown', () => {
     await runtime.dispose();
     await runtime.dispose();
     expect(destroyed).toBe(1);
+  });
+});
+
+describe('heard place information', () => {
+  const place: GuideStop = { id: 'gate', name: 'Gate', location: berlin.center };
+
+  async function setup() {
+    const clock = new FakeClock();
+    const backend = createDemoBackend({ latencyMs: 0 });
+    const getNarration = vi.spyOn(backend, 'getNarration').mockResolvedValue({
+      key: 'gate:story',
+      title: 'The story of the gate',
+      text: 'A story to remember after the walk.',
+      paragraphs: [{ text: 'A story to remember after the walk.', startMs: 0, durationMs: 5000 }],
+      keyFacts: ['A fact about the gate.'],
+      audioPath: 'demo:gate',
+      audioDurationMs: 5000,
+      images: [],
+      cached: true,
+      aiGenerated: true,
+      grounding: { queries: 1, sources: [{ uri: 'https://example.org/gate' }] },
+    });
+    const audio = new SimulatedAudioEngine(clock);
+    const runtime = new GuideRuntime({ backend, audio, clock, lang: 'en', access: { mode: 'roam' } });
+    const heard = vi.fn();
+    runtime.addNarrationListener(heard);
+    await runtime.start([place], undefined, { open: true });
+    return { runtime, audio, clock, getNarration, heard };
+  }
+
+  it('retains only confirmed heard content, with one update per story and no request when reading it', async () => {
+    const { runtime, clock, getNarration, heard } = await setup();
+    runtime.pause();
+    runtime.onFix({ ...place.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.flush();
+    expect(getNarration).toHaveBeenCalledOnce();
+    expect(runtime.getStopNarration(place.id)).toBeUndefined();
+    expect(heard).not.toHaveBeenCalled();
+
+    runtime.resume();
+    await clock.flush();
+    expect(runtime.getSnapshot().narration?.text).toBe('A story to remember after the walk.');
+    expect(runtime.getStopNarration(place.id)).toBeUndefined();
+    await clock.advance(1000);
+    const remembered = runtime.getStopNarration(place.id);
+    expect(remembered).toMatchObject({
+      title: 'The story of the gate',
+      text: 'A story to remember after the walk.',
+      keyFacts: ['A fact about the gate.'],
+      grounding: { queries: 1, sources: [{ uri: 'https://example.org/gate' }] },
+    });
+    expect(remembered).not.toHaveProperty('audioPath');
+    await clock.advance(6000);
+    expect(runtime.getStopNarration(place.id)).toBe(remembered);
+    expect(heard).toHaveBeenCalledOnce();
+    expect(getNarration).toHaveBeenCalledOnce();
+    await runtime.dispose();
+  });
+
+  it('does not retain content when audio fails before anything was heard', async () => {
+    const { runtime, audio, clock, heard } = await setup();
+    vi.spyOn(audio, 'play').mockRejectedValue(new Error('Playback unavailable'));
+    runtime.onFix({ ...place.location, ts: clock.now(), accuracy: 5, speed: 0 });
+    await clock.flush();
+    await clock.advance(1000);
+    expect(runtime.getStopNarration(place.id)).toBeUndefined();
+    expect(heard).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('keeps a spoken roaming place readable after passing nearby without entering the arrival radius', async () => {
+    const { runtime, clock, heard } = await setup();
+    const nearby = destinationPoint(place.location, 180, 80);
+    for (let i = 0; i < 3; i++) {
+      runtime.onFix({ ...nearby, ts: clock.now(), accuracy: 5, speed: 1.3 });
+      await clock.advance(5000);
+    }
+    await clock.advance(6000);
+    expect(runtime.getState().reached[place.id]).toBeUndefined();
+    expect(runtime.getState().narrated).toContain(place.id);
+    expect(heard).toHaveBeenCalledOnce();
+    runtime.setRoute(
+      [place, { id: 'next', name: 'Next', location: destinationPoint(nearby, 90, 400) }],
+      1,
+      true,
+    );
+    expect(runtime.getSnapshot().stops[0]?.state).toBe('visited');
+    expect(runtime.getStopNarration(place.id)?.text).toBe('A story to remember after the walk.');
+    await runtime.dispose();
   });
 });

@@ -114,7 +114,7 @@ describe('choosing a destination during roam', () => {
     score: 90,
   });
 
-  async function setup(stops: Poi[] = []) {
+  async function setup(stops: Poi[] = [], pinnedTargetId?: string) {
     const clock = new FakeClock();
     const backend = createDemoBackend({ latencyMs: 0 });
     vi.spyOn(backend, 'ensureArea').mockResolvedValue(undefined);
@@ -122,15 +122,144 @@ describe('choosing a destination during roam', () => {
     // Content remains in flight so these tests can drive guide events without unrelated demo generation.
     vi.spyOn(backend, 'getNarration').mockImplementation(() => new Promise(() => {}));
     const audio = new SimulatedAudioEngine(clock);
+    const listen = vi.spyOn(audio, 'setListener');
     const runtime = new GuideRuntime({ backend, audio, lang: 'de', clock });
     const unsubscribe = vi.fn();
     const source = { subscribe: vi.fn(async () => unsubscribe) };
     await runtime.start(stops, source, { open: true });
     const pool = new PoiPool(backend, clock);
-    const roam = new RoamController({ runtime, backend, pool, interests: [], frequency: 'high', clock });
+    const roam = new RoamController({
+      runtime,
+      backend,
+      pool,
+      interests: [],
+      frequency: 'high',
+      clock,
+      ...(pinnedTargetId ? { pinnedTargetId } : {}),
+    });
     roam.attach();
-    return { runtime, roam, pool, clock, source, unsubscribe, backend };
+    return {
+      runtime,
+      roam,
+      pool,
+      clock,
+      source,
+      unsubscribe,
+      backend,
+      audio,
+      listener: listen.mock.calls[0]![0],
+    };
   }
+
+  function provideStories(backend: ReturnType<typeof createDemoBackend>) {
+    vi.mocked(backend.getNarration).mockImplementation(async ({ poiId }) => ({
+      key: `${poiId}:story`,
+      title: poiId,
+      text: `The story of ${poiId}.`,
+      paragraphs: [{ text: `The story of ${poiId}.`, startMs: 0, durationMs: 4_000 }],
+      keyFacts: [],
+      audioPath: `demo:${poiId}`,
+      audioDurationMs: 4_000,
+      images: [],
+      cached: true,
+      aiGenerated: true,
+    }));
+  }
+
+  it('keeps the chosen first stop and automatically tells later stories without another selection', async () => {
+    const first = place('chosen-first', 90, 0);
+    const automatic = place('walked-past', 90, 250);
+    const ignored = place('optional-other-direction', 270, 250);
+    const { runtime, roam, pool, clock, backend } = await setup([first], first.id);
+    provideStories(backend);
+    vi.spyOn(pool, 'load').mockResolvedValue(undefined);
+    vi.spyOn(pool, 'all').mockReturnValue([first, automatic, ignored]);
+
+    runtime.onFix({ ...paris, ts: clock.now(), accuracy: 5, heading: 90 });
+    await clock.flush();
+    await clock.advance(5_000);
+    expect(runtime.getState().narrated).toContain(first.id);
+    for (let meters = 10; meters <= 270; meters += 10) {
+      await clock.advance(8_000);
+      runtime.onFix({
+        ...destinationPoint(paris, 90, meters),
+        ts: clock.now(),
+        accuracy: 5,
+        heading: 90,
+        speed: 1.25,
+      });
+      await clock.flush();
+    }
+
+    expect(runtime.getState().narrated).toEqual([first.id, automatic.id]);
+    expect(runtime.getState().route.map((stop) => stop.id)).toEqual([first.id, automatic.id]);
+    expect(runtime.getState().visited).toEqual([first.id, automatic.id]);
+    expect(runtime.getState().finished).toBe(false);
+    roam.detach();
+    await runtime.dispose();
+  });
+
+  it.each([
+    ['automatic', 'completed'],
+    ['chosen', 'completed'],
+    ['automatic', 'failed after positive progress'],
+    ['chosen', 'failed after positive progress'],
+    ['automatic', 'failed before playback'],
+  ] as const)(
+    'retains only heard nearby points for an %s next destination after audio %s, without exact arrival',
+    async (selection, outcome) => {
+      const heard = place('heard-nearby', 0, 50);
+      const next = place('next-nearby', 180, 50);
+      const { runtime, roam, pool, clock, backend, audio, listener } = await setup([heard]);
+      const play = vi.spyOn(audio, 'play');
+      provideStories(backend);
+      if (outcome === 'failed before playback')
+        vi.mocked(backend.getNarration).mockRejectedValue(new Error('Story unavailable'));
+      vi.spyOn(pool, 'load').mockResolvedValue(undefined);
+      vi.spyOn(pool, 'all').mockReturnValue([heard, next]);
+      runtime.pause();
+      runtime.onFix({ ...paris, ts: clock.now(), accuracy: 5, heading: 90 });
+      for (const meters of [10, 20]) {
+        await clock.advance(8_000);
+        runtime.onFix({
+          ...destinationPoint(paris, 90, meters),
+          ts: clock.now(),
+          accuracy: 5,
+          heading: 90,
+          speed: 1.25,
+        });
+      }
+      runtime.resume();
+      await clock.flush();
+      if (outcome !== 'failed after positive progress') await clock.advance(5_000);
+      else {
+        await clock.advance(1_000);
+        expect(runtime.getStopNarration(heard.id)?.text).toBe(`The story of ${heard.id}.`);
+        await audio.pause();
+        listener.onError(play.mock.calls.at(-1)![0].id, 'Playback interrupted');
+        await clock.advance(4_000);
+      }
+      expect(runtime.getState().narrated).toEqual([heard.id]);
+      expect(runtime.getState().reached[heard.id]).toBeUndefined();
+
+      if (selection === 'chosen') expect(roam.choose(next)).toBe(true);
+      else {
+        runtime.onFix({ ...destinationPoint(paris, 90, 20), ts: clock.now(), accuracy: 5, heading: 90 });
+        await clock.flush();
+      }
+
+      expect(runtime.getState().route.map((stop) => stop.id)).toEqual(
+        outcome === 'failed before playback' ? [next.id] : [heard.id, next.id],
+      );
+      expect(runtime.getSnapshot().target?.id).toBe(next.id);
+      expect(runtime.getState().narrated).toContain(heard.id);
+      expect(runtime.getStopNarration(heard.id)?.text).toBe(
+        outcome === 'failed before playback' ? undefined : `The story of ${heard.id}.`,
+      );
+      roam.detach();
+      await runtime.dispose();
+    },
+  );
 
   it('uses the live Gemini candidate order with the persistent tour question', async () => {
     const { runtime, roam, pool, clock, backend } = await setup();
@@ -329,6 +458,44 @@ describe('choosing a destination during roam', () => {
 });
 
 describe('crossroads mode (demo backend)', () => {
+  it('previews the first choices without an active guide and shows them while teasers are loading', async () => {
+    const backend = createDemoBackend({ latencyMs: 0 });
+    const tile = encodeGeohash(paris.lat, paris.lng, 6);
+    await backend.ensureArea(tile, 1);
+    await waitReady(backend, tile);
+    const select = vi.spyOn(backend, 'selectNearby');
+    let finishTeaser!: (text: string) => void;
+    const teaser = new Promise<string>((resolve) => {
+      finishTeaser = resolve;
+    });
+    const getTeaser = vi.spyOn(backend, 'getTeaser').mockReturnValue(teaser);
+    const fork = new ForkController({
+      backend,
+      pool: new PoiPool(backend),
+      lang: 'de',
+      interests: ['history'],
+      profile: 'foot-walking',
+      budgetMinutes: 90,
+      access: { mode: 'fork' },
+    });
+
+    const loaded = fork.compute(paris);
+    await vi.waitFor(() => expect(fork.getSnapshot().options.length).toBeGreaterThanOrEqual(1));
+    const preview = fork.getSnapshot();
+    expect(preview.loading).toBe(true);
+    expect(preview.options.every((option) => !option.teaser)).toBe(true);
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({ lang: 'de', interests: ['history'], access: { mode: 'fork' } }),
+    );
+    expect(getTeaser).toHaveBeenCalledWith(expect.objectContaining({ lang: 'de', access: { mode: 'fork' } }));
+
+    finishTeaser('A story worth discovering.');
+    const options = await loaded;
+    expect(options.map((option) => option.poi.id)).toEqual(preview.options.map((option) => option.poi.id));
+    expect(options.every((option) => option.teaser === 'A story worth discovering.')).toBe(true);
+    expect(fork.getSnapshot().loading).toBe(false);
+  });
+
   it('offers two distinct options with teasers at the start and after each waypoint; choices extend the route', async () => {
     const backend = createDemoBackend({ latencyMs: 0 });
     const tile = encodeGeohash(paris.lat, paris.lng, 6);
