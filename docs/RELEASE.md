@@ -4,6 +4,12 @@
 
 Latest owner instruction: commit and push the current project, publish the Expo Go preview, then wait for the owner's review. **Do not start a native TestFlight build or upload until a new explicit Go.** This supersedes the earlier same-day authorization below. The Expo Go preview remains demo-backed with device speech; live Gemini/TTS, native App Attest and real ORS navigation require the later native beta. The public operator-address decision remains outstanding for that release.
 
+Published the current iOS [Expo Go review update](https://expo.dev/accounts/noehxpo/projects/tuur/updates/2abdc634-42c6-4bd9-b7f5-556fc7b1b37a) at **18:31 Europe/Berlin** from pushed source commit `4f78a9d6f7f6d36f8aa51424ced964c9bb168cea` on Git branch `claude/amazing-hamilton-2cry00`. EAS branch: `expo-go`; update ID: `01a10ce8-1bda-7d4a-948d-11ad6a2fcb01`; SDK `57.0.0`; runtime `0.1.0`. Refresh Projects in Expo Go and reopen tuur while signed in as `noehxpo`.
+
+- EAS environment `development` is intentional: it has no conflicting public preview variables. The `preview` environment now holds native TestFlight configuration and was not changed. The exported preview explicitly uses demo backend, Expo Go adapters, simulated purchases and device speech, with emulators and the optional preview-routing override disabled.
+- The export has 2,419 modules and 67 assets. All 429 source/config/asset inputs remained stable and match the commit; 251 source-map text files and 11 bundled PNG assets were checked. Expected Expo Go adapters are present and unsupported native Firebase, MapLibre, TrackPlayer, Google Sign-In, purchases and ads sources are absent. Source maps remain local.
+- EAS publication metadata and the HTTP-200 manifest match the intended project, commit, SDK and runtime. Fetching the bundle with the manifest's asset headers returned HTTP 200; its SHA-256 matches the local 6,582,844-byte export (`96b346c92b303b28b5766e860cc493a602e464c53df4051a408f2ddd5dffdaa3`). Device acceptance is the owner's next review step. No TestFlight build/upload or hosted-web deployment was started.
+
 ## Native TestFlight preparation and real navigation — 2026-10-05
 
 The owner explicitly requested the current app be prepared and uploaded to TestFlight, lifting the earlier hold in D62–D65. This authorizes the isolated beta build/upload, not public App Store release or new tester invitations. Source includes concurrent app changes; no new native build has been uploaded yet.
