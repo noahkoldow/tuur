@@ -478,6 +478,7 @@ export const en: Widen<typeof de> = {
   player: {
     textMode: 'Explore & read',
     enableAudio: 'Unlock audio guide',
+    soundOff: 'Sound off – unlock audio guide',
     audioMode: 'Audio guide',
     audioUpgradeFailed: 'Audio could not start. Try again.',
     continueText: 'Continue without audio guide',
@@ -679,6 +680,7 @@ export const en: Widen<typeof de> = {
     pricingHint:
       'Text tours are free with ads. Listen as you explore with credits or Premium: up to 90 minutes per credit or 500 minutes per month with a subscription.',
     offersUnavailable: 'Prices are currently unavailable. Please try again.',
+    storeUnavailable: 'Purchases are not available in this version of the app yet. Text tours stay free.',
     demoNotice: 'Demo: browse prices and try purchases for free. No money will be charged.',
     demoAction: 'Free demo purchase; no money will be charged.',
     demoPurchased: 'Demo purchase complete. No money was charged.',

@@ -7,7 +7,9 @@ import { REGION_FIXTURES } from '@tuur/shared';
 import type { ForkSnapshot } from '../guide/modes';
 import type { ActiveSession } from '../guide/session';
 import { useNavigationRoute } from '../guide/use-navigation-route';
+import { useEndTour } from '../hooks/use-end-tour';
 import { useRoamSuggestions } from '../hooks/use-roam-suggestions';
+import { haptics } from '../motion';
 import { useStopPois } from '../hooks/useStopPois';
 import { useHistory } from '../state/history';
 import { useSettings } from '../state/settings';
@@ -41,6 +43,7 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { runtime, fork } = session;
+  const { confirmFinish } = useEndTour();
   const lang = useSettings((s) => s.language);
   const walked = useHistory((s) => s.records.find((record) => record.id === session.recordId)?.track);
   const savedStops = useHistory((s) => s.records.find((record) => record.id === session.recordId)?.stops);
@@ -141,7 +144,34 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
       <View style={{ position: 'absolute', top: insets.top + 8, left: metrics.margin }}>
         <WordmarkPill />
       </View>
-      <View style={{ position: 'absolute', top: insets.top + 8, right: metrics.margin }}>
+      <View
+        style={{
+          position: 'absolute',
+          top: insets.top + 8,
+          right: metrics.margin,
+          flexDirection: 'row',
+          gap: 8,
+        }}
+      >
+        {ui.phase === 'paused' ? (
+          <>
+            <IconButton
+              onMap
+              icon="stop"
+              label={t('player.endTour')}
+              onPress={confirmFinish}
+            />
+            <IconButton
+              onMap
+              icon="play"
+              label={t('player.play')}
+              onPress={() => {
+                haptics.tap();
+                runtime.resume();
+              }}
+            />
+          </>
+        ) : null}
         <IconButton
           onMap
           icon="settings"

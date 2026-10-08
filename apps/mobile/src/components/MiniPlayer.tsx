@@ -2,7 +2,6 @@ import { useSyncExternalStore } from 'react';
 import { View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { ActiveSession } from '../guide/session';
-import { useEndTour } from '../hooks/use-end-tour';
 import { haptics } from '../motion';
 import { metrics, sys } from '../theme';
 import { IconButton } from './Button';
@@ -24,7 +23,6 @@ export function MiniPlayer({
   onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  const { confirmFinish } = useEndTour();
   const ui = useSyncExternalStore(
     session.runtime.subscribe,
     session.runtime.getSnapshot,
@@ -80,20 +78,17 @@ export function MiniPlayer({
           </Text>
         </View>
       </PressableScale>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {paused ? (
-          <IconButton icon="stop" size={36} label={t('player.endTour')} onPress={confirmFinish} />
-        ) : null}
+      {/* while paused, resume/end float next to the settings button on the home map (PausedControls) */}
+      {paused ? null : (
         <IconButton
-          icon={paused ? 'play' : 'pause'}
-          label={paused ? t('player.play') : t('player.pause')}
+          icon="pause"
+          label={t('player.pause')}
           onPress={() => {
             haptics.tap();
-            if (paused) session.runtime.resume();
-            else session.runtime.pause();
+            session.runtime.pause();
           }}
         />
-      </View>
+      )}
     </View>
   );
 }

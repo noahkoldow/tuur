@@ -17,7 +17,9 @@ import { continueSessionAsText, getActiveSession } from '../src/guide/session';
 import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { config } from '../src/config';
+import { recordError } from '../src/telemetry';
 import type { Offer } from '../src/billing/types';
+import { UNCONFIGURED } from '../src/billing/revenueCat';
 import { getBilling, subscribed, useEntitlementStore } from '../src/billing/entitlements';
 import { metrics, sys } from '../src/theme';
 
@@ -33,7 +35,7 @@ export default function Paywall() {
   const backend = useBackend();
   const ent = useEntitlementStore();
   const [offers, setOffers] = useState<Offer[]>([]);
-  const [offersStatus, setOffersStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [offersStatus, setOffersStatus] = useState<'loading' | 'ready' | 'error' | 'unconfigured'>('loading');
   const [offersAttempt, setOffersAttempt] = useState(0);
   const [busy, setBusy] = useState<string | undefined>();
   const [message, setMessage] = useState<{ text: string; tone: 'info' | 'warning' | 'error' } | undefined>();
@@ -62,8 +64,9 @@ export default function Paywall() {
         setOffers(next);
         setOffersStatus('ready');
       })
-      .catch(() => {
-        if (active) setOffersStatus('error');
+      .catch((e: unknown) => {
+        recordError(e);
+        if (active) setOffersStatus(e instanceof Error && e.message === UNCONFIGURED ? 'unconfigured' : 'error');
       });
     return () => {
       active = false;
@@ -80,9 +83,15 @@ export default function Paywall() {
     try {
       await fn();
     } catch (e) {
+      recordError(e);
       const code = e instanceof BackendError ? e.code : undefined;
       setMessage({
-        text: code === 'insufficient_credit' ? t('paywall.insufficient') : t('paywall.failed'),
+        text:
+          code === 'insufficient_credit'
+            ? t('paywall.insufficient')
+            : e instanceof Error && e.message === UNCONFIGURED
+              ? t('paywall.storeUnavailable')
+              : t('paywall.failed'),
         tone: 'error',
       });
     } finally {
@@ -177,10 +186,18 @@ export default function Paywall() {
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
         {offersStatus === 'loading' && !offers.length ? <Text>{t('common.loading')}</Text> : null}
-        {offersStatus === 'error' || (offersStatus === 'ready' && !offers.length) ? (
+        {offersStatus === 'error' ||
+        offersStatus === 'unconfigured' ||
+        (offersStatus === 'ready' && !offers.length) ? (
           <Card>
             <Banner
-              text={t(offersStatus === 'error' ? 'paywall.failed' : 'paywall.offersUnavailable')}
+              text={t(
+                offersStatus === 'error'
+                  ? 'paywall.failed'
+                  : offersStatus === 'unconfigured'
+                    ? 'paywall.storeUnavailable'
+                    : 'paywall.offersUnavailable',
+              )}
               tone="warning"
             />
             <Button

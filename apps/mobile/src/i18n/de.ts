@@ -483,6 +483,7 @@ export const de = {
   player: {
     textMode: 'Entdecken & lesen',
     enableAudio: 'Audioguide freischalten',
+    soundOff: 'Ton aus – Audioguide freischalten',
     audioMode: 'Audioguide',
     audioUpgradeFailed: 'Audio konnte nicht gestartet werden. Versuche es erneut.',
     continueText: 'Ohne Audioguide fortfahren',
@@ -699,6 +700,7 @@ export const de = {
     pricingHint:
       'Texttouren sind mit Werbung kostenlos. Mit Guthaben oder Premium hörst du die Geschichten unterwegs: bis zu 90 Minuten pro Guthaben oder 500 Minuten pro Monat im Abo.',
     offersUnavailable: 'Gerade sind keine Preise verfügbar. Versuche es erneut.',
+    storeUnavailable: 'Käufe sind in dieser Version der App noch nicht verfügbar. Text-Touren bleiben kostenlos.',
     demoNotice:
       'Demo: Hier kannst du die Preise ansehen und Käufe kostenlos ausprobieren. Es wird kein Geld abgebucht.',
     demoAction: 'Kostenloser Demo-Kauf; es wird kein Geld abgebucht.',

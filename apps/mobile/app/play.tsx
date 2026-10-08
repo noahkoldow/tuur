@@ -325,6 +325,14 @@ function PlayInner({ session }: { session: ActiveSession }) {
         >
           {title}
         </Text>
+        {textOnly && ui.phase !== 'finished' ? (
+          <IconButton
+            icon="volume-x"
+            label={t('player.soundOff')}
+            onPress={requestAudio}
+            disabled={upgradingAudio}
+          />
+        ) : null}
         <IconButton
           icon={ui.phase === 'paused' ? 'play' : 'pause'}
           label={ui.phase === 'paused' ? t('player.play') : t('player.pause')}
@@ -518,14 +526,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
         onUserScroll={() => (userScrolledAt.current = Date.now())}
       >
         <View style={{ gap: 14 }}>
-          {ui.phase !== 'finished' && textOnly ? (
-            <Button
-              label={t('player.enableAudio')}
-              icon="headphones"
-              loading={upgradingAudio}
-              onPress={requestAudio}
-            />
-          ) : ui.phase !== 'finished' && !session.groupId ? (
+          {ui.phase !== 'finished' && !textOnly && !session.groupId ? (
             <Button
               variant="ghost"
               label={t('player.continueText')}
@@ -534,21 +535,6 @@ function PlayInner({ session }: { session: ActiveSession }) {
             />
           ) : null}
           {audioError ? <Banner tone="error" text={t('player.audioUpgradeFailed')} /> : null}
-          {session.mode === 'roam' && ui.phase !== 'finished' && !inspectedStop ? (
-            <RoamSuggestions
-              suggestions={suggestions}
-              position={ui.user}
-              selectedId={selectedSuggestionId}
-              selectionKey={suggestionSelectionKey}
-              onChoose={(poi) => {
-                if (session.roam?.choose(poi)) {
-                  setSelectedSuggestionId(undefined);
-                  setSelectedStopId(undefined);
-                  haptics.select();
-                }
-              }}
-            />
-          ) : null}
           {inspectedStop ? (
             <View style={{ alignItems: 'flex-end' }}>
               <IconButton
@@ -574,6 +560,21 @@ function PlayInner({ session }: { session: ActiveSession }) {
                 lang={lang}
               />
             </View>
+          ) : null}
+          {session.mode === 'roam' && ui.phase !== 'finished' && !inspectedStop ? (
+            <RoamSuggestions
+              suggestions={suggestions}
+              position={ui.user}
+              selectedId={selectedSuggestionId}
+              selectionKey={suggestionSelectionKey}
+              onChoose={(poi) => {
+                if (session.roam?.choose(poi)) {
+                  setSelectedSuggestionId(undefined);
+                  setSelectedStopId(undefined);
+                  haptics.select();
+                }
+              }}
+            />
           ) : null}
           <Row gap={32} style={{ justifyContent: 'center' }}>
             <IconButton

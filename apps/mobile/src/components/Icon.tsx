@@ -44,6 +44,7 @@ const SF: Record<string, string> = {
   'skip-forward': 'forward.end.fill',
   'skip-back': 'backward.end.fill',
   headphones: 'headphones',
+  'volume-x': 'speaker.slash.fill',
   mic: 'mic.fill',
   // places and routes
   compass: 'safari',

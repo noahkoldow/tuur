@@ -6,25 +6,34 @@ const KEYS = {
   android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY,
 };
 
+/** Thrown when the store SDK has no public key in this build; the paywall explains it instead of a generic error. */
+export const UNCONFIGURED = 'billing_unconfigured';
+
 const isSub = (id: string) => id.startsWith('tuur_sub_');
 
 /** RevenueCat (react-native-purchases). The public SDK keys are not secrets; the server side uses the webhook. */
 export function createRevenueCatBilling(): BillingProvider {
   let configured = false;
+  let ready: Promise<void> = Promise.reject(new Error(UNCONFIGURED));
+  ready.catch(() => undefined);
   const sdk = () => (require('react-native-purchases') as typeof import('react-native-purchases')).default;
   return {
-    async init(uid) {
+    init(uid) {
       const apiKey = Platform.OS === 'ios' ? KEYS.ios : KEYS.android;
-      if (!apiKey) throw new Error('RevenueCat key missing');
-      const Purchases = sdk();
-      if (!configured) {
-        Purchases.configure({ apiKey, appUserID: uid });
-        configured = true;
-      } else {
-        await Purchases.logIn(uid);
-      }
+      ready = (async () => {
+        if (!apiKey) throw new Error(UNCONFIGURED);
+        const Purchases = sdk();
+        if (!configured) {
+          Purchases.configure({ apiKey, appUserID: uid });
+          configured = true;
+        } else {
+          await Purchases.logIn(uid);
+        }
+      })();
+      return ready;
     },
     async offers() {
+      await ready;
       const Purchases = sdk();
       const list = await Purchases.getProducts([
         'tuur_credit_1',
@@ -60,6 +69,7 @@ export function createRevenueCatBilling(): BillingProvider {
       });
     },
     async purchase(id) {
+      await ready;
       const Purchases = sdk();
       const [product] = await Purchases.getProducts([id]);
       if (!product) throw new Error('Product unavailable');
@@ -72,6 +82,7 @@ export function createRevenueCatBilling(): BillingProvider {
       }
     },
     async restore() {
+      await ready;
       await sdk().restorePurchases();
     },
   };
