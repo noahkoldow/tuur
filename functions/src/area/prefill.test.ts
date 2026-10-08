@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { encodeGeohash, geohashBounds } from '@tuur/shared';
-import { canClaimForPrefill, PREFILL_PRESETS, prefillTiles } from './prefill';
+import { canClaimForPrefill, PREFILL_PRESETS, prefillTiles, snapshotPrefillOrder } from './prefill';
 import { parseBetaRegion } from './betaSnapshot';
 
 const preset = PREFILL_PRESETS['berlin-inner']!;
@@ -28,6 +28,20 @@ describe('area prefill planning', () => {
     }
   });
 
+  it('plans Hakenfelde first-class, nearest to its centre, inside the beta region', () => {
+    const hakenfelde = PREFILL_PRESETS['hakenfelde']!;
+    const plan = prefillTiles(hakenfelde.bounds, hakenfelde.center);
+    expect(plan.length).toBeGreaterThan(60);
+    expect(plan.length).toBeLessThan(160);
+    expect(plan[0]).toBe(encodeGeohash(hakenfelde.center.lat, hakenfelde.center.lng, 6));
+    const region = parseBetaRegion('52.28,12.90,52.78,13.92')!;
+    expect(hakenfelde.bounds.south).toBeGreaterThan(region.south);
+    expect(hakenfelde.bounds.east).toBeLessThan(region.east);
+    expect(prefillTiles(PREFILL_PRESETS['spandau']!.bounds, PREFILL_PRESETS['spandau']!.center).length).toBeLessThan(
+      700,
+    );
+  });
+
   it('refuses an unbounded plan', () => {
     expect(() => prefillTiles({ south: 50, west: 10, north: 53, east: 14 }, preset.center)).toThrow(/exceeds/);
   });
@@ -38,5 +52,22 @@ describe('area prefill planning', () => {
     expect(canClaimForPrefill({ ...base, status: 'empty' }, now)).toBe(true);
     expect(canClaimForPrefill({ ...base, status: 'ingesting', ingestStartedAt: now - 60_000 }, now)).toBe(false);
     expect(canClaimForPrefill({ ...base, status: 'ready', locked: true, expiresAt: now - 1 }, now)).toBe(false);
+  });
+
+  it('orders imported tiles nearest-first and skips street-only and invalid ones', () => {
+    const near = encodeGeohash(52.5208, 13.4095, 6);
+    const far = encodeGeohash(52.4, 13.06, 6);
+    const empty = encodeGeohash(52.5, 13.3, 6);
+    const order = snapshotPrefillOrder(
+      [
+        { id: far, sights: 9 },
+        { id: empty, sights: 0 },
+        { id: 'bad!!!', sights: 5 },
+        { id: near, sights: 1 },
+      ],
+      preset.center,
+    );
+    expect(order).toEqual([near, far]);
+    expect(snapshotPrefillOrder([{ id: near, sights: 1 }], preset.center, 2)).toEqual([]);
   });
 });

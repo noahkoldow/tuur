@@ -17,8 +17,8 @@ export function parseBetaRegion(value: string) {
     Math.abs(box.east) > 180 ||
     box.south >= box.north ||
     box.west >= box.east ||
-    box.north - box.south > 3 ||
-    box.east - box.west > 3
+    box.north - box.south > 4 ||
+    box.east - box.west > 4
   )
     return undefined;
   return box;

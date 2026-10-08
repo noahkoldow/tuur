@@ -2,6 +2,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { HttpPoiSources, MockPoiSources, type PoiSourceClient } from './providers/poiSources';
+import { SnapshotPoiSources } from './providers/osmSnapshot';
 import { OVERSPAN_ENDPOINT, reserveOverpassRequest } from './providers/overpass';
 import { MockGeocoder, NominatimGeocoder, type GeocodingProvider } from './providers/geocoding';
 import { PeliasGeocoder, reservePeliasRequest } from './providers/pelias';
@@ -63,10 +64,12 @@ export function poiSources(): PoiSourceClient {
     return new MockPoiSources();
   const endpoint = process.env['OVERPASS_ENDPOINT'];
   const apiKey = endpoint === OVERSPAN_ENDPOINT ? usableKey(OVERPASS_API_KEY.value()) : undefined;
-  return new HttpPoiSources(endpoint, undefined, {
+  const live = new HttpPoiSources(endpoint, undefined, {
     ...(apiKey ? { apiKey } : {}),
     reserveRequest: () => reserveOverpassRequest(db()),
   });
+  // An imported regional OSM extract (osmTiles) answers first; Overpass remains the fallback elsewhere.
+  return new SnapshotPoiSources(db(), live);
 }
 export function geocoder(): GeocodingProvider {
   const provider = validateProvider('TUUR_GEOCODING_PROVIDER', GEOCODING_PROVIDER.value(), [

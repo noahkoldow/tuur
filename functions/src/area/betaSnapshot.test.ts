@@ -81,6 +81,7 @@ describe('bounded beta snapshot areas', () => {
       { TUUR_BETA_REGION_BBOX: 'garbage' },
       { TUUR_BETA_REGION_BBOX: '52.78,12.90,52.28,13.92' },
       { TUUR_BETA_REGION_BBOX: '-90,-180,90,180' },
+      { TUUR_BETA_REGION_BBOX: '50,10,55,15' },
       { TUUR_DEPLOYMENT_ENV: 'production' },
       { GCLOUD_PROJECT: 'tuur-prod', TUUR_BETA_FIREBASE_PROJECT_ID: 'tuur-prod' },
     ])('fails closed on unsafe region configuration %j', async (overrides) => {
@@ -97,6 +98,7 @@ describe('bounded beta snapshot areas', () => {
         east: 13.92,
       });
       expect(parseBetaRegion('1,2,3')).toBeUndefined();
+      expect(parseBetaRegion('51.35,11.25,53.57,14.78')).toBeDefined();
     });
   });
   it.each([{ exists: false }, { locked: false }, { status: 'failed' }])(
