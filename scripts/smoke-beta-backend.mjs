@@ -7,7 +7,7 @@
 // https://firebase.google.com/docs/reference/appcheck/rest/v1/projects.apps.debugTokens/create
 // https://firebase.google.com/docs/reference/appcheck/rest/v1/projects.apps/exchangeDebugToken
 // https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/projects/accounts
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -32,16 +32,21 @@ const knownCallables = [
   'prepareTourDownload',
   'spendCredit',
   'claimTourStart',
+  'updateTourTime',
   'recordPurchaseConsent',
   'createRewardNonce',
   'getNarration',
   'getTransition',
   'getTeaser',
+  'getPoiText',
   'selectNearby',
   'generateAutoTours',
   'composePlannedRoute',
   'getWalkingRoute',
   'reportNarration',
+  'reportContent',
+  'getAiConsent',
+  'updateAiConsent',
   'exportMyData',
   'deleteAccount',
 ];
@@ -61,6 +66,7 @@ export const smokePlan = {
     'allowed snapshot tile succeeds; outside tile is rejected',
     'free/reward/invite downloads denied',
     'seeded Premium download allowed, expired Premium denied',
+    'seeded Premium tour lease starts, pauses and ends before download reservation',
   ],
   cleanup:
     'Exact owned fixtures, rate limit, Auth user and debug token in finally; non-secret recovery journal on disk.',
@@ -150,6 +156,7 @@ export async function runSmoke({
   let personalContentAttempted = false;
   let stage = 'preflight';
   const ownedDocs = new Set();
+  const serverOwnedDocs = new Set();
   const report = {
     projectId,
     runId,
@@ -228,6 +235,26 @@ export async function runSmoke({
         fields: firestoreFields(data),
       });
   };
+  const trackServerDoc = async (path) => {
+    requireCondition(path.startsWith(`users/${uid}/`), 'fixture_path_outside_test_user');
+    if (ownedDocs.has(path)) return;
+    try {
+      await cloudApi('GET', `${firestoreBase}/${path}`);
+      throw new SmokeFailure('temporary_server_document_collision');
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+    }
+    ownedDocs.add(path);
+    serverOwnedDocs.add(path);
+    await saveState();
+  };
+  const prepareDownload = async (request) => {
+    await trackServerDoc(`users/${uid}/tourTime/budget`);
+    await trackServerDoc(
+      `users/${uid}/tourDownloads/${createHash('sha256').update(request.scriptInstanceId).digest('hex')}`,
+    );
+    return callable('prepareTourDownload', request);
+  };
 
   try {
     await assertProject();
@@ -253,6 +280,7 @@ export async function runSmoke({
     requireCondition(
       active.has('ensureArea') &&
         active.has('prepareTourDownload') &&
+        active.has('updateTourTime') &&
         active.has('getWalkingRoute') &&
         (!content || active.has('deleteAccount')),
       'required_backend_not_active',
@@ -360,7 +388,7 @@ export async function runSmoke({
       expectDenied(await callable('getWalkingRoute', {}, { idToken: 'invalid', appCheckToken }), 401),
     );
 
-    // ensureArea is the only successful tested callable that writes state; track its exact private counter first.
+    // Track the exact counter before the server creates it for this temporary user.
     const ratePath = `rateLimits/ensureArea_${uid}`;
     try {
       await cloudApi('GET', `${firestoreBase}/${ratePath}`);
@@ -401,7 +429,10 @@ export async function runSmoke({
         smokeFixture: runId,
       }),
     );
-    const requests = [{ tourId: privateId, mode: 'planned' }, ...(tourId ? [{ tourId, mode: 'tour' }] : [])];
+    const requests = [
+      { tourId: privateId, mode: 'planned', scriptInstanceId: `${runId}-planned` },
+      ...(tourId ? [{ tourId, mode: 'tour', scriptInstanceId: `${runId}-tour` }] : []),
+    ];
     const entitlementPath = `users/${uid}/entitlements/smoke`;
     for (const request of requests) {
       for (const source of ['free', 'reward', 'invite']) {
@@ -427,7 +458,30 @@ export async function runSmoke({
           updatedAt: Date.now(),
           smokeFixture: runId,
         });
-        const response = await callable('prepareTourDownload', request);
+        if (request.mode === 'planned') {
+          await trackServerDoc(`users/${uid}/tourTime/budget`);
+          await trackServerDoc(`users/${uid}/tourTimeSessions/${runId}`);
+          for (const [index, state] of ['active', 'paused', 'ended'].entries()) {
+            const lease = await callable('updateTourTime', {
+              sessionId: runId,
+              sequence: index + 1,
+              tourId: request.tourId,
+              mode: request.mode,
+              state,
+            });
+            requireCondition(
+              lease.status === 200 &&
+                lease.data?.result?.state === state &&
+                lease.data.result.source === 'subscription' &&
+                typeof lease.data.result.remainingSeconds === 'number' &&
+                (state === 'active'
+                  ? lease.data.result.leaseExpiresAt > Date.now()
+                  : lease.data.result.leaseExpiresAt === null),
+              `tour_time_${state}_failed`,
+            );
+          }
+        }
+        const response = await prepareDownload(request);
         const receipt = response.data?.result;
         requireCondition(
           response.status === 200 &&
@@ -563,12 +617,18 @@ export async function runSmoke({
         });
       });
       await step('content:real_gemini_audio_and_signed_url', async () => {
+        const reservation = await prepareDownload({
+          tourId: realTourId,
+          mode: 'tour',
+          scriptInstanceId: runId,
+        });
+        requireCondition(reservation.status === 200, 'real_download_reservation_failed');
         const request = {
           poiId,
           lang: 'de',
           lengthTier: 'short',
           download: true,
-          access: { tourId: realTourId, mode: 'tour' },
+          access: { tourId: realTourId, mode: 'tour', downloadId: runId },
           context: {
             chapter: 1,
             script: {
@@ -625,7 +685,7 @@ export async function runSmoke({
         });
       });
       await step('content:real_tour_premium_download', async () => {
-        const response = await callable('prepareTourDownload', { tourId: realTourId, mode: 'tour' });
+        const response = await prepareDownload({ tourId: realTourId, mode: 'tour', scriptInstanceId: runId });
         requireCondition(
           response.status === 200 && response.data?.result?.tourId === realTourId,
           'real_download_failed',
@@ -708,7 +768,7 @@ export async function runSmoke({
         );
         try {
           const document = await cloudApi('GET', `${firestoreBase}/${path}`);
-          if (path.startsWith(`users/${uid}/`))
+          if (path.startsWith(`users/${uid}/`) && !serverOwnedDocs.has(path))
             requireCondition(
               value(document.fields?.smokeFixture) === runId,
               'cleanup_document_owner_mismatch',

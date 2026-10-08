@@ -45,7 +45,7 @@ describe('persistent tour script', () => {
       narrationKey(
         {
           ...base,
-          context: { ...context, script: { ...script, question: 'Welche kleinen Dinge übersehen wir?' } },
+          context: { ...context, script: { ...script, question: 'Welche kleinen Dinge Ã¼bersehen wir?' } },
         },
         'v1',
       ),
@@ -102,11 +102,32 @@ describe('small observations from sparse local sources', () => {
   it('leaves factual sources with the source-checked model and rejects unsupported feature types', () => {
     expect(
       localObservation(
-        { ...bundle, wikipedia: [{ lang: 'de', title: 'Straße', extract: 'A documented story.' }] },
+        { ...bundle, wikipedia: [{ lang: 'de', title: 'StraÃŸe', extract: 'A documented story.' }] },
         'de',
       ),
     ).toBeUndefined();
     expect(localObservation({ ...bundle, osmTags: { amenity: 'parking' } }, 'de')).toBeUndefined();
     expect(localObservation({ ...bundle, poiName: '' }, 'de')).toBeUndefined();
   });
+});
+
+it('does not send internal identifiers or future private context fields to the AI prompt', () => {
+  const context = {
+    ...narrationContextFor(
+      { ...script, id: 'private-story-id', instanceId: 'private-instance-id' },
+      route,
+      'b',
+    ),
+    uid: 'private-user-id',
+    email: 'private@example.invalid',
+  };
+  const prompt = userPrompt({ bundle, lang: 'de', tier: 'short', interest: 'history', context });
+  expect(prompt).toContain(script.question);
+  for (const secret of [
+    'private-story-id',
+    'private-instance-id',
+    'private-user-id',
+    'private@example.invalid',
+  ])
+    expect(prompt).not.toContain(secret);
 });

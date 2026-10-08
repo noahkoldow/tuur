@@ -1,10 +1,15 @@
 import { z } from 'zod';
 import { downloadTourMode, type OfflineDownloadAccess, type Tour } from '@tuur/shared';
 import { authorizeContent, BillingError, type BillingDeps } from './entitlements';
+import { reserveDownloadTime } from './timeBudget';
 
-const Request = z.object({ tourId: z.string().min(1).max(200), mode: z.enum(['tour', 'planned']) });
+const Request = z.object({
+  tourId: z.string().min(1).max(200),
+  mode: z.enum(['tour', 'planned']),
+  scriptInstanceId: z.string().min(1).max(200).optional(),
+});
 
-/** Authorize saving a fixed itinerary without claiming a tour start or changing monthly usage. */
+/** Reserve the itinerary's minutes once before generating a new offline script. Saved receipts remain permanent. */
 export async function prepareTourDownload(
   deps: BillingDeps,
   uid: string,
@@ -28,7 +33,23 @@ export async function prepareTourDownload(
     throw new BillingError('permission-denied', 'This route cannot be downloaded', {
       reason: 'download_not_supported',
     });
-  await authorizeContent(deps, uid, { tourId, mode, download: true, poiIds: tour.stops.map((s) => s.poiId) });
-  // The 24h private session governs new online curation. A fully downloaded fixed itinerary is kept.
+  await authorizeContent(deps, uid, {
+    tourId,
+    mode,
+    download: true,
+    preparingDownload: true,
+    poiIds: tour.stops.map((s) => s.poiId),
+  });
+  await reserveDownloadTime(deps, uid, {
+    tourId,
+    mode,
+    placeId: tour.placeId,
+    scriptInstanceId: parsed.data.scriptInstanceId,
+    stopIds: tour.stops.map((stop) => stop.poiId),
+    durationMinutes:
+      tour.durationMinutes ||
+      tour.stops.reduce((sum, stop) => sum + (stop.dwellMinutes || 0) + (stop.walkMinutesFromPrev || 0), 0) ||
+      90,
+  });
   return { tourId, mode, grantedAt: deps.now(), expiresAt: null };
 }

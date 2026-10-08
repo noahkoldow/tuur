@@ -1,11 +1,13 @@
 import {
+  AI_CONSENT_VERSION,
+  type AiConsentState,
   frameScriptParagraphs,
   localObservation,
   isLocalContextPoi,
   filterOsmTags,
   DEFAULT_TEMPLATES,
   SESSION_DURATION_MS,
-  decideAccess,
+  decideAudioAccess,
   decideDownloadAccess,
   decideInvite,
   decideSpend,
@@ -26,6 +28,7 @@ import {
   geohashNeighbors,
   tilesAround,
   GROUP_BASE_SIZE,
+  GROUP_PREMIUM_EXTRA,
   GROUP_MAX_SIZE,
   GROUP_TTL_MS,
   toExploredSpots,
@@ -35,6 +38,10 @@ import {
   type ComposeRouteRequest,
   layoutParagraphs,
   narrationKey,
+  narrationContextFor,
+  hasRemainingTourTime,
+  CREDIT_TOUR_MINUTES,
+  type AccessContext,
   pickFreeTourId,
   planTour,
   syntheticRawPois,
@@ -56,12 +63,19 @@ import {
   type AuthApi,
   type Backend,
   type GroupInfo,
+  type AccessInfo,
+  type TransitionResponse,
   type UserInfo,
 } from './types';
 import { previewWalkingPath } from './previewRouting';
-import { normalizedPhone, requireVerifiedAccount, validPhone } from '../auth/policy';
+import { normalizedPhone, requirePrimaryAccount, validPhone } from '../auth/policy';
+import { createDemoTimeBudget } from './demoTimeBudget';
+import { withDemoPlaceText } from './demoPlaceText';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const isNarrationResponse = (
+  response: NarrationResponse | TransitionResponse,
+): response is NarrationResponse => 'paragraphs' in response;
 
 interface Region {
   key: string;
@@ -205,16 +219,55 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
   const tourListeners = new Map<string, Set<(t: Tour[]) => void>>();
   const tours = new Map<string, Tour>();
   const ents: Entitlement[] = [];
+  const timeBudget = createDemoTimeBudget(() => ents);
   let wallet: Wallet = { balance: 0, rewardBalance: 0 };
   const invites = new Map<string, { tourId: string; expiresAt: number }>();
   const groupsDemo = new Map<string, GroupInfo>();
   const groupListeners = new Map<string, Set<(g: GroupInfo | null) => void>>();
+  const recordings = new Map<
+    string,
+    {
+      response: NarrationResponse | TransitionResponse;
+      poiId: string;
+      fromPoiId?: string;
+      scriptInstanceId?: string;
+      lang: string;
+      voice?: string;
+    }
+  >();
+  const groupRecordings = new Map<string, NarrationResponse | TransitionResponse>();
+  const groupSlot = (groupId: string, poiId: string, fromPoiId?: string) =>
+    JSON.stringify([groupId, fromPoiId ?? null, poiId]);
+  const groupFor = (access: AccessInfo | undefined, poiIds: string[], download = false) => {
+    if (!access?.groupId) return undefined;
+    const group = groupsDemo.get(access.groupId);
+    if (
+      !group ||
+      group.status !== 'live' ||
+      group.expiresAt <= Date.now() ||
+      download ||
+      !group.audio ||
+      !poiIds.every((id) => group.tour.stops.some((stop) => stop.poiId === id))
+    )
+      throw new BackendError('locked', 'Group access has ended', undefined, 'group_ended');
+    return group;
+  };
+  const contextFor = (access: AccessInfo & { placeId?: string; tile?: string }): AccessContext => {
+    const mode = access.mode ?? (access.tourId ? 'tour' : 'roam');
+    const tour = access.tourId ? tours.get(access.tourId) : undefined;
+    const areaPlace = access.tile ? areas.get(access.tile)?.placeId : undefined;
+    if (access.tile && (!areaPlace || (access.placeId && areaPlace !== access.placeId)))
+      throw new BackendError('locked', 'Place does not match this area');
+    return {
+      mode,
+      ...(access.tourId ? { tourId: access.tourId, tourFree: tour?.free ?? false } : {}),
+      placeId: tour?.placeId ?? areaPlace ?? access.placeId ?? [...regions.values()][0]?.placeId,
+    };
+  };
   /** Mirrors the server-side check so the demo shows the same locked/unlocked behavior. */
-  const gate = (
-    access: { tourId?: string; mode?: 'tour' | 'planned' | 'fork' | 'roam' } | undefined,
-    download = false,
-    poiIds: string[] = [],
-  ) => {
+  const gate = (access: AccessInfo | undefined, download = false, poiIds: string[] = [], prepare = false) => {
+    const group = groupFor(access, poiIds, download);
+    if (group) access = { tourId: group.tour.id, mode: group.mode, sessionId: group.sessionId };
     if (!download && !opts.enforceAccess) return;
     const mode = access?.mode ?? (access?.tourId ? 'tour' : undefined);
     const tour = access?.tourId ? tours.get(access.tourId) : undefined;
@@ -233,7 +286,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       if (!poiIds.every((id) => tour.stops.some((stop) => stop.poiId === id)))
         throw new BackendError('locked', 'Stop is not part of this tour');
     }
-    const d = (download ? decideDownloadAccess : decideAccess)(
+    const d = (download ? decideDownloadAccess : decideAudioAccess)(
       ents,
       {
         ...(mode ? { mode } : {}),
@@ -243,6 +296,12 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       now,
     );
     if (!d.allowed) throw new BackendError('locked', 'Content is locked', undefined, d.reason);
+    const context = { ...contextFor(access ?? {}), ...access };
+    if (download) {
+      if (!prepare) timeBudget.assertDownload(context);
+    } else {
+      timeBudget.assertAccess(context);
+    }
   };
   /** Demo partners: every sixth POI is a "partner" so the labels, offers and the QR screen can be tried in the preview. */
   const demoPartners = Boolean(opts.enforceAccess);
@@ -263,7 +322,8 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
     const existing = regions.get(key);
     if (existing) return existing;
     const raw: RawPoi[] = fx ? fx.raw : syntheticRawPois(tile);
-    const { pois } = buildPois(raw, { now: Date.now(), precision: 6, images: FIXTURE_IMAGES });
+    const built = buildPois(raw, { now: Date.now(), precision: 6, images: FIXTURE_IMAGES });
+    const pois = built.pois.map(withDemoPlaceText);
     const region: Region = {
       key,
       placeId: fx ? `${fx.countryCode}_${fx.key}` : `DEMO_${tile.slice(0, 5)}`,
@@ -291,7 +351,7 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       cb(user.current);
       return () => authListeners.delete(cb);
     },
-    ensureSignedIn: async () => requireVerifiedAccount(user.current),
+    ensureSignedIn: async () => requirePrimaryAccount(user.current),
     signInWithEmail: async (email) =>
       setUser({ uid: 'demo-user', isAnonymous: false, email, providerIds: ['password'] })!,
     signInWithApple: async () =>
@@ -338,9 +398,20 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
     },
   };
 
+  const aiChoices = new Map<string, AiConsentState>();
   const backend: Backend = {
     kind: 'demo',
     auth,
+    async getAiConsent() {
+      const current = await auth.ensureSignedIn();
+      return aiChoices.get(current.uid) ?? { granted: false, version: null, updatedAt: null };
+    },
+    async updateAiConsent(granted) {
+      const current = await auth.ensureSignedIn();
+      const state = { granted, version: AI_CONSENT_VERSION, updatedAt: Date.now() };
+      aiChoices.set(current.uid, state);
+      return state;
+    },
     async ensureArea(tile, rings) {
       const all = rings !== undefined ? tilesAround(tile, rings) : [tile, ...geohashNeighbors(tile)];
       for (const t of all) {
@@ -550,18 +621,49 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       return { tour, dropped: fit.dropped };
     },
     async getTeaser(req) {
-      gate(req.access);
       const poi = poiIndex.get(req.poiId);
       const kind = poi?.osmTags['tourism'] ?? poi?.osmTags['historic'] ?? poi?.osmTags['amenity'] ?? 'place';
       return req.lang === 'de'
         ? `Ein Ort der Kategorie ${kind}, an dem sich ein kurzer Halt lohnt.`
         : `A ${kind} that is worth a short stop.`;
     },
+    async getPoiText(req) {
+      await sleep(latency);
+      const poi = poiIndex.get(req.poiId);
+      if (!poi) throw new BackendError('not_found', 'Place is not available');
+      return poi;
+    },
     async getNarration(req: GetNarrationRequest): Promise<NarrationResponse> {
       await sleep(latency);
+      if (req.access?.downloadId && req.access.downloadId !== req.context?.script?.instanceId)
+        throw new BackendError('locked', 'Download recording identity does not match');
       if (req.download && (!req.access?.tourId || !['tour', 'planned'].includes(req.access.mode ?? 'tour')))
         throw new BackendError('locked', 'Only fixed itineraries can be downloaded');
       gate(req.access, Boolean(req.download), [req.poiId]);
+      const group = groupFor(req.access, [req.poiId], req.download);
+      const slot = group ? groupSlot(group.id, req.poiId) : undefined;
+      const shared = slot ? groupRecordings.get(slot) : undefined;
+      if (shared && isNarrationResponse(shared)) return { ...shared, cached: true };
+      if (group) {
+        if (group.hostUid !== (user.current?.uid ?? 'demo'))
+          throw new BackendError(
+            'unavailable',
+            'Waiting for the host recording',
+            1500,
+            'group_audio_pending',
+          );
+        req = {
+          ...req,
+          lang: group.audio!.lang,
+          voice: group.audio!.voice,
+          primaryInterest: group.audio!.primaryInterest,
+          context: narrationContextFor(
+            group.audio!.script,
+            group.tour.stops.map((stop) => ({ id: stop.poiId, name: stop.name })),
+            req.poiId,
+          ),
+        };
+      }
       const poi = poiIndex.get(req.poiId);
       if (!poi) throw new BackendError('not_found', 'POI not found');
       const sponsored = demoPartners && isDemoPartner(poi.id);
@@ -594,12 +696,13 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
           pcmBytes: (estimateSpeechMs(text, req.lang) / 1000) * PCM_BYTES_PER_SECOND,
         })),
       );
-      const key = narrationKey(
+      const contentKey = narrationKey(
         { ...req, primaryInterest: req.primaryInterest ?? poi.primaryInterest },
         'demo',
       );
+      const key = `${contentKey}__${req.context?.script?.instanceId ?? 'preview'}__${req.voice ?? 'default'}`;
       const last = layout[layout.length - 1];
-      return {
+      const response: NarrationResponse = {
         key,
         title: poi.name,
         text: layout.map((l) => l.text).join('\n\n'),
@@ -612,27 +715,70 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         aiGenerated: true,
         ...(sponsored ? { sponsored: true } : {}),
       };
+      recordings.set(key, {
+        response,
+        poiId: req.poiId,
+        scriptInstanceId: req.context?.script?.instanceId,
+        lang: req.lang,
+        voice: req.voice,
+      });
+      if (slot) groupRecordings.set(slot, response);
+      return response;
     },
     async getTransition(req) {
+      if (req.access?.downloadId && req.access.downloadId !== req.scriptInstanceId)
+        throw new BackendError('locked', 'Download recording identity does not match');
       if (req.download && (!req.access?.tourId || !['tour', 'planned'].includes(req.access.mode ?? 'tour')))
         throw new BackendError('locked', 'Only fixed itineraries can be downloaded');
       gate(req.access, Boolean(req.download), [req.fromPoiId, req.toPoiId]);
+      const group = groupFor(req.access, [req.fromPoiId, req.toPoiId], req.download);
+      const slot = group ? groupSlot(group.id, req.toPoiId, req.fromPoiId) : undefined;
+      const shared = slot ? groupRecordings.get(slot) : undefined;
+      if (shared) return shared;
+      if (group) {
+        if (group.hostUid !== (user.current?.uid ?? 'demo'))
+          throw new BackendError(
+            'unavailable',
+            'Waiting for the host recording',
+            1500,
+            'group_audio_pending',
+          );
+        req = {
+          ...req,
+          lang: group.audio!.lang,
+          voice: group.audio!.voice,
+          scriptInstanceId: group.audio!.script.instanceId,
+        };
+      }
       const to = poiIndex.get(req.toPoiId);
       const text =
         req.lang === 'de'
           ? `Weiter geht es zu ${to?.name ?? 'der nächsten Station'}, etwa ${req.walkMinutes} Minuten zu Fuß.`
           : `Next is ${to?.name ?? 'the next stop'}, about ${req.walkMinutes} minutes on foot.`;
-      return {
+      const response: TransitionResponse = {
         key: `demo-tr-${req.fromPoiId}-${req.toPoiId}-${req.scriptInstanceId ?? 'preview'}`,
         text,
         audioPath: `demo:tr:${req.toPoiId}:${req.scriptInstanceId ?? 'preview'}`,
         audioDurationMs: estimateSpeechMs(text, req.lang),
       };
+      recordings.set(response.key, {
+        response,
+        poiId: req.toPoiId,
+        fromPoiId: req.fromPoiId,
+        scriptInstanceId: req.scriptInstanceId,
+        lang: req.lang,
+        voice: req.voice,
+      });
+      if (slot) groupRecordings.set(slot, response);
+      return response;
     },
     async audioUrl(audioPath) {
       return `demo://${audioPath}`;
     },
     async reportNarration() {
+      await sleep(latency);
+    },
+    async reportContent() {
       await sleep(latency);
     },
     watchEntitlements(cb) {
@@ -652,22 +798,41 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       if (!tour && mode !== 'planned') throw new BackendError('not_found', 'Tour not found');
       if (opts.enforceAccess && !entitled && !(mode === 'planned' && hasSession) && !tour?.free)
         throw new BackendError('locked', 'Tour is locked');
+      if (opts.enforceAccess) timeBudget.assertAccess({ ...contextFor({ tourId, mode }), planning: true });
       return { counted: false, remaining: null };
     },
-    async prepareTourDownload(tourId, mode) {
+    async updateTourTime(request) {
+      const context = contextFor(request);
+      if (
+        (request.mode === 'tour' || request.mode === 'planned') &&
+        (!request.tourId || !tours.has(request.tourId))
+      )
+        throw new BackendError('not_found', 'Tour not found');
+      if (!context.placeId) throw new BackendError('not_found', 'Place not found');
+      const result = timeBudget.update(request, { ...context, mode: request.mode }, !opts.enforceAccess);
+      emitEnts();
+      return result;
+    },
+    async prepareTourDownload(tourId, mode, scriptInstanceId) {
       const tour = tours.get(tourId);
       if (!tour || downloadTourMode(tour) !== mode)
         throw new BackendError('not_found', 'This route cannot be downloaded');
       if (tour.expiresAt !== undefined && tour.expiresAt <= Date.now())
         throw new BackendError('locked', 'This online route session has expired');
-      gate({ tourId, mode }, true);
+      gate({ tourId, mode }, true, [], true);
+      timeBudget.reserveDownload(
+        { ...contextFor({ tourId, mode }), mode },
+        tour.durationMinutes,
+        scriptInstanceId,
+      );
+      emitEnts();
       return { tourId, mode, grantedAt: Date.now(), expiresAt: null };
     },
     async spendCredit(req) {
       await sleep(latency);
       const now = Date.now();
-      const paidOnly = req.kind === 'tour' && req.paidOnly === true;
-      if (paidOnly) {
+      const downloadPurchase = req.kind === 'tour' && req.paidOnly === true;
+      if (req.kind === 'tour') {
         const tour = tours.get(req.tourId);
         if (!tour || tour.locked) throw new BackendError('not_found', 'Tour not found');
       }
@@ -677,10 +842,19 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
               (e) =>
                 e.type === 'tour' &&
                 e.tourId === req.tourId &&
-                (!paidOnly || (e.source === 'credit' && (e.expiresAt === null || e.expiresAt > now))),
+                hasRemainingTourTime(e) &&
+                (e.source === 'credit' ||
+                  (!downloadPurchase && e.source === 'invite' && e.timeAllowanceSeconds === undefined)) &&
+                (e.expiresAt === null || e.expiresAt > now),
             )
-          : ents.some((e) => e.type === 'session' && e.placeId === req.placeId && e.expiresAt > now);
-      const d = decideSpend(wallet, req.kind, unlocked, isSubscriber(ents, now), paidOnly);
+          : ents.some(
+              (e) =>
+                e.type === 'session' &&
+                e.placeId === req.placeId &&
+                e.expiresAt > now &&
+                hasRemainingTourTime(e),
+            );
+      const d = decideSpend(wallet, req.kind, unlocked, isSubscriber(ents, now), true);
       if (!d.ok)
         throw new BackendError(
           d.reason === 'insufficient' ? 'insufficient_credit' : 'invite_invalid',
@@ -697,13 +871,17 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
               source: d.use === 'reward' ? 'reward' : 'credit',
               grantedAt: now,
               expiresAt: null,
+              timeAllowanceSeconds: CREDIT_TOUR_MINUTES * 60,
+              timeRemainingSeconds: CREDIT_TOUR_MINUTES * 60,
             }
           : {
               type: 'session',
               placeId: req.placeId,
               source: 'credit',
               grantedAt: now,
-              expiresAt: now + SESSION_DURATION_MS,
+              expiresAt: Number.MAX_SAFE_INTEGER,
+              timeAllowanceSeconds: CREDIT_TOUR_MINUTES * 60,
+              timeRemainingSeconds: CREDIT_TOUR_MINUTES * 60,
             },
       );
       emitEnts();
@@ -739,6 +917,10 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       ents.length = 0;
       wallet = { balance: 0, rewardBalance: 0 };
       invites.clear();
+      timeBudget.reset();
+      groupsDemo.clear();
+      groupRecordings.clear();
+      recordings.clear();
       emitEnts();
       setUser(null);
     },
@@ -774,18 +956,34 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       await sleep(latency);
       const tour = tours.get(req.tourId);
       if (!tour) throw new BackendError('not_found', 'Tour not found');
+      gate({ tourId: req.tourId, mode: req.mode, sessionId: req.sessionId });
       const id = `demogroup${Date.now().toString(36)}`;
       const g: GroupInfo = {
         id,
         tour,
         mode: req.mode,
+        audio: req.audio,
+        ...(req.sessionId ? { sessionId: req.sessionId } : {}),
         hostUid: user.current?.uid ?? 'demo',
         members: 1,
-        capacity: GROUP_BASE_SIZE,
+        capacity: GROUP_BASE_SIZE + (isSubscriber(ents, Date.now()) ? GROUP_PREMIUM_EXTRA : 0),
         status: 'live',
         expiresAt: Date.now() + GROUP_TTL_MS,
       };
       groupsDemo.set(id, g);
+      for (const seed of req.recordings ?? []) {
+        const recording = recordings.get(seed.key);
+        if (
+          recording &&
+          recording.poiId === seed.poiId &&
+          recording.fromPoiId === seed.fromPoiId &&
+          recording.scriptInstanceId === req.audio.script.instanceId &&
+          recording.lang === req.audio.lang &&
+          recording.voice === req.audio.voice &&
+          tour.stops.some((stop) => stop.poiId === seed.poiId)
+        )
+          groupRecordings.set(groupSlot(id, seed.poiId, seed.fromPoiId), recording.response);
+      }
       return { token: `${id}.${'d'.repeat(43)}`, group: g };
     },
     async joinGroup(token) {
@@ -850,12 +1048,12 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
         wallet = { ...wallet, rewardBalance: wallet.rewardBalance + 1 };
         emitEnts();
       },
-      grantSubscription() {
+      grantSubscription(productId = 'tuur_sub_monthly') {
         ents.push({
           type: 'subscription',
           active: true,
-          productId: 'tuur_sub_monthly',
-          expiresAt: Date.now() + 30 * 24 * 3600_000,
+          productId,
+          expiresAt: Date.now() + (productId === 'tuur_sub_yearly' ? 365 : 30) * 24 * 3600_000,
           willRenew: true,
           updatedAt: Date.now(),
         });

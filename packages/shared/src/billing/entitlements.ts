@@ -24,19 +24,25 @@ export const TourEntitlementSchema = z.object({
   source: z.enum(TOUR_ENTITLEMENT_SOURCES),
   placeId: z.string().optional(),
   grantedAt: z.number(),
-  /** Standard tours are unlocked permanently (null). */
+  /** Null has no wall-clock expiry; new credit grants are still limited by remaining time. */
   expiresAt: z.number().nullable(),
   /** Set for invited friends: who shared the tour. */
   inviteFrom: z.string().optional(),
+  /** Absent on legacy permanent purchases. New credit grants contain 90 active minutes. */
+  timeAllowanceSeconds: z.number().nonnegative().optional(),
+  timeRemainingSeconds: z.number().nonnegative().optional(),
 });
 
 export const SessionEntitlementSchema = z.object({
   type: z.literal('session'),
   placeId: z.string(),
-  /** 24 h at one place (spec 6.1). */
+  /** Legacy grants last 24 h; metered grants use remaining active time instead. */
   expiresAt: z.number(),
   source: z.literal('credit'),
   grantedAt: z.number(),
+  /** Absent on legacy 24-hour sessions. New grants do not expire while paused. */
+  timeAllowanceSeconds: z.number().nonnegative().optional(),
+  timeRemainingSeconds: z.number().nonnegative().optional(),
 });
 
 export const EntitlementSchema = z.discriminatedUnion('type', [
@@ -51,6 +57,7 @@ export type SessionEntitlement = z.infer<typeof SessionEntitlementSchema>;
 
 export const SESSION_DURATION_MS = 24 * 3600_000;
 export const MAX_INVITES_PER_TOUR = 2;
+/** @deprecated Starts no longer determine access; use SUBSCRIPTION_TOUR_MINUTES_PER_MONTH. */
 export const SUBSCRIPTION_TOUR_STARTS_PER_MONTH = 10;
 
 export type SessionMode = 'tour' | 'planned' | 'fork' | 'roam';
@@ -60,7 +67,7 @@ export interface AccessContext {
   tourId?: string;
   /** Whether that tour is the free tour of its place (from the tour document, never from the client). */
   tourFree?: boolean;
-  /** Dynamic modes are sold as 24 h sessions per place. */
+  /** Dynamic modes use a session entitlement for the current place. */
   mode?: SessionMode;
   placeId?: string;
 }
@@ -75,13 +82,20 @@ export function isSubscriber(ents: Entitlement[], now: number): boolean {
   );
 }
 
-/** Decides whether content may be served. Evaluated server-side before any (paid) generation happens. */
+export function hasRemainingTourTime(e: TourEntitlement | SessionEntitlement): boolean {
+  return e.timeAllowanceSeconds === undefined || (e.timeRemainingSeconds ?? e.timeAllowanceSeconds) > 0;
+}
+
+/** Legacy entitlement interpretation. New audio gates must use decideAudioAccess. */
 export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: number): AccessDecision {
   if (isSubscriber(ents, now)) return { allowed: true, reason: 'subscription' };
   if (ctx.mode === 'planned' || ctx.mode === 'fork' || ctx.mode === 'roam') {
     if (
       ctx.placeId &&
-      ents.some((e) => e.type === 'session' && e.placeId === ctx.placeId && e.expiresAt > now)
+      ents.some(
+        (e) =>
+          e.type === 'session' && e.placeId === ctx.placeId && e.expiresAt > now && hasRemainingTourTime(e),
+      )
     )
       return { allowed: true, reason: 'session' };
     return { allowed: false, reason: 'denied' };
@@ -94,6 +108,7 @@ export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: numbe
           e.type === 'tour' &&
           e.tourId === ctx.tourId &&
           e.source === 'credit' &&
+          hasRemainingTourTime(e) &&
           (e.expiresAt === null || e.expiresAt > now),
       )
     )
@@ -109,11 +124,30 @@ export function decideAccess(ents: Entitlement[], ctx: AccessContext, now: numbe
   }
   if (
     ents.some(
-      (e) => e.type === 'tour' && e.tourId === ctx.tourId && (e.expiresAt === null || e.expiresAt > now),
+      (e) =>
+        e.type === 'tour' &&
+        e.tourId === ctx.tourId &&
+        hasRemainingTourTime(e) &&
+        (e.expiresAt === null || e.expiresAt > now),
     )
   )
     return { allowed: true, reason: 'tour' };
   return { allowed: false, reason: 'denied' };
+}
+
+/** Audio uses Premium, spent paid credits or gifts backed by a legacy permanent purchase. */
+export function decideAudioAccess(ents: Entitlement[], ctx: AccessContext, now: number): AccessDecision {
+  return decideAccess(
+    ents.filter(
+      (entitlement) =>
+        entitlement.type !== 'tour' ||
+        entitlement.source === 'credit' ||
+        (entitlement.source === 'invite' && entitlement.timeAllowanceSeconds === undefined),
+    ),
+    // A tour's old free label cannot override these already purchase-backed rights.
+    { ...ctx, tourFree: false },
+    now,
+  );
 }
 
 export type DownloadAccessDecision =
@@ -164,7 +198,7 @@ export type SpendDecision =
   | { ok: true; use: 'reward' | 'paid'; wallet: Wallet }
   | { ok: false; reason: 'insufficient' | 'already_unlocked' | 'subscriber' };
 
-/** One credit unlocks one standard tour permanently or one 24 h session (spec 6.1). Reward credits first for tours. */
+/** One new credit grants 90 active minutes. Legacy grants retain their original rights. Rewards first for tours. */
 export function decideSpend(
   wallet: Wallet,
   kind: SpendKind,
@@ -186,7 +220,13 @@ export type InviteDecision =
 
 /** Only tours bought with a credit can be shared, at most twice (spec 6.3). Rewards and invites cannot be re-shared. */
 export function decideInvite(ents: Entitlement[], tourId: string, existingInvites: number): InviteDecision {
-  const bought = ents.some((e) => e.type === 'tour' && e.tourId === tourId && e.source === 'credit');
+  const bought = ents.some(
+    (e) =>
+      e.type === 'tour' &&
+      e.tourId === tourId &&
+      e.source === 'credit' &&
+      e.timeAllowanceSeconds === undefined,
+  );
   if (!bought) return { ok: false, reason: 'not_purchased' };
   if (existingInvites >= MAX_INVITES_PER_TOUR) return { ok: false, reason: 'limit_reached' };
   return { ok: true, remaining: MAX_INVITES_PER_TOUR - existingInvites - 1 };

@@ -16,9 +16,23 @@ import type {
   SelectNearbyResult,
   GetWalkingRouteRequest,
   WalkingRouteResult,
+  TourScript,
+  Interest,
+  UpdateTourTimeRequest,
+  TourTimeResult,
+  AiConsentState,
 } from '@tuur/shared';
 
 export type Unsubscribe = () => void;
+
+export interface ContentReportInput {
+  requestId: string;
+  kind: 'ad' | 'offer';
+  offerId?: string;
+  reason: 'offensive' | 'age_inappropriate' | 'misleading' | 'other';
+  text: string;
+  blockPartner: boolean;
+}
 
 export interface AreaInfo {
   status: AreaStatus;
@@ -54,6 +68,10 @@ export interface AccessInfo {
   mode?: 'tour' | 'planned' | 'fork' | 'roam';
   /** Live group the listener belongs to (server checks the membership, D47). */
   groupId?: string;
+  /** Server-issued active-time lease, shared across all modes in this walk. */
+  sessionId?: string;
+  /** Prepaid download identity, bound to the exact narration script instance. */
+  downloadId?: string;
 }
 
 /** What members see of a live group (D47). */
@@ -66,6 +84,8 @@ export interface GroupInfo {
   capacity: number;
   status: 'live' | 'ended';
   expiresAt: number;
+  audio?: { script: TourScript; lang: string; voice?: string; primaryInterest?: Interest };
+  sessionId?: string;
 }
 
 export type SpendRequest =
@@ -75,7 +95,7 @@ export type SpendRequest =
 export interface DemoControls {
   grantCredits(n: number): void;
   grantRewardCredit(): void;
-  grantSubscription(): void;
+  grantSubscription(productId?: 'tuur_sub_monthly' | 'tuur_sub_yearly'): void;
 }
 
 export interface RedemptionToken {
@@ -89,7 +109,7 @@ export interface RedemptionToken {
 export interface AuthApi {
   current(): UserInfo | null;
   onChange(cb: (u: UserInfo | null) => void): Unsubscribe;
-  /** Resolves for a signed-in account with a verified phone; never creates a guest identity. */
+  /** Resolves for a primary account; a mobile number is optional. Never creates a guest identity. */
   ensureSignedIn(): Promise<UserInfo>;
   signInWithEmail(email: string, password: string, create: boolean): Promise<UserInfo>;
   signInWithApple(): Promise<UserInfo>;
@@ -106,6 +126,8 @@ export interface AuthApi {
 export interface Backend {
   readonly kind: 'firebase' | 'demo';
   readonly auth: AuthApi;
+  getAiConsent(): Promise<AiConsentState>;
+  updateAiConsent(granted: boolean): Promise<AiConsentState>;
   /** Asks the server to ingest the tile and its neighbors (only the geohash is sent, never a position). */
   ensureArea(tile: string, rings?: number): Promise<void>;
   watchArea(tile: string, cb: (a: AreaInfo | null) => void): Unsubscribe;
@@ -124,6 +146,8 @@ export interface Backend {
   composePlannedRoute(req: ComposeRouteRequest): Promise<{ tour: Tour; dropped: string[] }>;
   /** One-sentence teaser for crossroads cards. */
   getTeaser(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<string>;
+  /** Free source text for a place; never generates narration or consumes audio time. */
+  getPoiText(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<Poi>;
   /** Live entitlements and credit wallet (server-written, read-only for the client). */
   watchEntitlements(cb: (s: EntitlementState) => void): Unsubscribe;
   claimTourStart(
@@ -131,9 +155,14 @@ export interface Backend {
     sessionId: string,
     mode: 'tour' | 'planned',
   ): Promise<{ counted: boolean; remaining: number | null }>;
+  updateTourTime(req: UpdateTourTimeRequest): Promise<TourTimeResult>;
   spendCredit(req: SpendRequest): Promise<{ used: 'reward' | 'paid'; wallet: Wallet }>;
   /** Verifies a fixed itinerary for download; does not start a tour or consume a tour-start quota. */
-  prepareTourDownload(tourId: string, mode: 'tour' | 'planned'): Promise<OfflineDownloadAccess>;
+  prepareTourDownload(
+    tourId: string,
+    mode: 'tour' | 'planned',
+    scriptInstanceId?: string,
+  ): Promise<OfflineDownloadAccess>;
   createInvite(tourId: string): Promise<{ token: string; remaining: number; expiresAt: number }>;
   redeemInvite(token: string): Promise<{ tourId: string }>;
   /** Nonce for rewarded-ad server-side verification (daily limit enforced on the server). */
@@ -150,10 +179,13 @@ export interface Backend {
   createGroup(req: {
     tourId: string;
     mode: 'tour' | 'planned';
+    audio: NonNullable<GroupInfo['audio']>;
+    sessionId?: string;
+    recordings?: { kind: 'narration' | 'transition'; key: string; poiId: string; fromPoiId?: string }[];
   }): Promise<{ token: string; group: GroupInfo }>;
   joinGroup(token: string): Promise<{ group: GroupInfo }>;
   /** Spends one bought seat credit of the host for one more place. */
-  addGroupSeat(groupId: string): Promise<{ capacity: number; seatBalance: number }>;
+  addGroupSeat(groupId: string, requestId?: string): Promise<{ capacity: number; seatBalance: number }>;
   leaveGroup(groupId: string): Promise<void>;
   watchGroup(groupId: string, cb: (g: GroupInfo | null) => void): Unsubscribe;
   /** Business onboarding: sends a partner application for admin review. */
@@ -192,6 +224,7 @@ export interface Backend {
     reason: 'wrong_fact' | 'offensive' | 'audio_issue' | 'other';
     text?: string;
   }): Promise<void>;
+  reportContent(input: ContentReportInput): Promise<void>;
 }
 
 export class BackendError extends Error {

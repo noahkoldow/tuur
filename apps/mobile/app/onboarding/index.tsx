@@ -5,11 +5,10 @@ import {
   BackHandler,
   Platform,
   Pressable,
-  ScrollView,
   View,
-  useColorScheme,
   useWindowDimensions,
   type ColorValue,
+  type ScrollView,
 } from 'react-native';
 import Animated, {
   cubicBezier,
@@ -20,6 +19,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BackendError, useBackend } from '../../src/backend';
 import { Banner } from '../../src/components/Banner';
 import { Wordmark } from '../../src/components/Brand';
@@ -31,7 +31,7 @@ import { Text } from '../../src/components/Text';
 import { requestForeground } from '../../src/location/real';
 import { haptics, useReduceMotion } from '../../src/motion';
 import { useSettings } from '../../src/state/settings';
-import { BRAND_RED, sys } from '../../src/theme';
+import { spacing, sys } from '../../src/theme';
 
 const STEPS = [
   { icon: 'walk', label: 'onboarding.slide1Title', description: 'onboarding.slide1Body' },
@@ -42,14 +42,15 @@ const STEPS = [
 ] as const;
 const EASE_OUT = cubicBezier(0.23, 1, 0.32, 1);
 
-/** A swipeable, wordless story. Only actions, legal links and errors need visible copy. */
+/** A short illustrated introduction, with one clear action and explanation per page. */
 export default function Onboarding() {
   const { t } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
   const reduceMotion = useReduceMotion();
-  const dark = useColorScheme() === 'dark';
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const compact = (windowHeight - insets.top - insets.bottom) / fontScale < 680;
   const language = useSettings((s) => s.language);
   const set = useSettings((s) => s.set);
   const [index, setIndex] = useState(0);
@@ -62,9 +63,9 @@ export default function Onboarding() {
   const [foreground, setForeground] = useState(AppState.currentState === 'active');
   const pager = useRef<ScrollView>(null);
   const offset = useSharedValue(0);
-  const background = dark ? '#191817' : '#F8F5EF';
-  const ink = dark ? '#F8F5EF' : '#292621';
-  const subtle = dark ? '#302D29' : '#EDE7DD';
+  const background = sys.background;
+  const ink = sys.label;
+  const subtle = sys.fill;
   const active = foreground && focused;
 
   useFocusEffect(
@@ -138,19 +139,14 @@ export default function Onboarding() {
 
   return (
     <Screen padded={false} style={{ backgroundColor: background }}>
-      <ScrollView
-        nestedScrollEnabled
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ flexGrow: 1, minHeight: 520 }}
-        style={{ flex: 1 }}
-      >
+      <View style={{ flex: 1, minHeight: 0 }}>
         <View
           style={{
-            paddingHorizontal: 24,
-            paddingTop: 8,
+            paddingHorizontal: spacing.lg,
+            paddingTop: compact ? 0 : 8,
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 12,
+            gap: 4,
           }}
         >
           <Wordmark width={80} />
@@ -167,15 +163,15 @@ export default function Onboarding() {
             }}
           />
           <Action
-            icon="skip-forward"
             label={t('onboarding.skipIntro')}
+            title={t('onboarding.skipIntro')}
             tint={ink}
             disabled={busy}
             onPress={() => void finish(false)}
           />
         </View>
         <View
-          style={{ flex: 1, minHeight: 100 }}
+          style={{ flex: 1, minHeight: 0 }}
           onLayout={(event) => setPageWidth(event.nativeEvent.layout.width)}
         >
           <Animated.ScrollView
@@ -183,6 +179,9 @@ export default function Onboarding() {
             horizontal
             pagingEnabled
             bounces={false}
+            directionalLockEnabled
+            alwaysBounceVertical={false}
+            contentInsetAdjustmentBehavior="never"
             showsHorizontalScrollIndicator={false}
             scrollEnabled={!busy}
             scrollEventThrottle={16}
@@ -202,33 +201,44 @@ export default function Onboarding() {
                 selected={index === i}
                 reduceMotion={reduceMotion}
               >
-                {i < 3 ? (
-                  <View
-                    accessible
-                    accessibilityRole="image"
-                    accessibilityLabel={t(step.label) + '. ' + t(step.description)}
-                    style={{ position: 'absolute', width: 1, height: 1 }}
-                  />
-                ) : null}
-                {i < 3 ? (
-                  <IntroArt
-                    kind={i === 0 ? 'walk' : i === 1 ? 'story' : 'choose'}
-                    active={active && index === i}
-                  />
-                ) : i === 3 ? (
-                  <OnboardingInterests active={active && index === i} />
-                ) : (
-                  <OnboardingLocation active={active && index === i} />
-                )}
+                <View
+                  style={{
+                    alignSelf: 'center',
+                    width: '100%',
+                    maxWidth: 520,
+                    paddingHorizontal: spacing.lg,
+                    paddingTop: compact ? spacing.xs : spacing.md,
+                    gap: compact ? spacing.xs : spacing.sm,
+                  }}
+                >
+                  <Text accessibilityRole="header" variant={compact ? 'title2' : 'title1'} align="center">
+                    {t(step.label)}
+                  </Text>
+                  <Text variant={compact ? 'callout' : 'body'} color={sys.labelSecondary} align="center">
+                    {t(step.description)}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, minHeight: 0 }}>
+                  {i < 3 ? (
+                    <IntroArt
+                      kind={i === 0 ? 'walk' : i === 1 ? 'story' : 'choose'}
+                      active={active && index === i}
+                    />
+                  ) : i === 3 ? (
+                    <OnboardingInterests active={active && index === i} />
+                  ) : (
+                    <OnboardingLocation active={active && index === i} />
+                  )}
+                </View>
               </StoryPage>
             ))}
           </Animated.ScrollView>
         </View>
         <View
           style={{
-            paddingHorizontal: 24,
-            paddingBottom: 8,
-            gap: 10,
+            paddingHorizontal: spacing.lg,
+            paddingBottom: compact ? 0 : 8,
+            gap: compact ? 2 : 6,
             alignSelf: 'center',
             width: '100%',
             maxWidth: 520,
@@ -239,44 +249,44 @@ export default function Onboarding() {
               <Banner tone="error" text={error} />
             </View>
           ) : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            {STEPS.map((step, i) => (
-              <Pressable
-                key={step.icon}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  t('onboarding.pageOf', { index: i + 1, total: STEPS.length }) + ': ' + t(step.label)
-                }
-                accessibilityState={{ selected: index === i, disabled: busy }}
-                disabled={busy}
-                onPress={() => go(i)}
-                style={{ width: 48, height: 52, alignItems: 'center', justifyContent: 'center', gap: 5 }}
-              >
-                <Animated.View
-                  style={{
-                    width: 40,
-                    height: 34,
-                    borderRadius: 17,
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+            <Text
+              variant="caption"
+              accessibilityLabel={t('onboarding.pageOf', { index: index + 1, total: STEPS.length })}
+              style={{ fontVariant: ['tabular-nums'] }}
+            >
+              {index + 1} / {STEPS.length}
+            </Text>
+            <View style={{ flexDirection: 'row' }}>
+              {STEPS.map((step, i) => (
+                <Pressable
+                  key={step.icon}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    t('onboarding.pageOf', { index: i + 1, total: STEPS.length }) + ': ' + t(step.label)
+                  }
+                  accessibilityState={{ selected: index === i, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => go(i)}
+                  style={({ pressed }) => ({
+                    width: 44,
+                    height: 44,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: index === i ? subtle : 'transparent',
-                    opacity: index === i ? 1 : 0.4,
-                    transitionProperty: ['opacity', 'backgroundColor'],
-                    transitionDuration: 180,
-                  }}
+                    opacity: pressed ? 0.6 : 1,
+                  })}
                 >
-                  <Icon name={step.icon} size={21} color={index === i ? BRAND_RED : ink} />
-                </Animated.View>
-                <View
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: 2,
-                    backgroundColor: index === i ? BRAND_RED : 'transparent',
-                  }}
-                />
-              </Pressable>
-            ))}
+                  <View
+                    style={{
+                      width: index === i ? 22 : 7,
+                      height: 7,
+                      borderRadius: 4,
+                      backgroundColor: index === i ? sys.accent : sys.separator,
+                    }}
+                  />
+                </Pressable>
+              ))}
+            </View>
           </View>
           <View
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
@@ -292,24 +302,16 @@ export default function Onboarding() {
             <Action
               icon={index === 4 ? 'navigation' : 'arrow-right'}
               label={index === 4 ? t('onboarding.allowLocation') : t('common.continue')}
-              title={index === 4 ? t('onboarding.allowLocation') : undefined}
-              tint="#FFFFFF"
-              background={BRAND_RED}
+              title={index === 4 ? t('onboarding.allowLocation') : t('common.continue')}
+              tint={sys.onAccent}
+              background={sys.accent}
               prominent
               loading={busy}
               onPress={() => (index === 4 ? void finish(true) : go(indexRef.current + 1))}
             />
           </View>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              gap: 4,
-            }}
-          >
-            {index === 4 ? (
+          {index === 4 ? (
+            <View style={{ alignItems: 'center' }}>
               <Action
                 title={t('onboarding.notNow')}
                 label={t('onboarding.notNow')}
@@ -317,14 +319,16 @@ export default function Onboarding() {
                 disabled={busy}
                 onPress={() => void finish(false)}
               />
-            ) : null}
+            </View>
+          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Pressable
               accessibilityRole="link"
               disabled={busy}
               onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'terms' } })}
-              style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' }}
+              style={{ flex: 0.5, minWidth: 44, minHeight: 44, justifyContent: 'center' }}
             >
-              <Text variant="caption" color={dark ? '#BFB7AB' : '#776F64'}>
+              <Text variant="caption" color={sys.labelSecondary} align="center">
                 {t('onboarding.legalTerms')}
               </Text>
             </Pressable>
@@ -332,15 +336,25 @@ export default function Onboarding() {
               accessibilityRole="link"
               disabled={busy}
               onPress={() => router.push({ pathname: '/legal/[doc]', params: { doc: 'privacy' } })}
-              style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: 'center' }}
+              style={{ flex: 1.8, minHeight: 44, justifyContent: 'center' }}
             >
-              <Text variant="caption" color={dark ? '#BFB7AB' : '#776F64'}>
+              <Text variant="caption" color={sys.labelSecondary} align="center">
                 {t('onboarding.legalPrivacy')}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="link"
+              disabled={busy}
+              onPress={() => router.push('/account/delete')}
+              style={{ flex: 1.2, minHeight: 44, justifyContent: 'center' }}
+            >
+              <Text variant="caption" color={sys.labelSecondary} align="center">
+                {t('account.delete')}
               </Text>
             </Pressable>
           </View>
         </View>
-      </ScrollView>
+      </View>
     </Screen>
   );
 }
@@ -390,7 +404,7 @@ function Action({
   label: string;
   title?: string;
   tint?: ColorValue;
-  background?: string;
+  background?: ColorValue;
   prominent?: boolean;
   loading?: boolean;
   disabled?: boolean;
@@ -409,12 +423,12 @@ function Action({
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
       pressRetentionOffset={16}
-      style={{ flexShrink: 1 }}
+      style={{ flexShrink: 1, flex: prominent ? 1 : undefined }}
     >
       <Animated.View
         style={{
-          minWidth: prominent ? 92 : 48,
-          minHeight: prominent ? 64 : 48,
+          minWidth: 48,
+          minHeight: prominent ? 50 : 48,
           paddingHorizontal: title ? 16 : 12,
           paddingVertical: 12,
           flexDirection: 'row',

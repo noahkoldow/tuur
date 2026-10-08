@@ -22,7 +22,12 @@ export const GetTeaserRequestSchema = z.object({
   access: z
     .object({
       tourId: z.string().max(200).optional(),
+      groupId: z
+        .string()
+        .regex(/^[A-Za-z0-9]{10,40}$/)
+        .optional(),
       mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
+      sessionId: z.string().max(200).optional(),
     })
     .optional(),
 });

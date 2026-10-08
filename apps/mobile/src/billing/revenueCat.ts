@@ -31,6 +31,7 @@ export function createRevenueCatBilling(): BillingProvider {
         'tuur_credit_5',
         'tuur_sub_monthly',
         'tuur_sub_yearly',
+        'tuur_group_seat',
       ]);
       return list.flatMap((p): Offer[] => {
         const id = p.identifier as ProductId;
@@ -48,7 +49,7 @@ export function createRevenueCatBilling(): BillingProvider {
               }
             : {
                 id,
-                kind: 'credit',
+                kind: id === 'tuur_group_seat' ? 'seat' : 'credit',
                 title: p.title,
                 priceString: p.priceString,
                 price: p.price,

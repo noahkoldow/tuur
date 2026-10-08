@@ -39,6 +39,17 @@ async function seedUserData(uid: string) {
     .set({ type: 'tour', tourId: 't1', source: 'credit', expiresAt: null });
   await u.collection('credits').doc('wallet').set({ balance: 2, rewardBalance: 1 });
   await u.collection('creditLedger').doc('l1').set({ delta: -1, kind: 'tour', ts: clock });
+  await u.collection('tourTime').doc('budget').set({ month: '2026-10', usedSeconds: 60, active: null });
+  await u.collection('tourTimeSessions').doc('walk').set({ mode: 'tour', tourId: 't1', sequence: 2 });
+  await u.collection('tourDownloads').doc('download').set({ tourId: 't1', seconds: 5400 });
+  await u.collection('consents').doc('ai').set({ granted: true, version: 'test-version', updatedAt: clock });
+  await u.collection('blockedPartners').doc('blocked-partner').set({ blockedAt: clock });
+  await db
+    .collection('users')
+    .doc('other-owner')
+    .collection('tourDownloads')
+    .doc('other')
+    .set({ tourId: 'private-other-download' });
   await db
     .collection('revenuecatPurchases')
     .doc('transaction-fingerprint')
@@ -75,6 +86,16 @@ async function seedUserData(uid: string) {
   await db.collection('rateLimits').doc(`narr_user_${uid}`).set({ count: 3 });
   await db.collection('rateLimits').doc(`narr_user_${uid}2`).set({ count: 1 }); // another user whose id starts the same way must survive... see below
   await db.collection('rateLimits').doc('narr_user_other').set({ count: 9 });
+  await db.collection('rateLimits').doc(`poi_text_user_${uid}`).set({ count: 2, windowStart: clock });
+  await db.collection('rateLimits').doc(`poi_text_user_${uid}2`).set({ count: 7, windowStart: clock });
+  for (const prefix of ['ai_consent_read_', 'ai_consent_write_', 'content_report_']) {
+    await db.collection('rateLimits').doc(`${prefix}${uid}`).set({ count: 2, windowStart: clock });
+    await db.collection('rateLimits').doc(`${prefix}${uid}2`).set({ count: 7, windowStart: clock });
+  }
+  await db
+    .collection('poiTexts')
+    .doc('shared-source-text')
+    .set({ poiId: poi.id, text: 'Public source text' });
   await db.collection('usageDaily').doc('2026-01-01').set({ costUsd: 3 });
   await db
     .collection('groups')
@@ -106,6 +127,22 @@ async function seedUserData(uid: string) {
     });
   await db.collection('rateLimits').doc(`group_join_${uid}`).set({ count: 1 });
   await db
+    .collection('groups')
+    .doc('hosted-group')
+    .collection('recordings')
+    .doc('chapter')
+    .set({
+      doc: { ownerUid: uid, text: 'My group recording' },
+    });
+  await db
+    .collection('groups')
+    .doc('joined-group')
+    .collection('recordings')
+    .doc('chapter')
+    .set({
+      doc: { ownerUid: 'private-host-uid', text: 'Another group recording' },
+    });
+  await db
     .collection('narrations')
     .doc('my-personal-recording')
     .set({ ownerUid: uid, text: 'My private walk' });
@@ -135,6 +172,12 @@ beforeEach(async () => {
 describe('account export', () => {
   it('contains the account data without secrets or other users’ data', async () => {
     const u = await makeUser('me@example.com');
+    await getAuth().updateUser(u.uid, {
+      phoneNumber: '+16505550123',
+      displayName: 'Export test account',
+      photoURL: 'https://example.com/avatar.png',
+      emailVerified: true,
+    });
     await seedUserData(u.uid);
     const out = await exportMyData(
       {
@@ -145,10 +188,38 @@ describe('account export', () => {
       },
       u.uid,
     );
-    expect(out.account).toMatchObject({ uid: u.uid, email: 'me@example.com' });
+    expect(out.account).toMatchObject({
+      uid: u.uid,
+      email: 'me@example.com',
+      emailVerified: true,
+      phoneNumber: '+16505550123',
+      displayName: 'Export test account',
+      photoURL: 'https://example.com/avatar.png',
+      linkedAccounts: expect.arrayContaining([
+        expect.objectContaining({ providerId: 'phone', phoneNumber: '+16505550123' }),
+      ]),
+    });
+    expect(JSON.stringify(out.account)).not.toMatch(/passwordHash|passwordSalt|refreshToken|customClaims/);
     expect(out.wallet).toEqual({ balance: 2, rewardBalance: 1 });
     expect(out.entitlements).toHaveLength(1);
     expect(out.creditLedger).toHaveLength(1);
+    expect(out.rateLimits).toContainEqual({ id: `poi_text_user_${u.uid}`, count: 2, windowStart: clock });
+    expect(out.rateLimits.some((entry) => entry.id === `poi_text_user_${u.uid}2`)).toBe(false);
+    expect(out.rateLimits.some((entry) => entry.id === 'narr_user_other')).toBe(false);
+    for (const prefix of ['ai_consent_read_', 'ai_consent_write_', 'content_report_']) {
+      expect(out.rateLimits).toContainEqual({ id: `${prefix}${u.uid}`, count: 2, windowStart: clock });
+      expect(out.rateLimits.some((entry) => entry.id === `${prefix}${u.uid}2`)).toBe(false);
+    }
+    expect(out.tourTime).toEqual([{ id: 'budget', month: '2026-10', usedSeconds: 60, active: null }]);
+    expect(out.tourTimeSessions).toHaveLength(1);
+    expect(out.tourDownloads).toEqual([{ id: 'download', tourId: 't1', seconds: 5400 }]);
+    expect(out.consents).toContainEqual({
+      id: 'ai',
+      granted: true,
+      version: 'test-version',
+      updatedAt: clock,
+    });
+    expect(out.blockedPartners).toEqual([{ id: 'blocked-partner', blockedAt: clock }]);
     expect(out.purchases).toHaveLength(1);
     expect(out.subscriptions).toHaveLength(1);
     expect(out.personalNarrations).toHaveLength(1);
@@ -174,6 +245,7 @@ describe('account export', () => {
     expect(json).not.toContain('private-host-uid');
     expect(json).not.toContain('other-private-route');
     expect(json).not.toContain('Someone else private recording');
+    expect(json).not.toContain('private-other-download');
   });
 });
 
@@ -198,10 +270,19 @@ describe('account deletion', () => {
       (await db.collection('narrations').doc('my-personal-recording').collection('voices').get()).empty,
     ).toBe(true);
     expect((await db.collection('narrations').doc('another-personal-recording').get()).exists).toBe(true);
+    expect((await db.collection('groups').doc('hosted-group').collection('recordings').get()).empty).toBe(
+      true,
+    );
+    expect((await db.collection('groups').doc('joined-group').collection('recordings').get()).size).toBe(1);
 
     expect((await db.collection('users').doc(u.uid).get()).exists).toBe(false);
     expect((await db.collection('users').doc(u.uid).collection('entitlements').get()).size).toBe(0);
     expect((await db.collection('users').doc(u.uid).collection('sessions').get()).size).toBe(0);
+    for (const name of ['tourTime', 'tourTimeSessions', 'tourDownloads'])
+      expect((await db.collection('users').doc(u.uid).collection(name).get()).size).toBe(0);
+    expect(
+      (await db.collection('users').doc('other-owner').collection('tourDownloads').doc('other').get()).exists,
+    ).toBe(true);
     expect((await db.collection('revenuecatPurchases').doc('transaction-fingerprint').get()).data()).toEqual({
       deleted: true,
       remaining: 0,
@@ -219,6 +300,13 @@ describe('account deletion', () => {
     expect((await db.collection('rateLimits').doc(`narr_user_${u.uid}`).get()).exists).toBe(false);
     expect((await db.collection('rateLimits').doc(`narr_user_${u.uid}2`).get()).exists).toBe(true);
     expect((await db.collection('rateLimits').doc(`group_join_${u.uid}`).get()).exists).toBe(false);
+    expect((await db.collection('rateLimits').doc(`poi_text_user_${u.uid}`).get()).exists).toBe(false);
+    expect((await db.collection('rateLimits').doc(`poi_text_user_${u.uid}2`).get()).exists).toBe(true);
+    for (const prefix of ['ai_consent_read_', 'ai_consent_write_', 'content_report_']) {
+      expect((await db.collection('rateLimits').doc(`${prefix}${u.uid}`).get()).exists).toBe(false);
+      expect((await db.collection('rateLimits').doc(`${prefix}${u.uid}2`).get()).exists).toBe(true);
+    }
+    expect((await db.collection('poiTexts').doc('shared-source-text').get()).exists).toBe(true);
     expect((await db.collection('groups').doc('hosted-group').get()).exists).toBe(false);
     expect((await db.collection('groups').doc('joined-group').get()).get('members')).toEqual([
       'private-host-uid',

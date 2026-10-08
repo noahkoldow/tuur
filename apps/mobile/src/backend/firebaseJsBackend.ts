@@ -14,6 +14,8 @@ import {
   onIdTokenChanged,
   PhoneAuthProvider,
   RecaptchaVerifier,
+  reauthenticateWithPopup,
+  revokeAccessToken,
   signInWithEmailAndPassword,
   signOut,
   type User,
@@ -46,13 +48,16 @@ import {
   type Tour,
   EntitlementSchema,
   LEGAL_VERSION,
+  AI_CONSENT_VERSION,
+  type AiConsentState,
   type Entitlement,
   type Wallet,
 } from '@tuur/shared';
 import { config } from '../config';
 import { toBackendError } from './errors';
 import { reachableAudioUrl } from './audioUrl';
-import { accountStep, requireVerifiedAccount } from '../auth/policy';
+import { accountStep, requirePrimaryAccount } from '../auth/policy';
+import { deleteAccountWithAppleRevocation } from '../auth/delete-account';
 import {
   BackendError,
   type AreaInfo,
@@ -128,7 +133,7 @@ export function createFirebaseJsBackend(): Backend {
     onChange: (cb) => onIdTokenChanged(auth, (u) => cb(toUser(u))),
     ensureSignedIn: async () => {
       await auth.authStateReady();
-      return requireVerifiedAccount(toUser(auth.currentUser));
+      return requirePrimaryAccount(toUser(auth.currentUser));
     },
     async signInWithEmail(email, password, create) {
       const current = auth.currentUser;
@@ -305,6 +310,7 @@ export function createFirebaseJsBackend(): Backend {
     async getTeaser(req) {
       return (await call<{ poiId: string; lang: string }, { text: string }>('getTeaser', req)).text;
     },
+    getPoiText: (req) => call('getPoiText', req),
     async getNarration(req: GetNarrationRequest) {
       const n = await call<GetNarrationRequest, NarrationResponse>('getNarration', req);
       if (n.audioUrl) {
@@ -359,12 +365,32 @@ export function createFirebaseJsBackend(): Backend {
       return () => unsubs.forEach((u) => u());
     },
     async deleteAccount() {
-      await call('deleteAccount', {});
-      await signOut(auth).catch(() => undefined);
+      const current = auth.currentUser;
+      await deleteAccountWithAppleRevocation({
+        current: () => toUser(auth.currentUser),
+        reauthenticateApple: async () => {
+          if (!current) throw new BackendError('unauthenticated', 'Sign in first');
+          if (Platform.OS !== 'web')
+            throw new BackendError('unavailable', 'Delete this Apple account in the installed app.');
+          const result = await reauthenticateWithPopup(current, new OAuthProvider('apple.com'));
+          return OAuthProvider.credentialFromResult(result)?.accessToken ?? '';
+        },
+        revokeApple: (token) => revokeAccessToken(auth, token),
+        deleteData: () => call('deleteAccount', {}),
+        signOut: () => signOut(auth),
+      });
     },
     exportMyData: () => call('exportMyData', {}),
+    getAiConsent: () => call<Record<string, never>, AiConsentState>('getAiConsent', {}),
+    updateAiConsent: (granted) =>
+      call<{ granted: boolean; version: string }, AiConsentState>('updateAiConsent', {
+        granted,
+        version: AI_CONSENT_VERSION,
+      }),
     claimTourStart: (tourId, sessionId, mode) => call('claimTourStart', { tourId, sessionId, mode }),
-    prepareTourDownload: (tourId, mode) => call('prepareTourDownload', { tourId, mode }),
+    updateTourTime: (req) => call('updateTourTime', req),
+    prepareTourDownload: (tourId, mode, scriptInstanceId) =>
+      call('prepareTourDownload', { tourId, mode, ...(scriptInstanceId ? { scriptInstanceId } : {}) }),
     async recordPurchaseConsent(productId) {
       await call('recordPurchaseConsent', { productId, textVersion: LEGAL_VERSION });
     },
@@ -372,7 +398,8 @@ export function createFirebaseJsBackend(): Backend {
     submitPartnerApplication: (app) => call('submitPartnerApplication', app),
     createGroup: (req) => call('createTourGroup', req),
     joinGroup: (token) => call('joinTourGroup', { token }),
-    addGroupSeat: (groupId) => call('addTourGroupSeat', { groupId }),
+    addGroupSeat: (groupId, requestId) =>
+      call('addTourGroupSeat', { groupId, ...(requestId ? { requestId } : {}) }),
     async leaveGroup(groupId) {
       await call('leaveTourGroup', { groupId });
     },
@@ -393,6 +420,8 @@ export function createFirebaseJsBackend(): Backend {
                   capacity: groupCapacity(g.data),
                   status: g.data.status,
                   expiresAt: g.data.expiresAt,
+                  ...(g.data.audio ? { audio: g.data.audio } : {}),
+                  ...(g.data.sessionId ? { sessionId: g.data.sessionId } : {}),
                 }
               : null,
           );
@@ -425,6 +454,9 @@ export function createFirebaseJsBackend(): Backend {
     },
     async reportNarration(input) {
       await call('reportNarration', input);
+    },
+    async reportContent(input) {
+      await call('reportContent', input);
     },
   };
 }

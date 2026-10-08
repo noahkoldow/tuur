@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, View, useColorScheme } from 'react-native';
+import { Pressable, View, useColorScheme } from 'react-native';
 import Animated, {
   cancelAnimation,
   cubicBezier,
@@ -64,7 +64,7 @@ function InterestTile({
       accessibilityState={{ checked: selected }}
       onPress={onPress}
       pressRetentionOffset={12}
-      style={{ width: size, height: size + 6 }}
+      style={{ width: size, height: size }}
     >
       {({ pressed }) => (
         <Animated.View
@@ -123,8 +123,11 @@ export function OnboardingInterests({ active = true }: { active?: boolean }) {
   const response = useSharedValue(0);
   const heart = useSharedValue(1);
   const [lastInterest, setLastInterest] = useState<Interest>('hidden_gems');
-  const tileSize = Math.max(48, Math.min(76, (width - 62) / 4));
-  const artScale = Math.min((width - 32) / 350, Math.max(0.62, (height - tileSize * 2 - 66) / 255), 1.12);
+  const gridGap = height < 280 ? 8 : 12;
+  const tileSize = Math.max(48, Math.min(76, (width - 32 - gridGap * 3) / 4, height * 0.27));
+  const gridHeight = tileSize * Math.ceil(INTERESTS.length / 4) + gridGap;
+  // Reserve full-size touch targets first; the illustration uses only the remaining space.
+  const artScale = Math.max(0, Math.min((width - 32) / 350, (height - gridHeight - 24) / 255, 1.12));
   const tone = categoryPalette[lastInterest][dark ? 'dark' : 'light'];
 
   useEffect(() => {
@@ -173,124 +176,122 @@ export function OnboardingInterests({ active = true }: { active?: boolean }) {
   };
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayout}>
-      <ScrollView
-        nestedScrollEnabled
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          flexGrow: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          paddingVertical: 12,
-          gap: 22,
-        }}
+    <View
+      style={{
+        flex: 1,
+        minHeight: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 8,
+        gap: 8,
+      }}
+      onLayout={onLayout}
+    >
+      <View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`${t('onboarding.interestsTitle')} ${t('onboarding.interestsHint')}`}
+        style={{ width: 350 * artScale, height: 255 * artScale }}
       >
         <View
-          accessible
-          accessibilityRole="image"
-          accessibilityLabel={`${t('onboarding.interestsTitle')} ${t('onboarding.interestsHint')}`}
-          style={{ width: 350 * artScale, height: 255 * artScale }}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={{ width: 350, height: 255, transform: [{ scale: artScale }], transformOrigin: 'top left' }}
         >
           <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={{ width: 350, height: 255, transform: [{ scale: artScale }], transformOrigin: 'top left' }}
+            style={{
+              position: 'absolute',
+              width: 224,
+              height: 224,
+              borderRadius: 112,
+              left: 63,
+              top: 15,
+              backgroundColor: dark ? '#352923' : '#F9E8D0',
+            }}
+          />
+          <Svg width={350} height={255} style={{ position: 'absolute' }}>
+            <Path
+              d="M54 170 Q40 103 79 67 M276 53 Q327 113 298 169"
+              stroke={dark ? '#645443' : '#E1C8A6'}
+              strokeWidth={2}
+              strokeDasharray="2 9"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <Path
+              d="M72 47 V62 M64.5 54.5 H79.5 M286 189 V204 M278.5 196.5 H293.5"
+              stroke={dark ? '#F5C56D' : '#D39C45'}
+              strokeWidth={3}
+              strokeLinecap="round"
+            />
+            <Circle cx={283} cy={43} r={5} fill={dark ? '#9FDAAE' : '#A4C6A4'} />
+            <Circle cx={44} cy={201} r={4} fill={dark ? '#D2ADF8' : '#C0ABDD'} />
+          </Svg>
+          <Animated.View style={[{ position: 'absolute', left: 57, top: 11 }, mascotMotion]}>
+            <Mascot
+              pose={interests.length ? 'celebrate' : 'present'}
+              size={236}
+              idle={false}
+              entrance={false}
+            />
+          </Animated.View>
+          <View
+            style={{
+              position: 'absolute',
+              left: 25,
+              top: 114,
+              width: 49,
+              height: 49,
+              borderRadius: 18,
+              backgroundColor: dark ? '#3D2231' : '#FDEBF4',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transform: [{ rotate: '-12deg' }],
+            }}
           >
-            <View
-              style={{
-                position: 'absolute',
-                width: 224,
-                height: 224,
-                borderRadius: 112,
-                left: 63,
-                top: 15,
-                backgroundColor: dark ? '#352923' : '#F9E8D0',
-              }}
-            />
-            <Svg width={350} height={255} style={{ position: 'absolute' }}>
-              <Path
-                d="M54 170 Q40 103 79 67 M276 53 Q327 113 298 169"
-                stroke={dark ? '#645443' : '#E1C8A6'}
-                strokeWidth={2}
-                strokeDasharray="2 9"
-                fill="none"
-                strokeLinecap="round"
-              />
-              <Path
-                d="M72 47 V62 M64.5 54.5 H79.5 M286 189 V204 M278.5 196.5 H293.5"
-                stroke={dark ? '#F5C56D' : '#D39C45'}
-                strokeWidth={3}
-                strokeLinecap="round"
-              />
-              <Circle cx={283} cy={43} r={5} fill={dark ? '#9FDAAE' : '#A4C6A4'} />
-              <Circle cx={44} cy={201} r={4} fill={dark ? '#D2ADF8' : '#C0ABDD'} />
-            </Svg>
-            <Animated.View style={[{ position: 'absolute', left: 57, top: 11 }, mascotMotion]}>
-              <Mascot
-                pose={interests.length ? 'celebrate' : 'present'}
-                size={236}
-                idle={false}
-                entrance={false}
-              />
-            </Animated.View>
-            <View
-              style={{
-                position: 'absolute',
-                left: 25,
-                top: 114,
-                width: 49,
-                height: 49,
-                borderRadius: 18,
-                backgroundColor: dark ? '#3D2231' : '#FDEBF4',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transform: [{ rotate: '-12deg' }],
-              }}
-            >
-              <Icon name="heart" size={24} color={dark ? '#F3AED0' : '#B64073'} />
-            </View>
-            <View
-              style={{
-                position: 'absolute',
-                right: 22,
-                top: 94,
-                width: 55,
-                height: 55,
-                borderRadius: 19,
-                backgroundColor: tone.background,
-                alignItems: 'center',
-                justifyContent: 'center',
-                transform: [{ rotate: '9deg' }],
-              }}
-            >
-              <Icon name={INTEREST_ICON[lastInterest]} size={29} color={tone.foreground} />
-            </View>
-            <Animated.View style={[{ position: 'absolute', right: 78, top: 73 }, heartMotion]}>
-              <Icon name="heart" size={29} color={BRAND_RED} />
-            </Animated.View>
+            <Icon name="heart" size={24} color={dark ? '#F3AED0' : '#B64073'} />
           </View>
+          <View
+            style={{
+              position: 'absolute',
+              right: 22,
+              top: 94,
+              width: 55,
+              height: 55,
+              borderRadius: 19,
+              backgroundColor: tone.background,
+              alignItems: 'center',
+              justifyContent: 'center',
+              transform: [{ rotate: '9deg' }],
+            }}
+          >
+            <Icon name={INTEREST_ICON[lastInterest]} size={29} color={tone.foreground} />
+          </View>
+          <Animated.View style={[{ position: 'absolute', right: 78, top: 73 }, heartMotion]}>
+            <Icon name="heart" size={29} color={BRAND_RED} />
+          </Animated.View>
         </View>
-        <View
-          style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            gap: 12,
-            width: tileSize * 4 + 36,
-          }}
-        >
-          {INTERESTS.map((interest, index) => (
-            <InterestTile
-              key={interest}
-              interest={interest}
-              index={index}
-              size={tileSize}
-              selected={interests.includes(interest)}
-              onPress={() => toggle(interest)}
-            />
-          ))}
-        </View>
-      </ScrollView>
+      </View>
+      <View
+        style={{
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: gridGap,
+          width: tileSize * 4 + gridGap * 3,
+        }}
+      >
+        {INTERESTS.map((interest, index) => (
+          <InterestTile
+            key={interest}
+            interest={interest}
+            index={index}
+            size={tileSize}
+            selected={interests.includes(interest)}
+            onPress={() => toggle(interest)}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -363,7 +364,7 @@ export function OnboardingLocation({ active = true }: { active?: boolean }) {
   const dark = useColorScheme() === 'dark';
   const reduced = useReduceMotion();
   const { width, height, onLayout } = useArtSize();
-  const scale = Math.max(0.25, Math.min((width - 24) / 350, (height - 12) / 430, 1.2));
+  const scale = Math.max(0, Math.min((width - 24) / 350, (height - 12) / 430, 1.2));
   const breath = useSharedValue(0);
   const running = active && !reduced;
   useEffect(() => {
@@ -380,7 +381,10 @@ export function OnboardingLocation({ active = true }: { active?: boolean }) {
   const road = dark ? '#34372F' : '#FFFFFF';
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onLayout={onLayout}>
+    <View
+      style={{ flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }}
+      onLayout={onLayout}
+    >
       <View
         accessible
         accessibilityRole="image"

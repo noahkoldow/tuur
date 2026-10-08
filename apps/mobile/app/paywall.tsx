@@ -1,25 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Wordmark } from '../src/components/Brand';
 import { Checkbox } from '../src/components/Checkbox';
 import { yearlyValue } from '../src/billing/pricing';
 import { paywallContext, type PaywallParams } from '../src/billing/paywall-context';
+import { PaywallEnhancement } from '../src/billing/paywall-enhancement';
 import { useBackend, BackendError } from '../src/backend';
 import { Banner } from '../src/components/Banner';
 import { Button, Row } from '../src/components/Button';
 import { CloseButton } from '../src/components/HeaderButton';
+import { GoldShimmer } from '../src/components/GoldShimmer';
+import { VoicePreviewCard } from '../src/components/voice-preview-card';
+import { continueSessionAsText, getActiveSession } from '../src/guide/session';
 import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { config } from '../src/config';
 import type { Offer } from '../src/billing/types';
-import { getAds, getBilling, subscribed, useEntitlementStore } from '../src/billing/entitlements';
+import { getBilling, subscribed, useEntitlementStore } from '../src/billing/entitlements';
 import { metrics, sys } from '../src/theme';
 
 /**
- * Paywall (spec 6): credit, subscription (with the full disclosure required by the stores), rewarded ad (tours only)
- * and restore. Contextual gates close once access exists; the price overview remains open for browsing.
+ * Audio credits and subscriptions. Text tours remain free; fixed voice samples never consume tour minutes.
+ * Contextual gates close once audio access exists; the price overview remains open for browsing.
  */
 export default function Paywall() {
   const params = useLocalSearchParams<PaywallParams>();
@@ -33,8 +37,15 @@ export default function Paywall() {
   const [offersAttempt, setOffersAttempt] = useState(0);
   const [busy, setBusy] = useState<string | undefined>();
   const [message, setMessage] = useState<{ text: string; tone: 'info' | 'warning' | 'error' } | undefined>();
-  const [waitingReward, setWaitingReward] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
 
   const { browsing, downloading, unlocked } = paywallContext(ent, params);
   const demo = backend.kind === 'demo' || config.backend === 'demo' || Platform.OS === 'web';
@@ -44,8 +55,8 @@ export default function Paywall() {
   useEffect(() => {
     let active = true;
     setOffersStatus('loading');
-    void getBilling()
-      .offers()
+    void Promise.resolve()
+      .then(() => getBilling().offers())
       .then((next) => {
         if (!active) return;
         setOffers(next);
@@ -63,17 +74,6 @@ export default function Paywall() {
     if (unlocked) router.back();
   }, [unlocked, router]);
 
-  useEffect(() => {
-    if (!waitingReward) return;
-    if (unlocked) return setWaitingReward(false);
-    // the server credits the reward after verification; do not spin forever if it never arrives
-    const timer = setTimeout(() => {
-      setWaitingReward(false);
-      setMessage({ text: t('paywall.failed'), tone: 'warning' });
-    }, 90_000);
-    return () => clearTimeout(timer);
-  }, [waitingReward, unlocked, t]);
-
   const run = async (id: string, fn: () => Promise<void>) => {
     setBusy(id);
     setMessage(undefined);
@@ -90,13 +90,13 @@ export default function Paywall() {
     }
   };
 
-  const total = ent.wallet.balance + (kind === 'tour' && !downloading ? ent.wallet.rewardBalance : 0);
+  const total = ent.wallet.balance;
   const spend = () =>
     run('spend', async () => {
       if (browsing) return;
       await backend.spendCredit(
         kind === 'tour'
-          ? { kind: 'tour', tourId: tourId!, ...(downloading ? { paidOnly: true } : {}) }
+          ? { kind: 'tour', tourId: tourId!, paidOnly: downloading }
           : { kind: 'session', placeId: placeId! },
       );
     });
@@ -111,29 +111,6 @@ export default function Paywall() {
       const r = await getBilling().purchase(o.id);
       if (r === 'purchased')
         setMessage({ text: t(demo ? 'paywall.demoPurchased' : 'paywall.purchasePending'), tone: 'info' });
-    });
-
-  const watchAd = () =>
-    run('ad', async () => {
-      const ads = getAds();
-      if (ads.consent() === 'unknown') await ads.gatherConsent();
-      const uid = (await backend.auth.ensureSignedIn()).uid;
-      let nonce: string;
-      try {
-        if (!tourId) throw new Error('Tour is missing');
-        nonce = (await backend.createRewardNonce({ tourId })).nonce;
-      } catch (e) {
-        if (e instanceof BackendError && e.code === 'rate_limited') {
-          setMessage({ text: t('paywall.adLimit'), tone: 'warning' });
-          return;
-        }
-        throw e;
-      }
-      const outcome = await ads.showRewarded({ userId: uid, nonce });
-      if (outcome === 'earned') {
-        setWaitingReward(true);
-        setMessage({ text: t('paywall.adPending'), tone: 'info' });
-      } else if (outcome === 'unavailable') setMessage({ text: t('paywall.adUnavailable'), tone: 'warning' });
     });
 
   const restore = () =>
@@ -188,6 +165,14 @@ export default function Paywall() {
                   : t('paywall.subtitleSession')}
           </Text>
         </View>
+        <View style={{ gap: 8 }}>
+          <Text variant="footnote">{t('paywall.aiConsentHint')}</Text>
+          <Button
+            variant="ghost"
+            label={t('paywall.aiConsentDetails')}
+            onPress={() => router.push('/profile/settings')}
+          />
+        </View>
         {demo ? <Banner text={t('paywall.demoNotice')} icon="info" /> : null}
         {message ? <Banner text={message.text} tone={message.tone} /> : null}
         {isSub ? <Banner text={t('paywall.subscribed')} icon="check-circle" /> : null}
@@ -209,11 +194,6 @@ export default function Paywall() {
         {total > 0 ? (
           <Card>
             <Text variant="headline">{t('paywall.balance', { count: total })}</Text>
-            {kind === 'tour' && !downloading && ent.wallet.rewardBalance > 0 ? (
-              <Text variant="footnote">
-                {t('paywall.balanceReward', { count: ent.wallet.rewardBalance })}
-              </Text>
-            ) : null}
             {!browsing ? (
               <Button
                 label={busy === 'spend' ? t('paywall.unlocking') : t('paywall.unlockWithCredit')}
@@ -250,20 +230,15 @@ export default function Paywall() {
         {subs.length ? (
           <Card>
             <Text variant="headline">{t('paywall.subscribe')}</Text>
-            {[yearly, monthly]
+            <Text variant="subheadline">{t('paywall.subscriptionMinutes')}</Text>
+            <Text variant="footnote">{t('paywall.calendarMonth')}</Text>
+            {[monthly, yearly]
               .flatMap((o) => (o ? [o] : []))
-              .map((o) => (
-                <View key={o.id} style={{ gap: 6 }}>
-                  {o.period === 'year' ? (
-                    <Text variant="subheadline" color={sys.accentText} style={{ fontWeight: '600' }}>
-                      {value && value.savedPercent > 0
-                        ? `${t('paywall.recommended')} · ${t('paywall.saveBadge', { percent: value.savedPercent })}`
-                        : t('paywall.recommended')}
-                    </Text>
-                  ) : null}
+              .map((o) => {
+                const button = (
                   <Button
                     variant="secondary"
-                    label={t(o.period === 'year' ? 'paywall.subYearly' : 'paywall.subMonthly', {
+                    label={t(o.period === 'month' ? 'paywall.subMonthly' : 'paywall.subYearly', {
                       price: o.priceString,
                     })}
                     loading={busy === o.id}
@@ -271,11 +246,32 @@ export default function Paywall() {
                     accessibilityHint={demo ? t('paywall.demoAction') : undefined}
                     onPress={() => void buy(o)}
                   />
-                  {o.period === 'year' && value ? (
-                    <Text variant="footnote">{t('paywall.perMonth', { price: value.perMonthString })}</Text>
-                  ) : null}
-                </View>
-              ))}
+                );
+                return (
+                  <View key={o.id} style={{ gap: 6 }}>
+                    {o.period === 'year' && value && value.savedPercent > 0 ? (
+                      <Text variant="subheadline" color={sys.accentText} style={{ fontWeight: '600' }}>
+                        {t('paywall.saveBadge', { percent: value.savedPercent })}
+                      </Text>
+                    ) : null}
+                    {o.period === 'month' ? (
+                      <PaywallEnhancement fallback={button}>
+                        <GoldShimmer active={focused} disabled={Boolean(busy) || isSub}>
+                          {button}
+                        </GoldShimmer>
+                      </PaywallEnhancement>
+                    ) : (
+                      button
+                    )}
+                    {o.period === 'month' ? (
+                      <Text variant="footnote">{t('paywall.monthlyBonus')}</Text>
+                    ) : null}
+                    {o.period === 'year' && value ? (
+                      <Text variant="footnote">{t('paywall.perMonth', { price: value.perMonthString })}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
             <Text variant="footnote">{t(demo ? 'paywall.demoSubDisclosure' : 'paywall.subDisclosure')}</Text>
             {!demo ? (
               <Button variant="ghost" size="regular" label={t('paywall.manageSubs')} onPress={manageSubs} />
@@ -283,18 +279,29 @@ export default function Paywall() {
           </Card>
         ) : null}
 
-        {!browsing && kind === 'tour' && !isSub && !downloading ? (
-          <Card>
+        <PaywallEnhancement>
+          <VoicePreviewCard
+            active={focused && !busy}
+            beforePlay={() => getActiveSession()?.runtime.pause()}
+          />
+        </PaywallEnhancement>
+
+        <Card>
+          <Text variant="headline">{t('paywall.freeTextTitle')}</Text>
+          <Text variant="footnote">{t('paywall.freeTextHint')}</Text>
+          {!browsing && !downloading ? (
             <Button
               variant="secondary"
-              icon="play-circle"
-              label={t('paywall.watchAd')}
-              loading={busy === 'ad' || waitingReward}
-              onPress={() => void watchAd()}
+              icon="book-open"
+              label={t('paywall.continueText')}
+              onPress={() => {
+                void continueSessionAsText()
+                  .then(close)
+                  .catch(() => setMessage({ text: t('paywall.failed'), tone: 'error' }));
+              }}
             />
-            <Text variant="footnote">{t('paywall.watchAdHint')}</Text>
-          </Card>
-        ) : null}
+          ) : null}
+        </Card>
 
         {!demo ? (
           <Button

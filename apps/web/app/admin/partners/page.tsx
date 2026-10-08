@@ -1,11 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, doc, getDoc, limit, orderBy, query } from 'firebase/firestore';
-import { DEFAULT_PARTNER_CONFIG, PartnerSchema, PartnerPricingSchema, type Partner } from '@tuur/shared';
+import { collection, doc, getDoc, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import {
+  DEFAULT_PARTNER_CONFIG,
+  PartnerSchema,
+  PartnerPricingSchema,
+  OfferSchema,
+  type Offer,
+  type Partner,
+} from '@tuur/shared';
 import { callFn, fb } from '@/lib/firebase';
 import { useLive } from '@/lib/adminData';
 import { useT } from '@/lib/i18n';
+import { formatDate } from '@/lib/partnerData';
 import { Badge, Button, Card, Field, Input, Loading, Notice, TextArea } from '@/components/ui';
 
 export default function AdminPartners() {
@@ -80,7 +88,136 @@ export default function AdminPartners() {
           </div>
         </Card>
       ))}
+      <OfferModeration partners={partners} />
       <PartnerConfig />
+    </div>
+  );
+}
+
+function OfferModeration({ partners }: { partners: Partner[] }) {
+  const { t, lang } = useT();
+  const [offers, setOffers] = useState<Offer[]>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
+  const [hasMore, setHasMore] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [msg, setMsg] = useState<{ tone: 'success' | 'error'; text: string }>();
+  useEffect(() => {
+    setFailed(false);
+    return onSnapshot(
+      query(collection(fb().db, 'offers'), orderBy('updatedAt', 'desc'), limit(pageSize)),
+      (snapshot) => {
+        setOffers(
+          snapshot.docs.flatMap((document) => {
+            const parsed = OfferSchema.safeParse({ ...document.data(), id: document.id });
+            return parsed.success ? [parsed.data] : [];
+          }),
+        );
+        setHasMore(snapshot.docs.length === pageSize);
+        setFailed(false);
+      },
+      () => setFailed(true),
+    );
+  }, [attempt, pageSize]);
+
+  const moderate = async (offer: Offer, status: 'approved' | 'rejected') => {
+    if (busy) return;
+    setBusy(offer.id);
+    setMsg(undefined);
+    try {
+      await callFn('adminModerateOffer', { offerId: offer.id, revision: offer.reviewRevision ?? '', status });
+      setMsg({ tone: 'success', text: t('admin.offers.saved') });
+    } catch (error) {
+      setMsg({
+        tone: 'error',
+        text: t(
+          (error as { code?: string }).code === 'failed-precondition'
+            ? 'admin.offers.changed'
+            : 'common.error',
+        ),
+      });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  const order = { pending: 0, rejected: 1, approved: 2 } as const;
+  const sorted = offers
+    ? [...offers].sort(
+        (a, b) => order[a.moderationStatus ?? 'pending'] - order[b.moderationStatus ?? 'pending'],
+      )
+    : undefined;
+  return (
+    <div id="offers" className="stack">
+      <h2>{t('admin.offers.title')}</h2>
+      <p className="muted">{t('admin.offers.hint')}</p>
+      {msg ? <Notice tone={msg.tone}>{msg.text}</Notice> : null}
+      {failed ? (
+        <Notice tone="error">
+          {t('common.error')}
+          <Button variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+            {t('common.retry')}
+          </Button>
+        </Notice>
+      ) : !sorted ? (
+        <Loading label={t('common.loading')} />
+      ) : null}
+      {sorted?.length === 0 && !failed ? <p className="muted">{t('admin.offers.none')}</p> : null}
+      {sorted?.map((offer) => {
+        const status = offer.moderationStatus ?? 'pending';
+        const partner = partners.find((p) => p.id === offer.partnerId);
+        return (
+          <Card key={offer.id}>
+            <div className="row between">
+              <h3>{offer.title}</h3>
+              <Badge tone={status === 'approved' ? 'ok' : status === 'rejected' ? 'bad' : 'wait'}>
+                {t(`offers.review.${status}`)}
+              </Badge>
+            </div>
+            <p className="muted">
+              {partner?.name ?? offer.partnerId} · {offer.id}
+            </p>
+            <p>{offer.description}</p>
+            <p>
+              <strong>{t('offers.terms')}: </strong>
+              {offer.terms || t('admin.offers.noTerms')}
+            </p>
+            <p className="muted">
+              {formatDate(offer.validFrom, lang)} – {formatDate(offer.validUntil, lang)}
+            </p>
+            <p className="muted">
+              {offer.active ? t('common.active') : t('common.inactive')}
+              {offer.dailyLimit ? ` · ${t('offers.perDay', { count: offer.dailyLimit })}` : ''}
+            </p>
+            <div className="row">
+              {status !== 'approved' ? (
+                <Button
+                  busy={busy === offer.id}
+                  disabled={Boolean(busy) || failed}
+                  onClick={() => void moderate(offer, 'approved')}
+                >
+                  {t('admin.partners.approve')}
+                </Button>
+              ) : null}
+              {status !== 'rejected' ? (
+                <Button
+                  variant="danger"
+                  busy={busy === offer.id}
+                  disabled={Boolean(busy) || failed}
+                  onClick={() => void moderate(offer, 'rejected')}
+                >
+                  {t('admin.offers.reject')}
+                </Button>
+              ) : null}
+            </div>
+          </Card>
+        );
+      })}
+      {hasMore ? (
+        <Button variant="secondary" onClick={() => setPageSize((n) => n + 100)}>
+          {t('admin.offers.more')}
+        </Button>
+      ) : null}
     </div>
   );
 }

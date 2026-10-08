@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_CLAIM_POLICY, decideClaim, type Area, type ClaimPolicy, AreaSchema } from '@tuur/shared';
+import { RateLimitError } from '../util/rateLimit';
 
 export const AREAS = 'areas';
 
@@ -10,18 +11,38 @@ export function newArea(geohash: string, now: number): Area {
 /**
  * Atomically claims an area for ingest. Exactly one concurrent caller gets `true`: the transaction
  * re-reads the doc and `decideClaim` is evaluated against the committed state (spec 4.1 dedup).
+ * When supplied, the daily allowance is reserved in the same transaction, including across callers.
  */
 export async function claimArea(
   db: Firestore,
   geohash: string,
   now: number,
   policy: ClaimPolicy = DEFAULT_CLAIM_POLICY,
+  maxClaimsPerDay?: number,
 ): Promise<boolean> {
   const ref = db.collection(AREAS).doc(geohash);
-  return db.runTransaction(async (tx) => {
+  const day = new Date(now).toISOString().slice(0, 10);
+  const counter = maxClaimsPerDay === undefined ? undefined : db.collection('usageDaily').doc(day);
+  const result = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const current = snap.exists ? AreaSchema.parse(snap.data()) : undefined;
     if (decideClaim(current, now, policy) === 'skip') return false;
+    const quota = counter ? await tx.get(counter) : undefined;
+    const claimedToday = Number(quota?.get('tilesClaimed') ?? 0);
+    if (maxClaimsPerDay !== undefined && claimedToday >= maxClaimsPerDay) {
+      const retryAt = Date.parse(`${day}T00:00:00Z`) + 86_400_000;
+      // A deferred new area must be visible to clients as unavailable, not as an empty successful
+      // lookup. Keep cached terminal areas usable even if their refresh cannot be admitted today.
+      if (current?.status !== 'ready' && current?.status !== 'low_content')
+        tx.set(ref, {
+          ...(current ?? newArea(geohash, now)),
+          status: 'failed',
+          error: 'rate_limited',
+          ingestRetryAt: retryAt,
+          updatedAt: now,
+        });
+      return { retryAfterMs: retryAt - now };
+    }
     const base = current ?? newArea(geohash, now);
     const next: Area = {
       ...base,
@@ -33,8 +54,11 @@ export async function claimArea(
     delete next.error;
     delete next.ingestRetryAt;
     tx.set(ref, next);
+    if (counter) tx.set(counter, { day, tilesClaimed: claimedToday + 1 }, { merge: true });
     return true;
   });
+  if (typeof result !== 'boolean') throw new RateLimitError(result.retryAfterMs);
+  return result;
 }
 
 export async function markAreaFailed(

@@ -22,7 +22,8 @@ import {
 import { MockRoutingProvider, OrsRoutingProvider, type RoutingProvider } from './providers/routing';
 import type { NarrationDeps, ObjectStore } from './narration/service';
 import type { TeaserDeps } from './narration/teaser';
-import { BillingError, authorizeContent } from './billing/entitlements';
+import type { PoiTextDeps } from './poi/text';
+import { BillingError, authorizeContent, authorizeTextContent } from './billing/entitlements';
 import { hasGroupAccess } from './groups/service';
 import { NarrationError } from './narration/service';
 import { MockPayments, StripePayments, type PaymentsProvider } from './partners/payments';
@@ -143,10 +144,8 @@ export function objectStore(): ObjectStore {
   };
 }
 
-// Entitlements are checked before any content is served or generated. `system-pregen` is the internal warm-up
-// after tour creation (first stops only, cost brake spec 4.3) and never reaches clients.
+// Audio always needs paid access, including cache hits and internally named callers.
 const authorizeNarration: NonNullable<NarrationDeps['authorize']> = async (uid, poi, access, opts) => {
-  if (uid === 'system-pregen') return;
   // Live group guests ride on the host's tour (online only, never for downloads, D47).
   if (
     access?.groupId &&
@@ -163,6 +162,8 @@ const authorizeNarration: NonNullable<NarrationDeps['authorize']> = async (uid, 
       poiIds: [poi.id],
       tile: poi.tile,
       download: opts?.download,
+      sessionId: access?.sessionId,
+      downloadId: access?.downloadId,
     });
   } catch (e) {
     if (e instanceof BillingError) {
@@ -176,6 +177,26 @@ const authorizeNarration: NonNullable<NarrationDeps['authorize']> = async (uid, 
   }
 };
 
+const authorizeText: NonNullable<NarrationDeps['authorize']> = async (uid, poi, access) => {
+  try {
+    await authorizeTextContent({ db: db(), now: Date.now }, uid, {
+      tourId: access?.tourId,
+      groupId: access?.groupId,
+      mode: access?.mode,
+      poiIds: [poi.id],
+      tile: poi.tile,
+    });
+  } catch (error) {
+    if (error instanceof BillingError)
+      throw new NarrationError(
+        error.code === 'not-found' ? 'not-found' : 'permission-denied',
+        error.message,
+        error.details,
+      );
+    throw error;
+  }
+};
+
 /** Text-only teasers do not instantiate TTS, an encoder or an audio store. */
 export function teaserDeps(): TeaserDeps {
   return {
@@ -183,13 +204,23 @@ export function teaserDeps(): TeaserDeps {
     llm: llm(),
     sources: narrationSources(),
     now: Date.now,
-    authorize: authorizeNarration,
+    authorize: authorizeText,
+  };
+}
+
+/** Real public Wikipedia text, with bounded latency and no model/audio provider or secret. */
+export function poiTextDeps(): PoiTextDeps {
+  return {
+    db: db(),
+    sources: new HttpNarrationSources({ timeoutMs: 8000, retries: 0 }, true),
+    now: Date.now,
   };
 }
 
 export function narrationDeps(): NarrationDeps {
   return {
     ...teaserDeps(),
+    authorize: authorizeNarration,
     tts: tts(),
     encoder: encoder(),
     store: objectStore(),
@@ -206,7 +237,7 @@ export function routing(): RoutingProvider {
 import type { TourDeps } from './tours/service';
 import { TourError } from './tours/service';
 
-/** Deps of the planned-route callable, including the entitlement check for the paid 24 h session. */
+/** Planning is free text/navigation; provider budgets and route limits still apply. */
 export function plannedRouteDeps(): TourDeps {
   return {
     db: db(),
@@ -215,10 +246,14 @@ export function plannedRouteDeps(): TourDeps {
     now: Date.now,
     authorize: async (uid, r) => {
       try {
-        await authorizeContent({ db: db(), now: Date.now }, uid, { mode: r.mode, poiIds: [], tile: r.tile });
+        await authorizeTextContent({ db: db(), now: Date.now }, uid, {
+          mode: r.mode,
+          poiIds: [],
+          tile: r.tile,
+        });
       } catch (e) {
         if (e instanceof BillingError)
-          throw new TourError('failed-precondition', 'Route planning needs an unlocked session', e.details);
+          throw new TourError('failed-precondition', 'Route planning area is unavailable', e.details);
         throw e;
       }
     },

@@ -24,6 +24,35 @@ const ref = (lang: string, extract?: string): WikipediaRef => ({
 });
 
 describe('place summary', () => {
+  it('uses sanitized editorial facts when the source record has no article extract', () => {
+    const poi = { ...place([]), adminFacts: ['<b>A local fact.</b>', 'A second fact.'] };
+    expect(placeInformation(poi, 'de')).toEqual({
+      text: 'A local fact.\n\nA second fact.',
+      sourceName: 'tuur',
+    });
+  });
+
+  it('keeps localized OSM descriptions and inscriptions attributed to OSM', () => {
+    const poi = place([]);
+    poi.sources.osmId = 'node/123';
+    poi.osmTags = {
+      'description:de': 'Ein Gedenkort.',
+      'description:en': 'A memorial.',
+      inscription: 'Remember.',
+    };
+    expect(placeInformation(poi, 'de-DE')).toEqual({
+      text: 'Ein Gedenkort.\n\nRemember.',
+      sourceName: 'OpenStreetMap',
+      sourceUrl: 'https://www.openstreetmap.org/node/123',
+    });
+    expect(placeInformation(poi, 'en')?.text).toBe('A memorial.\n\nRemember.');
+    poi.osmTags['tuur:demo'] = 'yes';
+    expect(placeInformation(poi, 'en')).toEqual({
+      text: 'A memorial.\n\nRemember.',
+      sourceName: 'tuur Demo',
+    });
+  });
+
   it('prefers the base UI language independently of source order', () => {
     const poi = place([ref('en', 'A television tower.'), ref('de', 'Ein Fernsehturm in Berlin.')]);
 

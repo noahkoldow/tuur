@@ -74,6 +74,38 @@ const escapeHtml = (value) =>
 const pagePath = (page, lang) => `${lang === 'en' ? '/en' : ''}/${page}`;
 const emailLink = (address) => `<a href="mailto:${escapeHtml(address)}">${escapeHtml(address)}</a>`;
 
+/** Only the token formats issued by the backend may become a native URL. */
+export function betaNativeInviteUrl(pathname) {
+  if (typeof pathname !== 'string') return null;
+  const match = /^\/(join|invite)\/([A-Za-z0-9_.-]+)$/.exec(pathname);
+  if (!match || match[0] !== pathname) return null;
+  const [, kind, token] = match;
+  const valid =
+    kind === 'join'
+      ? /^[A-Za-z0-9]{10,40}\.[A-Za-z0-9_-]{32,64}$/.test(token)
+      : /^[A-Za-z0-9_-]{32}$/.test(token);
+  return valid ? `tuur://${kind}/${token}` : null;
+}
+
+function appLinkPage() {
+  return `<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><title>Einladung · tuur</title><link rel="stylesheet" href="/site.css"><script src="/app-link.js" defer></script></head>
+<body><a class="skip" href="#content">Zum Inhalt</a><header><div class="wrap"><a class="brand" href="/support">tuur</a></div></header>
+<main id="content" class="wrap" tabindex="-1"><h1>Deine Einladung zu tuur</h1><p lang="en">Your invitation to tuur</p><p>Öffne diese Einladung mit der tuur-App. Wenn tuur noch nicht installiert ist, installiere die App über deine TestFlight-Einladung und kehre anschließend zu diesem Link zurück.</p><p lang="en">Open this invitation in the tuur app. If tuur is not installed yet, install it using your TestFlight invitation, then return to this link.</p><p><a id="open-app" class="app-button" hidden>In tuur öffnen / <span lang="en">Open in tuur</span></a></p><p id="invalid-link" hidden>Dieser Einladungslink ist ungültig. Bitte lass dir einen neuen Link senden. <span lang="en">This invitation link is invalid. Please request a new link.</span></p><noscript><p>Aktiviere JavaScript, um die Einladung in tuur zu öffnen. <span lang="en">Enable JavaScript to open the invitation in tuur.</span></p></noscript><p><a href="/support">Hilfe &amp; Kontakt</a> · <a href="/en/support" lang="en">Help &amp; contact</a></p></main></body></html>\n`;
+}
+
+// No requests, storage, automatic redirects or redemption: the app checks access after a deliberate tap.
+const appLinkScript = `${betaNativeInviteUrl.toString()}
+const nativeUrl = betaNativeInviteUrl(window.location.pathname);
+if (nativeUrl) {
+  const link = document.getElementById('open-app');
+  link.href = nativeUrl;
+  link.hidden = false;
+} else {
+  document.getElementById('invalid-link').hidden = false;
+}
+`;
+
 export function operatorFromEnv(env) {
   const value = (name) => (env[`EXPO_PUBLIC_OPERATOR_${name}`] ?? env[`OPERATOR_${name}`])?.trim();
   return {
@@ -149,9 +181,28 @@ export async function buildBetaLegal({ env, outputDir = defaultOutput }) {
   if (errors.length) throw new Error(`Beta legal pages are not ready:\n- ${errors.join('\n- ')}`);
   const operator = operatorFromEnv(env);
   const { getLegalDocument, hasMissing } = await legalBuilders();
+  // Public seller ID from the configured AdMob account, never Google's demo publisher.
+  const appAds = readFileSync(join(root, 'apps/web/public/app-ads.txt'), 'utf8');
+  if (!/^google\.com, pub-(?!3940256099942544)\d{16}, DIRECT, f08c47fec0942fa0\r?\n?$/.test(appAds))
+    throw new Error('The public AdMob seller declaration is invalid');
   const files = new Map([
-    ['site.css', css],
-    ['robots.txt', 'User-agent: *\nDisallow: /\n'],
+    [
+      'site.css',
+      `${css}.app-button{display:inline-block;border:2px solid currentColor;border-radius:.75rem;padding:.8rem 1.2rem;font-weight:700;text-decoration:none}.app-button[hidden]{display:none}\n`,
+    ],
+    ['robots.txt', 'User-agent: *\nAllow: /app-ads.txt\nDisallow: /\n'],
+    ['app-ads.txt', appAds],
+    ['app-link.html', appLinkPage()],
+    ['app-link.js', appLinkScript],
+    [
+      '.well-known/apple-app-site-association',
+      `${JSON.stringify({
+        applinks: {
+          apps: [],
+          details: [{ appID: '4GXK973R2W.com.tuurapp', paths: ['/join/*', '/invite/*'] }],
+        },
+      })}\n`,
+    ],
   ]);
   for (const lang of ['de', 'en']) {
     for (const page of pages) {

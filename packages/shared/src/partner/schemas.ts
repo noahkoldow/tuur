@@ -90,6 +90,8 @@ export const OfferSchema = z
     validUntil: z.number().int().positive(),
     dailyLimit: z.number().int().min(1).max(1000).optional(),
     active: z.boolean(),
+    moderationStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+    reviewRevision: z.string().optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
   })

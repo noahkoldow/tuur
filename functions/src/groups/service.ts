@@ -5,6 +5,8 @@ import {
   GROUP_MAX_SIZE,
   GROUP_TTL_MS,
   GroupSchema,
+  GroupAudioSchema,
+  GroupRecordingSeedSchema,
   TourSchema,
   decideGroupAccess,
   decideJoin,
@@ -13,10 +15,13 @@ import {
   parseGroupInvite,
   type Group,
   type Tour,
+  resolvePersona,
 } from '@tuur/shared';
-import { authorizeContent, loadEntitlements } from '../billing/entitlements';
+import { authorizeContent, BillingError, loadEntitlements } from '../billing/entitlements';
 import { consumePurchaseUnit } from '../billing/purchaseLedger';
 import { consumeRateLimit } from '../util/rateLimit';
+import { GroupAudioPendingError, seedGroupRecordings } from './recordings';
+import { loadAiConfig } from '../util/aiConfig';
 
 export interface GroupDeps {
   db: Firestore;
@@ -48,6 +53,8 @@ export function publicGroup(g: Group) {
     capacity: groupCapacity(g),
     status: g.status,
     expiresAt: g.expiresAt,
+    ...(g.audio ? { audio: g.audio } : {}),
+    ...(g.sessionId ? { sessionId: g.sessionId } : {}),
   };
 }
 
@@ -74,7 +81,13 @@ async function loadTourForHost(
   return t.data;
 }
 
-const CreateSchema = z.object({ tourId: z.string().min(1).max(200), mode: z.enum(['tour', 'planned']) });
+const CreateSchema = z.object({
+  tourId: z.string().min(1).max(200),
+  mode: z.enum(['tour', 'planned']),
+  audio: GroupAudioSchema,
+  sessionId: z.string().min(1).max(120).optional(),
+  recordings: z.array(GroupRecordingSeedSchema).max(200).default([]),
+});
 
 /**
  * Host starts a live group for the tour they are allowed to play (checked like content access). Returns the
@@ -95,7 +108,10 @@ export async function createGroup(deps: GroupDeps, uid: string, raw: unknown) {
     mode: p.data.mode,
     poiIds: [first.poiId],
     tile: poi.get('tile') as string | undefined,
+    ...(p.data.sessionId ? { sessionId: p.data.sessionId } : {}),
   });
+  const cfg = await loadAiConfig(deps.db, now);
+  const voice = resolvePersona(cfg.voiceCast, cfg.defaultVoiceId, p.data.audio.voice).id;
   // one live group per host: an older one ends (its guests lose access)
   const open = await groups(deps.db).where('hostUid', '==', uid).where('status', '==', 'live').get();
   const batch = deps.db.batch();
@@ -107,6 +123,8 @@ export async function createGroup(deps: GroupDeps, uid: string, raw: unknown) {
     hostUid: uid,
     tour,
     mode: p.data.mode,
+    audio: { ...p.data.audio, voice },
+    ...(p.data.sessionId ? { sessionId: p.data.sessionId } : {}),
     members: [uid],
     hostSubscriber: isSubscriber(await loadEntitlements(deps.db, uid), now),
     extraSeats: 0,
@@ -117,6 +135,7 @@ export async function createGroup(deps: GroupDeps, uid: string, raw: unknown) {
   });
   batch.set(ref, { ...group, expireAt: new Date(group.expiresAt + 7 * 86_400_000) });
   await batch.commit();
+  await seedGroupRecordings(deps, group, p.data.recordings, cfg.defaultVoiceId);
   return { token: `${ref.id}.${secret}`, group: publicGroup(group) };
 }
 
@@ -152,7 +171,13 @@ const GroupIdSchema = z.object({ groupId: z.string().regex(/^[A-Za-z0-9]{10,40}$
 
 /** Host spends one bought seat credit for one more place (never beyond GROUP_MAX_SIZE). */
 export async function addGroupSeat(deps: GroupDeps, uid: string, raw: unknown) {
-  const p = GroupIdSchema.safeParse(raw);
+  const p = GroupIdSchema.extend({
+    // Optional for older clients. New clients persist this before spending a credit or opening StoreKit.
+    requestId: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{10,120}$/)
+      .optional(),
+  }).safeParse(raw);
   if (!p.success) throw new GroupError('invalid-argument', 'Invalid request');
   const ref = groups(deps.db).doc(p.data.groupId);
   const walletRef = deps.db.collection('users').doc(uid).collection('credits').doc('wallet');
@@ -160,16 +185,27 @@ export async function addGroupSeat(deps: GroupDeps, uid: string, raw: unknown) {
     const [snap, wallet] = await Promise.all([tx.get(ref), tx.get(walletRef)]);
     const g = snap.exists ? GroupSchema.safeParse(snap.data()) : undefined;
     if (!g?.success || g.data.hostUid !== uid) throw new GroupError('not-found', 'Group not found');
+    const seats = Number(wallet.get('seatBalance') ?? 0);
+    const requests = z.array(z.string()).parse(snap.get('seatRequestIds') ?? []);
+    // A lost response can be replayed after the group has ended, without spending another credit.
+    if (p.data.requestId && requests.includes(p.data.requestId))
+      return { capacity: groupCapacity(g.data), seatBalance: seats };
     if (g.data.status !== 'live' || g.data.expiresAt <= deps.now())
       throw new GroupError('failed-precondition', 'Group ended', 'ended');
     if (groupCapacity(g.data) >= GROUP_MAX_SIZE)
       throw new GroupError('failed-precondition', 'Group is at its maximum size', 'max_size');
-    const seats = Number(wallet.get('seatBalance') ?? 0);
     if (seats < 1) throw new GroupError('failed-precondition', 'No seat credit', 'no_seat_credit');
     const consume = await consumePurchaseUnit(tx, deps.db, uid, 'seat', seats, deps.now());
     consume();
     tx.set(walletRef, { seatBalance: seats - 1 }, { merge: true });
-    tx.update(ref, { extraSeats: g.data.extraSeats + 1 });
+    tx.set(
+      ref,
+      {
+        extraSeats: g.data.extraSeats + 1,
+        ...(p.data.requestId ? { seatRequestIds: [...requests, p.data.requestId] } : {}),
+      },
+      { merge: true },
+    );
     return {
       capacity: groupCapacity({ ...g.data, extraSeats: g.data.extraSeats + 1 }),
       seatBalance: seats - 1,
@@ -198,7 +234,17 @@ export async function hasGroupAccess(
   groupId: string,
   req: { poiIds: string[]; download?: boolean },
 ): Promise<boolean> {
-  if (!/^[A-Za-z0-9]{10,40}$/.test(groupId)) return false;
+  return Boolean(await authorizedGroup(deps, uid, groupId, req));
+}
+
+/** Membership and the host's current time lease are checked on every shared recording request. */
+export async function authorizedGroup(
+  deps: GroupDeps,
+  uid: string,
+  groupId: string,
+  req: { poiIds: string[]; download?: boolean; waitForHost?: boolean },
+): Promise<Group | undefined> {
+  if (!/^[A-Za-z0-9]{10,40}$/.test(groupId)) return undefined;
   const snap = await groups(deps.db).doc(groupId).get();
   const g = snap.exists ? GroupSchema.safeParse(snap.data()) : undefined;
   if (
@@ -206,6 +252,26 @@ export async function hasGroupAccess(
     g.data.hostSubscriber &&
     !isSubscriber(await loadEntitlements(deps.db, g.data.hostUid), deps.now())
   )
-    return false;
-  return Boolean(g?.success && decideGroupAccess(g.data, uid, req, deps.now()));
+    return undefined;
+  if (!g?.success || !decideGroupAccess(g.data, uid, req, deps.now())) return undefined;
+  try {
+    await authorizeContent(deps, g.data.hostUid, {
+      tourId: g.data.tour.id,
+      mode: g.data.mode,
+      poiIds: req.poiIds,
+      ...(g.data.sessionId ? { sessionId: g.data.sessionId } : {}),
+    });
+  } catch (error) {
+    if (error instanceof BillingError) {
+      if (
+        req.waitForHost &&
+        uid !== g.data.hostUid &&
+        ['tour_time_required', 'tour_time_exhausted'].includes(String(error.details?.['reason']))
+      )
+        throw new GroupAudioPendingError();
+      return undefined;
+    }
+    throw error;
+  }
+  return g.data;
 }

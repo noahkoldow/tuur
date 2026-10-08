@@ -46,14 +46,35 @@ describe('account-bound entitlement synchronization', () => {
     useEntitlementSync();
   });
 
-  it('does not initialize billing or read entitlements for guests or unverified accounts', () => {
+  it('does not initialize billing or read entitlements without a primary account', () => {
     controls.authChanged(null);
     controls.authChanged({ uid: 'legacy', isAnonymous: true });
-    controls.authChanged({ uid: 'email', isAnonymous: false, email: 'test@example.com' });
+    controls.authChanged({ uid: 'no-provider', isAnonymous: false, providerIds: [] });
+    controls.authChanged({
+      uid: 'phone-only',
+      isAnonymous: false,
+      phoneNumber: '+491701234567',
+      providerIds: ['phone'],
+    });
     expect(controls.entitlementCallbacks).toHaveLength(0);
     expect(controls.init).not.toHaveBeenCalled();
     controls.cleanup();
   });
+
+  it.each(['password', 'apple.com', 'google.com'])(
+    'initializes billing and loads entitlements for a %s account without a phone',
+    (provider) => {
+      controls.authChanged({ uid: 'primary', isAnonymous: false, providerIds: [provider] });
+      expect(controls.init).toHaveBeenCalledExactlyOnceWith('primary');
+      expect(controls.entitlementCallbacks).toHaveLength(1);
+      controls.entitlementCallbacks[0]!({
+        entitlements: [],
+        wallet: { balance: 3, rewardBalance: 0 },
+      });
+      expect(useEntitlementStore.getState()).toMatchObject({ loaded: true, wallet: { balance: 3 } });
+      controls.cleanup();
+    },
+  );
 
   it('clears the previous wallet before switching owners and ignores their queued updates', () => {
     controls.authChanged({ uid: 'a', isAnonymous: false, phoneNumber: '+491701234567' });

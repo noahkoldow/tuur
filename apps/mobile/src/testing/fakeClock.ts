@@ -21,7 +21,7 @@ export class FakeClock implements Clock {
   }
   /** Lets pending promise continuations (backend calls) run. */
   async flush() {
-    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    for (let i = 0; i < 4; i++) await new Promise<void>((r) => setImmediate(r));
   }
   async advance(ms: number) {
     const end = this.t + ms;

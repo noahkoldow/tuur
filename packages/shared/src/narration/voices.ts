@@ -50,11 +50,18 @@ export const DEFAULT_VOICE_CAST: VoicePersona[] = [
     voice: 'gemini:Achird',
     fallback: 'openai:coral',
     style: `${GUIDE} Personality: friendly, upbeat and a little playful, enjoys the odd anecdote.`,
-    names: { de: 'Lina', en: 'Lina' },
+    names: { de: 'Linus', en: 'Linus' },
     blurb: { de: 'Freundlich und verspielt', en: 'Friendly and playful' },
   },
 ];
 export const DEFAULT_VOICE_ID = 'mara';
+
+/** Display the renamed persona consistently, including older remote casts; persisted voice IDs stay stable. */
+export function voiceDisplayName(persona: Pick<VoicePersona, 'id' | 'names'>, lang: string): string {
+  if (persona.id === 'lina') return 'Linus';
+  const baseLanguage = lang.toLowerCase().split(/[-_]/)[0]!;
+  return persona.names[lang] ?? persona.names[baseLanguage] ?? persona.names['en'] ?? persona.id;
+}
 
 export function parseVoiceSpec(spec: string): { provider: TtsProviderId; name: string } {
   const [provider, name] = spec.split(':') as [TtsProviderId, string];

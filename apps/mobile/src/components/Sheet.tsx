@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   View,
@@ -12,6 +13,7 @@ import {
 import { haptics, springs, useReduceMotion } from '../motion';
 import { Icon } from './Icon';
 import { radii, sys } from '../theme';
+import { ParentScrollLock, useParentScrollLock } from './nested-scroll';
 
 interface Props {
   /** Visible heights in px for each snap stop, ascending. */
@@ -39,6 +41,9 @@ interface Props {
   scrollRef?: React.RefObject<ScrollView | null>;
   /** The listener scrolled the content themselves. */
   onUserScroll?: () => void;
+  /** Visible content bounds, excluding the fixed header and bottom safe area. */
+  onContentScroll?: (y: number, viewportHeight: number) => void;
+  onScrollSettled?: () => void;
   /** Sheet surface: `grouped` (default) suits list content, `plain` suits reading text. */
   tone?: 'grouped' | 'plain';
 }
@@ -63,6 +68,8 @@ export function Sheet({
   bottomInset = 24,
   scrollRef,
   onUserScroll,
+  onContentScroll,
+  onScrollSettled,
   tone = 'grouped',
 }: Props) {
   const background = tone === 'grouped' ? sys.grouped : sys.background;
@@ -89,6 +96,7 @@ export function Sheet({
   const offset = useRef(new Animated.Value(max - snaps[initialSnap]!)).current;
   const startOffset = useRef(0);
   const scrollY = useRef(0);
+  const { acquire, locked, isLocked } = useParentScrollLock();
   const activeIndex = Math.max(0, Math.min(current, snaps.length - 1));
   const canExpand = snaps[activeIndex]! < max - 1;
   const canCollapse = snaps[activeIndex]! > snaps[0]! + 1;
@@ -172,6 +180,7 @@ export function Sheet({
           ...handlers,
           onMoveShouldSetPanResponder: () => false,
           onMoveShouldSetPanResponderCapture: (_, g) =>
+            !isLocked() &&
             Math.abs(g.dy) > 10 &&
             Math.abs(g.dy) > Math.abs(g.dx) * 1.4 &&
             ((g.dy < 0 && canExpand) || (g.dy > 0 && scrollY.current <= 0 && canCollapse)),
@@ -179,14 +188,14 @@ export function Sheet({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snaps, max, current, activeIndex, canExpand, canCollapse, reduceMotion, onIndexChange],
+    [snaps, max, current, activeIndex, canExpand, canCollapse, reduceMotion, onIndexChange, isLocked],
   );
   const headerContent = (
     <View onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height + 44)}>{header}</View>
   );
 
   return (
-    <>
+    <ParentScrollLock.Provider value={acquire}>
       <Animated.View
         style={[
           {
@@ -246,10 +255,17 @@ export function Sheet({
           <ScrollView
             ref={scrollRef}
             onScrollBeginDrag={onUserScroll}
-            onScroll={(e) => (scrollY.current = e.nativeEvent.contentOffset.y)}
+            onScroll={(e) => {
+              scrollY.current = e.nativeEvent.contentOffset.y;
+              onContentScroll?.(
+                scrollY.current,
+                Math.max(0, visibleHeight - (scrollHeader ? 44 : headerHeight) - bottomInset),
+              );
+            }}
+            onMomentumScrollEnd={onScrollSettled}
             scrollEventThrottle={16}
-            // always scrollable: content below the header must stay reachable for screen-reader and switch users
-            scrollEnabled
+            // Only pause native page scrolling during a card gesture. Web contains overflow on the card.
+            scrollEnabled={Platform.OS === 'web' || !locked}
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{
@@ -276,7 +292,7 @@ export function Sheet({
           {floatingAction}
         </Animated.View>
       ) : null}
-    </>
+    </ParentScrollLock.Provider>
   );
 }
 

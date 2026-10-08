@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_AI_CONFIG, PoiSchema, encodeGeohash, type Poi } from '@tuur/shared';
+import { AI_CONSENT_VERSION, DEFAULT_AI_CONFIG, PoiSchema, encodeGeohash, type Poi } from '@tuur/shared';
 import { memoryFirestore } from '../../test/memoryFirestore';
 import { MockLlmProvider } from '../providers/llm';
 import { NarrationError } from '../narration/service';
@@ -26,6 +26,7 @@ const place = (id: string, changes: Partial<Poi> = {}): Poi =>
 
 function setup(places: Poi[] = [place('a'), place('b')]) {
   const { db, docs } = memoryFirestore();
+  docs.set('users/visitor/consents/ai', { granted: true, version: AI_CONSENT_VERSION, updatedAt: time });
   places.forEach((poi) => docs.set(`pois/${poi.id}`, poi));
   const llm = new MockLlmProvider();
   const select = vi.spyOn(llm, 'selectNearby').mockResolvedValue({
@@ -44,6 +45,12 @@ function setup(places: Poi[] = [place('a'), place('b')]) {
 }
 
 describe('nearby Gemini curation', () => {
+  it('keeps local candidate order without sending a route or interests to AI after refusal', async () => {
+    const { deps, select, docs } = setup();
+    docs.set('users/visitor/consents/ai', { granted: false, version: AI_CONSENT_VERSION, updatedAt: time });
+    expect(await selectNearby(deps, 'visitor', request)).toEqual({ poiIds: ['a', 'b'], source: 'fallback' });
+    expect(select).not.toHaveBeenCalled();
+  });
   it('curates only server place facts and passes the stable thread and interests to the lite model', async () => {
     const { deps, select, docs } = setup();
     const result = await selectNearby(deps, 'visitor', {

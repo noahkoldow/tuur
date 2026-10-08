@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { ScrollView } from 'react-native';
 import { Alert, Animated, PixelRatio, Platform, View, useWindowDimensions } from 'react-native';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import { useContentReports } from '../src/state/content-reports';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInterstitials } from '../src/ads/useInterstitials';
 import { useBackend } from '../src/backend';
@@ -32,12 +33,14 @@ import { TuurMap } from '../src/components/TuurMap';
 import type { ForkSnapshot } from '../src/guide/modes';
 import {
   endSession,
+  enableSessionAudio,
+  continueSessionAsText,
   switchSessionToExplore,
   tourPath,
   useActiveSession,
   type ActiveSession,
 } from '../src/guide/session';
-import { canUseSession, useEntitlementStore } from '../src/billing/entitlements';
+import { canStartTour, canUseSession, useEntitlementStore } from '../src/billing/entitlements';
 import { useStopPois } from '../src/hooks/useStopPois';
 import { useRoamSuggestions } from '../src/hooks/use-roam-suggestions';
 import { endTourAndShowSummary, goHome, isEndingTour } from '../src/navigation';
@@ -72,6 +75,58 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const insets = useSafeAreaInsets();
   const { height: screenH } = useWindowDimensions();
   const entitlements = useEntitlementStore();
+  const textOnly = session.contentMode === 'text';
+  const [audioPlaceId, setAudioPlaceId] = useState(tour?.placeId);
+  const [upgradingAudio, setUpgradingAudio] = useState(false);
+  const [audioError, setAudioError] = useState(false);
+  const audioAfterPurchase = useRef(false);
+  useEffect(() => {
+    setAudioPlaceId(tour?.placeId);
+    if (tour?.placeId || !session.billingTile) return;
+    return backend.watchArea(session.billingTile, (area) => setAudioPlaceId(area?.placeId));
+  }, [backend, tour?.placeId, session.billingTile]);
+  const audioAllowed =
+    session.mode === 'tour' && tour
+      ? canStartTour(entitlements, tour.id, tour.free)
+      : canUseSession(entitlements, session.mode === 'tour' ? 'planned' : session.mode, audioPlaceId);
+  const startAudio = useCallback(async () => {
+    setUpgradingAudio(true);
+    setAudioError(false);
+    try {
+      await enableSessionAudio();
+    } catch {
+      setAudioError(true);
+    } finally {
+      setUpgradingAudio(false);
+    }
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      if (!audioAfterPurchase.current) return;
+      audioAfterPurchase.current = false;
+      if (audioAllowed) void startAudio();
+    }, [audioAllowed, startAudio]),
+  );
+  const requestAudio = () => {
+    if (audioAllowed) return void startAudio();
+    audioAfterPurchase.current = true;
+    if (session.mode === 'tour' && tour)
+      router.push({ pathname: '/paywall', params: { kind: 'tour', tourId: tour.id } });
+    else if (audioPlaceId)
+      router.push({
+        pathname: '/paywall',
+        params: {
+          kind: 'session',
+          placeId: audioPlaceId,
+          mode: session.mode,
+          ...(tour ? { tourId: tour.id } : {}),
+        },
+      });
+    else {
+      audioAfterPurchase.current = false;
+      setAudioError(true);
+    }
+  };
   const walked = useHistory((s) => s.records.find((r) => r.id === session.recordId)?.track);
   const savedStops = useHistory((s) => s.records.find((r) => r.id === session.recordId)?.stops);
   const settingsLanguage = useSettings((s) => s.language);
@@ -101,6 +156,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState(false);
   const [offers, setOffers] = useState<PublicOffer[]>([]);
+  const reportRevision = useContentReports((state) => state.revision);
   const sponsored = Boolean(ui.narration?.sponsored);
   const partnerPoiId = ui.narration?.kind === 'stop' ? ui.narration.poiId : undefined;
   // Partner stop: count the visit, show the offers (server only returns valid ones) and count the impression.
@@ -120,7 +176,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
     return () => {
       cancelled = true;
     };
-  }, [backend, sponsored, partnerPoiId, ui.narration?.key]);
+  }, [backend, sponsored, partnerPoiId, ui.narration?.key, reportRevision]);
   const path = useMemo(() => (tour ? tourPath(tour) : []), [tour]);
   const storyStops = useMemo(() => ui.stops.filter((stop) => !stop.navigationOnly), [ui.stops]);
   const pois = useStopPois(storyStops);
@@ -177,8 +233,8 @@ function PlayInner({ session }: { session: ActiveSession }) {
     setReported(false);
     setReportError(false);
   }, [n?.key]);
-  const exploreInstead = () => {
-    if (!canUseSession(entitlements, 'roam', tour?.placeId)) {
+  const exploreInstead = async () => {
+    if (!textOnly && !canUseSession(entitlements, 'roam', tour?.placeId)) {
       if (tour?.placeId)
         router.push({
           pathname: '/paywall',
@@ -186,21 +242,29 @@ function PlayInner({ session }: { session: ActiveSession }) {
         });
       return;
     }
-    if (switchSessionToExplore()) haptics.select();
+    if (await switchSessionToExplore()) haptics.select();
   };
 
   const noticeText =
-    ui.notice === 'unavailable'
-      ? t('player.unavailable')
-      : ui.notice === 'locked'
-        ? t('errors.locked')
-        : ui.notice === 'generation_paused'
-          ? t('errors.paused')
-          : ui.notice === 'rate_limited'
-            ? t('errors.rateLimited')
-            : ui.notice === 'offline'
-              ? t('errors.network')
-              : undefined;
+    ui.notice === 'ai_consent_updated'
+      ? t('errors.aiConsentUpdated')
+      : ui.notice === 'ai_consent_pause_failed'
+        ? t('errors.aiConsentPauseFailed')
+        : ui.notice === 'tour_time_exhausted'
+          ? t('errors.tourTimeExhausted')
+          : ui.notice === 'group_audio_pending'
+            ? t('errors.groupAudioPending')
+            : ui.notice === 'unavailable'
+              ? t('player.unavailable')
+              : ui.notice === 'locked'
+                ? t('errors.locked')
+                : ui.notice === 'generation_paused'
+                  ? t('errors.paused')
+                  : ui.notice === 'rate_limited'
+                    ? t('errors.rateLimited')
+                    : ui.notice === 'offline'
+                      ? t('errors.network')
+                      : undefined;
 
   // Without a GPS heading (standing, slow walking) a relative arrow would point anywhere: hide it then.
   const arrowDeg =
@@ -332,7 +396,13 @@ function PlayInner({ session }: { session: ActiveSession }) {
         </View>
       ) : null}
       <NavigationRouteNotice navigation={nav} onRetry={session.navigation?.retry} />
-      <ProgressBar value={progress} />
+      {textOnly ? <Text variant="footnote">{t('player.textMode')}</Text> : <ProgressBar value={progress} />}
+      {ui.tourTime?.remainingSeconds !== undefined && ui.tourTime.remainingSeconds !== null ? (
+        <Text variant="footnote">
+          {t('player.minutesRemaining', { count: Math.ceil(ui.tourTime.remainingSeconds / 60) })}
+          {ui.phase === 'paused' ? ` · ${t('player.timePaused')}` : ''}
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -448,6 +518,22 @@ function PlayInner({ session }: { session: ActiveSession }) {
         onUserScroll={() => (userScrolledAt.current = Date.now())}
       >
         <View style={{ gap: 14 }}>
+          {ui.phase !== 'finished' && textOnly ? (
+            <Button
+              label={t('player.enableAudio')}
+              icon="headphones"
+              loading={upgradingAudio}
+              onPress={requestAudio}
+            />
+          ) : ui.phase !== 'finished' && !session.groupId ? (
+            <Button
+              variant="ghost"
+              label={t('player.continueText')}
+              icon="file-text"
+              onPress={() => void continueSessionAsText()}
+            />
+          ) : null}
+          {audioError ? <Banner tone="error" text={t('player.audioUpgradeFailed')} /> : null}
           {session.mode === 'roam' && ui.phase !== 'finished' && !inspectedStop ? (
             <RoamSuggestions
               suggestions={suggestions}
@@ -475,6 +561,11 @@ function PlayInner({ session }: { session: ActiveSession }) {
           {cardStop && (ui.phase !== 'finished' || inspectedStop) ? (
             <View style={{ marginHorizontal: -metrics.margin }}>
               <StopCards
+                access={{
+                  mode: session.mode,
+                  ...(tour ? { tourId: tour.id } : {}),
+                  ...(session.groupId ? { groupId: session.groupId } : {}),
+                }}
                 poi={cardPoi}
                 name={cardStop.name}
                 distanceM={cardStop.id === ui.target?.id ? nav.distanceM : undefined}
@@ -553,7 +644,10 @@ function PlayInner({ session }: { session: ActiveSession }) {
             </View>
           ) : null}
           {tuuBubble}
-          {ui.phase !== 'finished' ? <GroupBar session={session} /> : null}
+          {ui.phase !== 'finished' && !textOnly ? (
+            <GroupBar session={session} offline={ui.tourTime?.offline} />
+          ) : null}
+          <Banner icon="info" text={t('onboarding.safetyBody')} />
           {session.foregroundOnly ? <Banner icon="smartphone" text={t('player.foregroundOnly')} /> : null}
           {noticeText ? <Banner text={noticeText} /> : null}
           {ui.travelMode === 'vehicle' ? <Banner icon="car" text={t('travel.vehicleHint')} /> : null}
@@ -618,6 +712,11 @@ function PlayInner({ session }: { session: ActiveSession }) {
                     icon="tag"
                     onPress={() => router.push({ pathname: '/redeem', params: { offerId: o.id } })}
                   />
+                  <Button
+                    variant="secondary"
+                    label={t('safety.offer')}
+                    onPress={() => router.push({ pathname: '/report', params: { offerId: o.id } })}
+                  />
                 </View>
               ))}
             </View>
@@ -656,6 +755,11 @@ function PlayInner({ session }: { session: ActiveSession }) {
         </View>
       </Sheet>
       <StopInfoSheet
+        access={{
+          mode: session.mode,
+          ...(tour ? { tourId: tour.id } : {}),
+          ...(session.groupId ? { groupId: session.groupId } : {}),
+        }}
         stop={
           readingStop
             ? { ...readingStop, ...(savedNarration ? { narration: savedNarration } : {}) }

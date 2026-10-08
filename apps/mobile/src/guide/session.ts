@@ -6,6 +6,7 @@ import {
   decodePolyline,
   createTourScript,
   destinationPoint,
+  encodeGeohash,
   type Interest,
   type LatLng,
   type NarrationFrequency,
@@ -14,12 +15,13 @@ import {
   type SessionCheckpoint,
   type Tour,
   type TourScript,
+  type TourTimeResult,
 } from '@tuur/shared';
 import { createAudioEngine } from '../audio/createEngine';
 import { getBackend } from '../backend';
 import { getPermissionState, requestForeground, RealLocationSource } from '../location/real';
 import { SimulatedLocationSource } from '../location/simulated';
-import type { AccessInfo } from '../backend/types';
+import { BackendError, type AccessInfo } from '../backend/types';
 import type { LocationSource } from '../location/types';
 import { ForkController, PoiPool, RoamController } from './modes';
 import { GuideRuntime } from './runtime';
@@ -30,11 +32,16 @@ import { config } from '../config';
 import { useHistory } from '../state/history';
 import { useSettings } from '../state/settings';
 import { attachTourLiveActivity } from '../liveActivity/service';
+import { TourTimeController, observeTourTime } from './tourTime';
+import { subscribed, useEntitlementStore } from '../billing/entitlements';
+import { cancelFreeTourIntro, runFreeTourIntro } from '../ads/freeTourIntro';
+import type { ContentMode } from './runtime';
 
 export type SessionMode = 'tour' | 'planned' | 'fork' | 'roam';
 
 export interface ActiveSession {
   mode: SessionMode;
+  contentMode: ContentMode;
   runtime: GuideRuntime;
   navigation?: NavigationRouteController;
   /** Present for standard and planned tours; crossroads and roam build their route on the way. */
@@ -52,11 +59,23 @@ export interface ActiveSession {
   guest?: boolean;
   ownerUid?: string;
   recovery?: RecoveryOptions;
+  billingTile?: string;
+  time?: TourTimeController;
+  detachTime?: () => void;
+  detachGroup?: () => void;
 }
 
 type RecoveryOptions = Pick<
   SessionCheckpoint,
-  'lang' | 'interests' | 'frequency' | 'profile' | 'budgetMinutes' | 'simulate' | 'claimId'
+  | 'lang'
+  | 'interests'
+  | 'frequency'
+  | 'profile'
+  | 'budgetMinutes'
+  | 'simulate'
+  | 'claimId'
+  | 'billingContext'
+  | 'contentMode'
 >;
 
 let active: ActiveSession | undefined;
@@ -65,6 +84,21 @@ let detachCheckpoint: (() => void) | undefined;
 let savedSession: SessionCheckpoint | undefined;
 let recoveryRevision = 0;
 let sessionLifecycle = 0;
+let audioChangeRevision = 0;
+let newStartRevision = 0;
+let introPause:
+  | {
+      runtime: GuideRuntime;
+      revision: number;
+      resumeOnCancel: boolean;
+      detach: () => void;
+    }
+  | undefined;
+
+function clearIntroPause() {
+  introPause?.detach();
+  introPause = undefined;
+}
 const checkpoints = new SessionCheckpointStore(AsyncStorage);
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -74,7 +108,9 @@ export function tourPath(tour: Tour): LatLng[] {
 }
 
 interface Common {
+  contentMode?: ContentMode;
   lang: string;
+  voice?: string;
   interest?: Interest;
   simulate?: boolean;
   location?: LocationSource;
@@ -84,11 +120,12 @@ interface Common {
 
 function makeRuntime(c: Common, access: AccessInfo, script?: TourScript) {
   return new GuideRuntime({
+    contentMode: c.contentMode ?? 'audio',
     access,
     backend: getBackend(),
     audio: createAudioEngine(),
     lang: c.lang,
-    voice: useSettings.getState().voiceId,
+    voice: c.voice ?? useSettings.getState().voiceId,
     script:
       script ??
       createTourScript({
@@ -98,6 +135,83 @@ function makeRuntime(c: Common, access: AccessInfo, script?: TourScript) {
       }),
     ...(c.interest ? { interest: c.interest } : {}),
   });
+}
+
+export class FreeTourIntroCancelled extends Error {}
+
+/** Credits never change the default: only Premium starts new walks with audio. */
+async function prepareNewSession<T extends Common>(
+  options: T,
+  groupAudio = false,
+): Promise<T & { contentMode: ContentMode }> {
+  const revision = ++newStartRevision;
+  if (!groupAudio && options.contentMode === undefined && !useEntitlementStore.getState().loaded) {
+    await new Promise<void>((resolve, reject) => {
+      const ownerUid = getBackend().auth.current()?.uid;
+      const timeout = setTimeout(() => {
+        off();
+        reject(new BackendError('network', 'Could not load audio access'));
+      }, 15_000);
+      const off = useEntitlementStore.subscribe((state) => {
+        if (!state.loaded) return;
+        off();
+        clearTimeout(timeout);
+        if (getBackend().auth.current()?.uid !== ownerUid) reject(new Error('Account changed'));
+        else resolve();
+      });
+    });
+  }
+  if (revision !== newStartRevision) throw new FreeTourIntroCancelled();
+  const contentMode = groupAudio
+    ? 'audio'
+    : (options.contentMode ?? (subscribed(useEntitlementStore.getState()) ? 'audio' : 'text'));
+  if (contentMode === 'text') {
+    const previous = active;
+    const ownerUid = getBackend().auth.current()?.uid;
+    if (previous && introPause?.runtime === previous.runtime) {
+      // The newer start inherits the pause intent; the replaced intro no longer owns resuming it.
+      introPause.revision = revision;
+    } else {
+      clearIntroPause();
+      if (previous) {
+        const resumeOnCancel = !previous.runtime.getState().paused;
+        previous.runtime.pause();
+        const pause = {
+          runtime: previous.runtime,
+          revision,
+          resumeOnCancel,
+          detach: () => undefined as void,
+        };
+        pause.detach = previous.runtime.addPauseListener(() => {
+          pause.resumeOnCancel = false;
+        });
+        introPause = pause;
+      }
+    }
+    let completed = false;
+    try {
+      completed = await runFreeTourIntro(options.lang);
+    } catch {
+      // A failed/canceled intro must leave the previous walk in a deliberate state.
+    }
+    const current = revision === newStartRevision && ownerUid === getBackend().auth.current()?.uid;
+    if (!completed || !current) {
+      if (introPause?.revision === revision) {
+        const pause = introPause;
+        clearIntroPause();
+        if (
+          current &&
+          pause.resumeOnCancel &&
+          active?.runtime === pause.runtime &&
+          AppState.currentState === 'active'
+        )
+          pause.runtime.resume();
+      }
+      throw new FreeTourIntroCancelled();
+    }
+    if (introPause?.revision === revision) clearIntroPause();
+  }
+  return { ...options, contentMode };
 }
 
 /** The demo backend has no data at the device's real position, so previews always walk the simulator. */
@@ -112,7 +226,9 @@ function recoveryOptions(c: Common & Partial<RecoveryOptions>): RecoveryOptions 
     profile: c.profile ?? 'foot-walking',
     budgetMinutes: c.budgetMinutes ?? 480,
     simulate: simulating(c),
+    contentMode: c.contentMode ?? 'audio',
     ...(c.claimId ? { claimId: c.claimId } : {}),
+    ...(c.billingContext ? { billingContext: c.billingContext } : {}),
   };
 }
 
@@ -125,7 +241,7 @@ function straightWalk(start: LatLng, heading: number, lengthM: number): Simulate
 }
 
 async function begin(
-  s: Omit<ActiveSession, 'recordId'>,
+  s: Omit<ActiveSession, 'recordId' | 'contentMode'>,
   recovered?: SessionCheckpoint,
 ): Promise<ActiveSession> {
   // Local tour history (summary, profile list, city badges): created now, stops and the walked track follow.
@@ -139,7 +255,12 @@ async function begin(
     startedAt: s.startedAt,
   };
   const ownerUid = getBackend().auth.current()?.uid;
-  const session: ActiveSession = { ...s, recordId: record.id, ...(ownerUid ? { ownerUid } : {}) };
+  const session: ActiveSession = {
+    ...s,
+    contentMode: s.runtime.getContentMode(),
+    recordId: record.id,
+    ...(ownerUid ? { ownerUid } : {}),
+  };
   session.navigation = new NavigationRouteController({
     backend: getBackend(),
     subscribe: s.runtime.subscribe,
@@ -196,21 +317,75 @@ async function begin(
   return session;
 }
 
+function makeTimeController(
+  session: ActiveSession,
+  sessionId: string,
+  billingContext: NonNullable<RecoveryOptions['billingContext']>,
+  onTime = (result: TourTimeResult) => {
+    if (session.runtime.getContentMode() === 'audio') session.runtime.setTourTime(result);
+  },
+) {
+  const backend = getBackend();
+  const ownerUid = backend.auth.current()?.uid;
+  return new TourTimeController({
+    request: {
+      sessionId,
+      ...billingContext,
+      ...(session.runtime.getScript().instanceId
+        ? { scriptInstanceId: session.runtime.getScript().instanceId! }
+        : {}),
+    },
+    update: (request) => backend.updateTourTime(request),
+    isCurrent: () => backend.auth.current()?.uid === ownerUid,
+    onTime,
+    onBlocked: (error) => {
+      if (session.runtime.getContentMode() !== 'audio') return;
+      session.runtime.blockTourTime(
+        error.code === 'network'
+          ? 'offline'
+          : error.reason === 'tour_time_exhausted'
+            ? 'tour_time_exhausted'
+            : 'locked',
+      );
+    },
+  });
+}
+
 async function startRuntime(
   session: ActiveSession,
   ...args: Parameters<GuideRuntime['start']>
 ): Promise<void> {
   try {
     if (active?.runtime !== session.runtime) throw new Error('Session replaced');
+    if (!session.guest && session.contentMode === 'audio') {
+      const sessionId = session.recovery?.claimId ?? randomUUID();
+      session.runtime.setAccess({ ...session.runtime.getAccess(), sessionId });
+      const billingContext = session.recovery?.billingContext ?? {
+        mode: session.mode,
+        ...(session.tour ? { tourId: session.tour.id } : {}),
+        ...(session.billingTile ? { tile: session.billingTile } : {}),
+      };
+      if (session.recovery) session.recovery.billingContext = billingContext;
+      const time = makeTimeController(session, sessionId, billingContext);
+      session.time = time;
+      session.runtime.setResumeAuthorization(() => time.activate());
+      await time.start(args[2]?.progress ? 'paused' : 'active');
+      if (active?.runtime !== session.runtime) throw new Error('Session replaced');
+    }
     await session.runtime.start(...args);
     // Ending/replacing the session during asynchronous startup must not resurrect its activity.
     if (active?.runtime === session.runtime) {
+      attachGroupWatch(session);
+      if (session.time) session.detachTime = observeTourTime(session.runtime, session.time);
       attachCheckpoint(session);
       detachLiveActivity = attachTourLiveActivity(session, () =>
         active?.runtime === session.runtime ? active : session,
       );
     }
   } catch (error) {
+    session.detachTime?.();
+    session.detachGroup?.();
+    const settlement = session.time?.stop(Boolean(args[2]?.progress)).catch(() => undefined);
     if (active?.runtime === session.runtime) {
       active = undefined;
       detachLiveActivity?.();
@@ -227,25 +402,76 @@ async function startRuntime(
       session.navigation?.dispose();
       await session.runtime.dispose();
     }
+    await settleTimeBeforeContinuing(settlement);
     throw error;
   }
+}
+
+/** Local audio/GPS cleanup never waits for a stalled server request. */
+async function settleTimeBeforeContinuing(settlement: Promise<unknown> | undefined) {
+  if (!settlement) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    settlement,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, 2000);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
+/** A group only grants live access; local audio must pause when the membership disappears. */
+function attachGroupWatch(session: ActiveSession) {
+  session.detachGroup?.();
+  if (!session.groupId) return;
+  let live = true;
+  let expiresAt = 0;
+  let expiry: ReturnType<typeof setTimeout> | undefined;
+  const off = getBackend().watchGroup(session.groupId, (group) => {
+    clearTimeout(expiry);
+    live = group?.status === 'live' && group.expiresAt > Date.now();
+    expiresAt = group?.expiresAt ?? 0;
+    if (!live) session.runtime.pause();
+    else
+      expiry = setTimeout(() => {
+        live = false;
+        session.runtime.pause();
+      }, expiresAt - Date.now());
+  });
+  let ended = false;
+  const offRuntime = session.runtime.subscribe(() => {
+    if (!session.guest && !ended && session.runtime.getState().finished) {
+      ended = true;
+      void getBackend()
+        .leaveGroup(session.groupId!)
+        .catch(() => undefined);
+    }
+  });
+  session.runtime.setResumeAuthorization(
+    async () =>
+      live && expiresAt > Date.now() && (session.guest || (await session.time?.activate()) === true),
+  );
+  session.detachGroup = () => {
+    off();
+    offRuntime();
+    clearTimeout(expiry);
+  };
 }
 
 /** Starts (or replaces) a standard or planned tour; the session outlives screens so audio continues in the background. */
 export async function startTourSession(
   o: Common & { tour: Tour; planned?: boolean; groupId?: string; guest?: boolean; script?: TourScript },
 ): Promise<ActiveSession> {
+  o = await prepareNewSession(o, Boolean(o.groupId));
   // Group guests ride on the host's tour: no own start claim, the server checks the membership instead (D47).
-  const tourStartSessionId = o.planned ? o.tour.id.replace(/^planned_/, '') : randomUUID();
-  if (!o.guest) {
-    await getBackend().claimTourStart(o.tour.id, tourStartSessionId, o.planned ? 'planned' : 'tour');
-  }
+  const tourStartSessionId = randomUUID();
   await endSession();
   const runtime = makeRuntime(
     o,
     {
       tourId: o.tour.id,
       mode: o.planned ? 'planned' : 'tour',
+      sessionId: tourStartSessionId,
       ...(o.groupId ? { groupId: o.groupId } : {}),
     },
     o.script ?? createTourScript({ lang: o.lang, tour: o.tour, instanceId: randomUUID() }),
@@ -287,17 +513,19 @@ export async function startForkSession(
     interests: Interest[];
   },
 ): Promise<ActiveSession> {
+  o = await prepareNewSession(o);
   await endSession();
+  const claimId = randomUUID();
   const runtime = makeRuntime(
     o,
-    { mode: 'fork' },
+    { mode: 'fork', sessionId: claimId },
     createTourScript({ lang: o.lang, interests: o.interests, instanceId: randomUUID() }),
   );
   const fork = new ForkController({
     runtime,
     backend: getBackend(),
     pool: o.pool,
-    access: { mode: 'fork' },
+    access: { mode: 'fork', sessionId: claimId },
     lang: o.lang,
     interests: o.interests,
     profile: o.profile,
@@ -317,7 +545,8 @@ export async function startForkSession(
     mode: 'fork',
     runtime,
     fork,
-    recovery: recoveryOptions(o),
+    recovery: recoveryOptions({ ...o, claimId }),
+    billingTile: o.first.tile,
     ...(simulator ? { simulator } : {}),
     startedAt: Date.now(),
     ...(o.foregroundOnly ? { foregroundOnly: true } : {}),
@@ -336,10 +565,12 @@ export async function startForkSession(
 export async function startRoamSession(
   o: Common & { start: LatLng; frequency: NarrationFrequency; interests: Interest[]; first?: Poi },
 ): Promise<ActiveSession> {
+  o = await prepareNewSession(o);
   await endSession();
+  const claimId = randomUUID();
   const runtime = makeRuntime(
     o,
-    { mode: 'roam' },
+    { mode: 'roam', sessionId: claimId },
     createTourScript({ lang: o.lang, interests: o.interests, instanceId: randomUUID() }),
   );
   const pool = new PoiPool(getBackend());
@@ -368,7 +599,8 @@ export async function startRoamSession(
     mode: 'roam',
     runtime,
     roam,
-    recovery: recoveryOptions(o),
+    recovery: recoveryOptions({ ...o, claimId }),
+    billingTile: o.first?.tile ?? encodeGeohash(o.start.lat, o.start.lng, 6),
     ...(simulator ? { simulator } : {}),
     startedAt: Date.now(),
     ...(o.foregroundOnly ? { foregroundOnly: true } : {}),
@@ -384,6 +616,10 @@ export async function startRoamSession(
  * (a stop was reached or the listener really walked). A host ending the tour also ends a live group.
  */
 export async function endSession(): Promise<string | undefined> {
+  newStartRevision++;
+  clearIntroPause();
+  cancelFreeTourIntro();
+  audioChangeRevision++;
   const lifecycle = ++sessionLifecycle;
   const cur = active;
   active = undefined;
@@ -395,7 +631,11 @@ export async function endSession(): Promise<string | undefined> {
   cur?.fork?.detach();
   cur?.roam?.detach();
   cur?.navigation?.dispose();
+  cur?.detachTime?.();
+  cur?.detachGroup?.();
+  const settlement = cur?.time?.stop().catch(() => undefined);
   await cur?.runtime.dispose();
+  await settleTimeBeforeContinuing(settlement);
   if (sessionLifecycle === lifecycle) await clearSavedSession();
   if (!cur) return undefined;
   if (cur.groupId)
@@ -406,9 +646,56 @@ export async function endSession(): Promise<string | undefined> {
 }
 
 /** Continue the same walk in Explore: GPS, audio and the local summary stay intact. */
-export function switchSessionToExplore(): boolean {
+export async function switchSessionToExplore(): Promise<boolean> {
   const cur = active;
   if (!cur || cur.mode !== 'planned' || cur.groupId || cur.guest) return false;
+  let resumeAfterSwitch = !cur.runtime.getState().paused;
+  // Prepaid archive time applies only to saved stories. Explore needs its own online lease,
+  // including when the original planned route has expired on the server.
+  if (cur.runtime.getSnapshot().tourTime?.offline && cur.tour) {
+    const sessionId = randomUUID();
+    const billingContext = { mode: 'roam' as const, placeId: cur.tour.placeId };
+    let pendingTime: TourTimeResult | undefined;
+    let committed = false;
+    let internalPause = false;
+    const offPause = cur.runtime.addPauseListener(() => {
+      if (!internalPause) resumeAfterSwitch = false;
+    });
+    const time = makeTimeController(cur, sessionId, billingContext, (result) => {
+      pendingTime = result;
+      if (committed) cur.runtime.setTourTime(result);
+    });
+    try {
+      await time.start('paused');
+    } catch {
+      offPause();
+      void time.stop().catch(() => undefined);
+      return false;
+    }
+    if (active !== cur) {
+      offPause();
+      void time.stop().catch(() => undefined);
+      return false;
+    }
+    internalPause = true;
+    cur.runtime.pause();
+    internalPause = false;
+    cur.detachTime?.();
+    await cur.time?.stop().catch(() => undefined);
+    if (active !== cur) {
+      offPause();
+      void time.stop().catch(() => undefined);
+      return false;
+    }
+    cur.time = time;
+    committed = true;
+    if (pendingTime) cur.runtime.setTourTime(pendingTime);
+    cur.runtime.setResumeAuthorization(() => time.activate());
+    cur.runtime.setAccess({ mode: 'roam', sessionId });
+    if (cur.recovery) cur.recovery = { ...cur.recovery, claimId: sessionId, billingContext };
+    cur.detachTime = observeTourTime(cur.runtime, time);
+    offPause();
+  }
   const settings = useSettings.getState();
   const backend = getBackend();
   const roam = new RoamController({
@@ -419,18 +706,25 @@ export function switchSessionToExplore(): boolean {
     interests: settings.interests,
     frequency: settings.frequency,
   });
-  cur.runtime.setAccess({ mode: 'roam' });
+  cur.runtime.setAccess({ ...cur.runtime.getAccess(), mode: 'roam' });
   cur.runtime.explore();
   roam.attach();
   const { tour: _tour, fork: _fork, ...continuing } = cur;
   void _tour;
   void _fork;
-  active = { ...continuing, mode: 'roam', roam };
+  const position = cur.runtime.getSnapshot().user ?? _tour?.stops[0]?.location;
+  active = {
+    ...continuing,
+    mode: 'roam',
+    roam,
+    ...(position ? { billingTile: encodeGeohash(position.lat, position.lng, 6) } : {}),
+  };
   active.navigation?.update();
   if (active.recovery)
     active.recovery = { ...active.recovery, interests: settings.interests, frequency: settings.frequency };
   emit();
   attachCheckpoint(active);
+  if (resumeAfterSwitch && cur.runtime.getState().paused) cur.runtime.resume();
   return true;
 }
 
@@ -438,12 +732,25 @@ export function switchSessionToExplore(): boolean {
 export async function inviteToGroup(): Promise<{ url: string; groupId: string; capacity: number }> {
   const cur = active;
   if (!cur?.tour || cur.guest) throw new Error('No tour to share');
+  if (cur.contentMode !== 'audio') throw new BackendError('locked', 'Group audio requires an audio guide');
+  if (cur.runtime.getSnapshot().tourTime?.offline)
+    throw new BackendError('locked', 'Groups require an online tour', undefined, 'offline_group');
   const { token, group } = await getBackend().createGroup({
     tourId: cur.tour.id,
     mode: cur.mode === 'planned' ? 'planned' : 'tour',
+    audio: cur.runtime.getGroupAudio(),
+    recordings: cur.runtime.getGroupRecordings(),
+    ...(cur.recovery?.claimId ? { sessionId: cur.recovery.claimId } : {}),
   });
+  if (active !== cur) {
+    void getBackend()
+      .leaveGroup(group.id)
+      .catch(() => undefined);
+    throw new BackendError('unavailable', 'The tour ended before the group was ready');
+  }
   active = { ...cur, groupId: group.id };
   cur.runtime.setAccess({ ...(cur.runtime.getAccess() ?? {}), groupId: group.id });
+  attachGroupWatch(active);
   emit();
   return { url: `${config.legal.webBaseUrl}/join/${token}`, groupId: group.id, capacity: group.capacity };
 }
@@ -461,6 +768,99 @@ export function useActiveSession(): ActiveSession | undefined {
 
 export function getActiveSession() {
   return active;
+}
+
+let enablingAudio: Promise<void> | undefined;
+/** Upgrade the existing walk after purchase, retaining GPS, route, current stop and history. */
+export function enableSessionAudio(): Promise<void> {
+  if (enablingAudio) return enablingAudio;
+  enablingAudio = enableCurrentAudio().finally(() => {
+    enablingAudio = undefined;
+  });
+  return enablingAudio;
+}
+
+async function enableCurrentAudio(): Promise<void> {
+  const current = active;
+  if (!current || current.contentMode === 'audio') return;
+  const revision = ++audioChangeRevision;
+  const sessionId = randomUUID();
+  const billingContext = {
+    mode: current.mode,
+    ...(current.tour ? { tourId: current.tour.id } : {}),
+    ...(current.billingTile ? { tile: current.billingTile } : {}),
+  };
+  let committed = false;
+  let latest: TourTimeResult | undefined;
+  const time = makeTimeController(current, sessionId, billingContext, (result) => {
+    latest = result;
+    if (committed && current.runtime.getContentMode() === 'audio') current.runtime.setTourTime(result);
+  });
+  try {
+    await time.start(current.runtime.getState().paused ? 'paused' : 'active');
+    if (active !== current || revision !== audioChangeRevision) throw new Error('Session changed');
+    current.runtime.setAccess({ ...current.runtime.getAccess(), sessionId });
+    await current.runtime.enableAudio();
+    if (active !== current || revision !== audioChangeRevision) throw new Error('Session changed');
+    current.time = time;
+    current.runtime.setResumeAuthorization(() => time.activate());
+    committed = true;
+    if (latest) current.runtime.setTourTime(latest);
+    current.detachTime = observeTourTime(current.runtime, time);
+    active = {
+      ...current,
+      contentMode: 'audio',
+      recovery: current.recovery
+        ? { ...current.recovery, contentMode: 'audio', claimId: sessionId, billingContext }
+        : undefined,
+    };
+    attachCheckpoint(active);
+    emit();
+  } catch (error) {
+    await settleTimeBeforeContinuing(time.stop().catch(() => undefined));
+    if (
+      active === current &&
+      revision === audioChangeRevision &&
+      current.runtime.getContentMode() === 'audio'
+    )
+      await current.runtime.disableAudio();
+    throw error;
+  }
+}
+
+/** Return to free reading and end the paid lease, including after time has run out. */
+export async function continueSessionAsText(): Promise<void> {
+  const current = active;
+  if (!current || current.groupId) return;
+  audioChangeRevision++;
+  current.detachTime?.();
+  current.runtime.setResumeAuthorization(undefined);
+  const settlement = current.time?.stop().catch(() => undefined);
+  delete current.time;
+  delete current.detachTime;
+  await current.runtime.disableAudio();
+  if (active === current) {
+    const { sessionId: _sessionId, ...access } = current.runtime.getAccess() ?? {};
+    void _sessionId;
+    current.runtime.setAccess(access);
+    active = {
+      ...current,
+      contentMode: 'text',
+      recovery: current.recovery ? { ...current.recovery, contentMode: 'text' } : undefined,
+    };
+    attachCheckpoint(active);
+    emit();
+  }
+  await settleTimeBeforeContinuing(settlement);
+}
+
+/** Pause playback and billing before a potentially unbounded privacy decision. */
+export async function pauseSessionForAiConsent(): Promise<boolean> {
+  const current = active;
+  if (!current) return false;
+  current.runtime.pause();
+  await current.time?.pauseAndWait();
+  return active === current;
 }
 
 function attachCheckpoint(session: ActiveSession) {
@@ -492,6 +892,7 @@ function attachCheckpoint(session: ActiveSession) {
       route: state.route,
       progress: current.runtime.getProgress(),
       script: current.runtime.getScript(),
+      ...(current.runtime.getGroupAudio().voice ? { voice: current.runtime.getGroupAudio().voice } : {}),
       ...(current.tour ? { tour: current.tour } : {}),
       ...(current.groupId ? { groupId: current.groupId } : {}),
       ...(current.guest ? { guest: true } : {}),
@@ -592,13 +993,6 @@ async function restoreSavedSession(): Promise<ActiveSession> {
       }, 10_000);
     });
   }
-  if (checkpoint.tour && !checkpoint.guest) {
-    await backend.claimTourStart(
-      checkpoint.tour.id,
-      checkpoint.claimId ?? checkpoint.tour.id.replace(/^planned_/, ''),
-      checkpoint.mode === 'planned' ? 'planned' : 'tour',
-    );
-  }
   // Revalidate the owner after asynchronous permission/access checks.
   if (
     backend.auth.current()?.uid !== checkpoint.ownerUid ||
@@ -619,6 +1013,7 @@ async function restoreSavedSession(): Promise<ActiveSession> {
     { ...checkpoint, ...(checkpoint.interests[0] ? { interest: checkpoint.interests[0] } : {}) },
     {
       mode: checkpoint.mode,
+      sessionId: checkpoint.claimId ?? randomUUID(),
       ...(checkpoint.tour ? { tourId: checkpoint.tour.id } : {}),
       ...(checkpoint.groupId ? { groupId: checkpoint.groupId } : {}),
     },
@@ -647,7 +1042,7 @@ async function restoreSavedSession(): Promise<ActiveSession> {
           lang: checkpoint.lang,
           interests: checkpoint.interests,
           profile: checkpoint.profile,
-          access: { mode: 'fork' },
+          access: runtime.getAccess(),
           budgetMinutes: Math.max(0, checkpoint.budgetMinutes - (Date.now() - checkpoint.startedAt) / 60_000),
         })
       : undefined;
@@ -670,7 +1065,16 @@ async function restoreSavedSession(): Promise<ActiveSession> {
       mode: checkpoint.mode,
       runtime,
       startedAt: checkpoint.startedAt,
-      recovery: recoveryOptions(checkpoint),
+      recovery: recoveryOptions({ ...checkpoint, claimId: runtime.getAccess()!.sessionId! }),
+      ...(!checkpoint.tour && (checkpoint.position ?? checkpoint.route[checkpoint.progress.index]?.location)
+        ? {
+            billingTile: encodeGeohash(
+              (checkpoint.position ?? checkpoint.route[checkpoint.progress.index]!.location).lat,
+              (checkpoint.position ?? checkpoint.route[checkpoint.progress.index]!.location).lng,
+              6,
+            ),
+          }
+        : {}),
       ...(checkpoint.tour ? { tour: checkpoint.tour } : {}),
       ...(checkpoint.groupId ? { groupId: checkpoint.groupId } : {}),
       ...(checkpoint.guest ? { guest: true } : {}),

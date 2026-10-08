@@ -3,7 +3,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { BETA_ORIGIN, BETA_PROJECT, buildBetaLegal, validateBetaLegalEnv } from './build-beta-legal.mjs';
+import { runInNewContext } from 'node:vm';
+import {
+  BETA_ORIGIN,
+  BETA_PROJECT,
+  betaNativeInviteUrl,
+  buildBetaLegal,
+  validateBetaLegalEnv,
+} from './build-beta-legal.mjs';
 
 const fixture = () => ({
   EXPO_PUBLIC_FIREBASE_PROJECT_ID: BETA_PROJECT,
@@ -72,7 +79,12 @@ test('legal-only hosting accepts a separate app/share origin without redirecting
 test('generates complete accessible bilingual documents from shared text with safe operator content', async (t) => {
   const outputDir = temporaryOutput(t);
   const result = await buildBetaLegal({ env: fixture(), outputDir });
-  assert.equal(result.files.length, 13);
+  assert.equal(result.files.length, 17);
+  assert.match(
+    readFileSync(join(outputDir, 'app-ads.txt'), 'utf8'),
+    /^google\.com, pub-5666991539216529, DIRECT, f08c47fec0942fa0/,
+  );
+  assert.ok(readFileSync(join(outputDir, 'robots.txt'), 'utf8').includes('Allow: /app-ads.txt'));
   for (const lang of ['de', 'en']) {
     for (const page of ['privacy', 'terms', 'imprint', 'support']) {
       const html = readFileSync(join(outputDir, `${lang === 'en' ? 'en/' : ''}${page}.html`), 'utf8');
@@ -103,6 +115,70 @@ test('generates complete accessible bilingual documents from shared text with sa
   assert.ok(support.includes('href="mailto:privacy@example.test"'));
 });
 
+test('native links accept backend tokens and reject URL or markup injection', () => {
+  const gift = 'aB09_-'.repeat(5) + 'ab';
+  const group = `Ab0123456789.${'aB09_-'.repeat(7)}a`;
+  assert.equal(betaNativeInviteUrl(`/invite/${gift}`), `tuur://invite/${gift}`);
+  assert.equal(betaNativeInviteUrl(`/join/${group}`), `tuur://join/${group}`);
+  for (const path of [
+    null,
+    '/join/',
+    '/invite/short',
+    `/invite/${gift}\n`,
+    `/invite/${gift}/extra`,
+    `/invite/${gift}?next=https://example.test`,
+    `/invite/${gift}#fragment`,
+    `/invite/${gift}%22`,
+    `/invite/${gift}<script>alert(1)</script>`,
+    `/invite/${gift}" onclick="alert(1)`,
+    `/join/${group.replace('.', '%2e')}`,
+    `/join/${group.replace('.', '/')}`,
+    `/join/${group}%2Fextra`,
+    `//example.test/invite/${gift}`,
+    `https://example.test/invite/${gift}`,
+    'javascript:alert(1)',
+  ])
+    assert.equal(betaNativeInviteUrl(path), null, `Reject ${path}`);
+});
+
+test('landing page only exposes a validated button and never redeems or redirects', async (t) => {
+  const outputDir = temporaryOutput(t);
+  const secret = 'server-only-secret-sentinel-do-not-publish';
+  const result = await buildBetaLegal({ env: { ...fixture(), PRIVATE_API_KEY: secret }, outputDir });
+  const script = readFileSync(join(outputDir, 'app-link.js'), 'utf8');
+  const html = readFileSync(join(outputDir, 'app-link.html'), 'utf8');
+  assert.ok(html.includes('<script src="/app-link.js" defer></script>'));
+  assert.ok(html.includes('id="open-app" class="app-button" hidden'));
+  assert.ok(html.includes('TestFlight'));
+  assert.ok(!/http-equiv="refresh"|<iframe|<form|onclick=/i.test(html));
+  const gift = 'a'.repeat(32);
+  for (const [pathname, expected] of [
+    [`/invite/${gift}`, `tuur://invite/${gift}`],
+    ['/join/invalid', null],
+  ]) {
+    const open = { hidden: true };
+    const invalid = { hidden: true };
+    const window = Object.freeze({ location: Object.freeze({ pathname }) });
+    // No network, storage, timers or navigation APIs are supplied to the generated script.
+    runInNewContext(script, {
+      window,
+      document: { getElementById: (id) => ({ 'open-app': open, 'invalid-link': invalid })[id] },
+    });
+    assert.equal(open.href, expected ?? undefined);
+    assert.equal(open.hidden, !expected);
+    assert.equal(invalid.hidden, Boolean(expected));
+  }
+  for (const file of result.files)
+    assert.ok(!readFileSync(join(outputDir, file), 'utf8').includes(secret), `No secrets in ${file}`);
+  const association = JSON.parse(
+    readFileSync(join(outputDir, '.well-known/apple-app-site-association'), 'utf8'),
+  );
+  assert.deepEqual(association.applinks, {
+    apps: [],
+    details: [{ appID: '4GXK973R2W.com.tuurapp', paths: ['/join/*', '/invite/*'] }],
+  });
+});
+
 test('Hosting configuration is restricted to static beta pages and rebuilds before deployment', () => {
   const config = JSON.parse(readFileSync(new URL('../firebase.beta-legal.json', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(config), ['hosting']);
@@ -113,4 +189,21 @@ test('Hosting configuration is restricted to static beta pages and rebuilds befo
   assert.ok(
     config.hosting.redirects.some((rule) => rule.source === '/legal/:page' && rule.destination === '/:page'),
   );
+  assert.deepEqual(config.hosting.rewrites, [
+    { source: '/join/**', destination: '/app-link.html' },
+    { source: '/invite/**', destination: '/app-link.html' },
+  ]);
+  assert.ok(!config.hosting.ignore.some((pattern) => ['.*', '**/.*', '.well-known'].includes(pattern)));
+  assert.ok(
+    config.hosting.headers.some(
+      (rule) =>
+        rule.source === '/.well-known/apple-app-site-association' &&
+        rule.headers.some((header) => header.key === 'Content-Type' && header.value === 'application/json'),
+    ),
+  );
+  const csp = config.hosting.headers
+    .flatMap((rule) => rule.headers)
+    .find((header) => header.key === 'Content-Security-Policy').value;
+  assert.ok(csp.includes("script-src 'self'"));
+  assert.ok(!csp.includes('unsafe-inline'));
 });

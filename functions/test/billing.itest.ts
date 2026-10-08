@@ -14,6 +14,7 @@ import {
   spendCredit,
   verifyBearer,
 } from '../src/billing/entitlements';
+import { updateTourTime } from '../src/billing/timeBudget';
 import { verifyAdmobSignature } from '../src/billing/ssv';
 import { MockLlmProvider, type LlmProvider } from '../src/providers/llm';
 import type { NarrationSourceProvider } from '../src/providers/narrationSources';
@@ -54,7 +55,7 @@ beforeEach(async () => {
 }, 30_000);
 
 describe('spendCredit', () => {
-  it('unlocks a tour permanently with one credit and never charges twice', async () => {
+  it('grants 90 active tour minutes with one credit and never charges twice', async () => {
     await seedTour();
     await wallet('u1', 2);
     const r = await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
@@ -67,22 +68,24 @@ describe('spendCredit', () => {
     expect(await walletOf('u1')).toEqual({ balance: 1, rewardBalance: 0, seatBalance: 0 });
   });
 
-  it('uses reward credits first for tours and unlocks a 24 h session with a paid credit', async () => {
+  it('preserves reward credits and grants audio tour/session minutes only with paid credits', async () => {
     await seedTour();
-    await wallet('u1', 1, 1);
-    expect((await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' })).used).toBe('reward');
+    await wallet('u1', 2, 1);
+    expect((await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' })).used).toBe('paid');
     const s = await spendCredit(deps(), 'u1', { kind: 'session', placeId: 'DE_berlin' });
     expect(s.used).toBe('paid');
+    expect((await walletOf('u1'))?.['rewardBalance']).toBe(1);
     const ent = (
       await db.collection('users').doc('u1').collection('entitlements').doc('session_DE_berlin').get()
     ).data()!;
-    expect(ent['expiresAt']).toBe(clock + 24 * 3600_000);
+    expect(ent['expiresAt']).toBe(Number.MAX_SAFE_INTEGER);
+    expect(ent['timeRemainingSeconds']).toBe(90 * 60);
     await expect(spendCredit(deps(), 'u1', { kind: 'session', placeId: 'DE_berlin' })).rejects.toMatchObject({
       code: 'already-exists',
     });
   });
 
-  it('rejects without credits, for free/locked/unknown tours and for subscribers', async () => {
+  it('allows a paid upgrade on free text tours but rejects missing credits, locked tours and subscribers', async () => {
     await seedTour();
     await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' })).rejects.toMatchObject({
       code: 'failed-precondition',
@@ -90,8 +93,8 @@ describe('spendCredit', () => {
     });
     await seedTour({ free: true }, 'free1');
     await wallet('u1', 3);
-    await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'free1' })).rejects.toMatchObject({
-      details: { reason: 'free' },
+    await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'free1' })).resolves.toMatchObject({
+      used: 'paid',
     });
     await seedTour({ locked: true }, 'locked1');
     await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'locked1' })).rejects.toMatchObject({
@@ -116,7 +119,7 @@ describe('spendCredit', () => {
     await expect(spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' })).rejects.toMatchObject({
       details: { reason: 'subscriber' },
     });
-    expect(await walletOf('u1')).toEqual({ balance: 3, rewardBalance: 0 });
+    expect(await walletOf('u1')).toEqual({ balance: 2, rewardBalance: 0, seatBalance: 0 });
     await expect(spendCredit(deps(), 'u1', { kind: 'tour' })).rejects.toMatchObject({
       code: 'invalid-argument',
     });
@@ -154,30 +157,27 @@ describe('claimTourStart', () => {
         updatedAt: clock,
       });
 
-  it('allows ten starts per UTC month, rejects the eleventh, and makes retries idempotent', async () => {
+  it('grants 500 monthly minutes with idempotent start retries and charges elapsed active seconds', async () => {
     await seedTour();
     await addSubscriber();
-    for (let i = 1; i <= 10; i++) {
-      const result = await claimTourStart(deps(), 'u1', {
-        tourId: 'tour1',
-        sessionId: sessionId(i),
-        mode: 'tour',
-      });
-      expect(result).toEqual({ counted: true, remaining: 10 - i });
-    }
-    expect(
-      await claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(10), mode: 'tour' }),
-    ).toEqual({ counted: true, remaining: 0 });
-    await expect(
-      claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(11), mode: 'tour' }),
-    ).rejects.toMatchObject({ code: 'resource-exhausted', details: { reason: 'monthly_tour_limit' } });
+    const request = { tourId: 'tour1', sessionId: sessionId(1), mode: 'tour' as const };
+    expect(await claimTourStart(deps(), 'u1', request)).toEqual({ counted: true, remaining: 500 });
+    clock += 30000;
+    expect(await claimTourStart(deps(), 'u1', request)).toEqual({ counted: true, remaining: 500 });
+    expect(await updateTourTime(deps(), 'u1', { ...request, sequence: 1, state: 'paused' })).toMatchObject({
+      remainingSeconds: 29970,
+    });
+    clock += 3600000;
+    expect(await updateTourTime(deps(), 'u1', { ...request, sequence: 2, state: 'active' })).toMatchObject({
+      remainingSeconds: 29970,
+    });
   });
 
-  it('serializes concurrent starts so the subscription limit cannot be raced', async () => {
+  it('serializes concurrent devices so only one tour lease can run at a time', async () => {
     await seedTour();
     await addSubscriber();
     const results = await Promise.allSettled(
-      Array.from({ length: 12 }, (_, i) =>
+      Array.from({ length: 4 }, (_, i) =>
         claimTourStart(deps(), 'u1', {
           tourId: 'tour1',
           sessionId: sessionId(i + 1),
@@ -185,26 +185,22 @@ describe('claimTourStart', () => {
         }),
       ),
     );
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(10);
-    const usage = await db
-      .collection('users')
-      .doc('u1')
-      .collection('tourUsage')
-      .doc(new Date(clock).toISOString().slice(0, 7))
-      .get();
-    expect(usage.get('starts')).toBe(10);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const usage = await db.collection('users').doc('u1').collection('tourTime').doc('budget').get();
+    expect(usage.get('usedSeconds')).toBe(0);
+    expect(usage.get('active')).toBeTruthy();
   });
 
-  it('requires a server-granted free-tour entitlement for a free tour', async () => {
+  it('requires paid audio access even when a tour is marked free', async () => {
     await seedTour({ free: true });
     await expect(
       claimTourStart(deps(), 'u1', { tourId: 'tour1', sessionId: sessionId(1), mode: 'tour' }),
-    ).rejects.toMatchObject({ code: 'permission-denied', details: { reason: 'ad_required' } });
+    ).rejects.toMatchObject({ code: 'permission-denied', details: { reason: 'audio_requires_purchase' } });
   });
 });
 
 describe('authorizeContent', () => {
-  it('serves a free tour only after the verified ad grant, and only its own stops', async () => {
+  it('retains verified ad grants without granting audio, and checks the tour stop context', async () => {
     await seedTour({ free: true });
     const request = { tourId: 'tour1', mode: 'tour' as const, poiIds: ['wd_Q82425'] };
     await expect(authorizeContent(deps(), 'u1', request)).rejects.toMatchObject({
@@ -219,7 +215,9 @@ describe('authorizeContent', () => {
         phoneNumberVerified: true,
       }),
     ).resolves.toMatchObject({ granted: true });
-    expect((await authorizeContent(deps(), 'u1', request)).reason).toBe('free');
+    await expect(authorizeContent(deps(), 'u1', request)).rejects.toMatchObject({
+      details: { reason: 'audio_requires_purchase' },
+    });
     await expect(authorizeContent(deps(), 'u2', request)).rejects.toMatchObject({
       code: 'permission-denied',
     });
@@ -239,8 +237,22 @@ describe('authorizeContent', () => {
     });
     await wallet('u1', 1);
     await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
+    await updateTourTime(deps(), 'u1', {
+      tourId: 'tour1',
+      mode: 'tour',
+      sessionId: 'paid-tour',
+      sequence: 1,
+      state: 'active',
+    });
     expect(
-      (await authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] })).reason,
+      (
+        await authorizeContent(deps(), 'u1', {
+          tourId: 'tour1',
+          mode: 'tour',
+          poiIds: ['wd_Q82425'],
+          sessionId: 'paid-tour',
+        })
+      ).reason,
     ).toBe('tour');
     await expect(
       authorizeContent(deps(), 'u2', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] }),
@@ -253,9 +265,17 @@ describe('authorizeContent', () => {
       authorizeContent(deps(), 'u1', { mode: 'roam', poiIds: [], tile: 'u33dc0' }),
     ).rejects.toMatchObject({ code: 'permission-denied' });
     await spendCredit(deps(), 'u1', { kind: 'session', placeId: 'DE_berlin' });
-    expect((await authorizeContent(deps(), 'u1', { mode: 'roam', poiIds: [], tile: 'u33dc0' })).reason).toBe(
-      'session',
-    );
+    await updateTourTime(deps(), 'u1', {
+      mode: 'roam',
+      placeId: 'DE_berlin',
+      sessionId: 'roam',
+      sequence: 1,
+      state: 'active',
+    });
+    expect(
+      (await authorizeContent(deps(), 'u1', { mode: 'roam', poiIds: [], tile: 'u33dc0', sessionId: 'roam' }))
+        .reason,
+    ).toBe('session');
     clock += 25 * 3600_000;
     await expect(
       authorizeContent(deps(), 'u1', { mode: 'fork', poiIds: [], tile: 'u33dc0' }),
@@ -267,7 +287,13 @@ describe('invites', () => {
   const buy = async (uid = 'alice') => {
     await seedTour();
     await wallet(uid, 1);
-    await spendCredit(deps(), uid, { kind: 'tour', tourId: 'tour1' });
+    // Legacy permanent purchases retain their old standalone invite rights.
+    await db
+      .collection('users')
+      .doc(uid)
+      .collection('entitlements')
+      .doc('tour_tour1')
+      .set({ type: 'tour', tourId: 'tour1', source: 'credit', grantedAt: clock, expiresAt: null });
   };
 
   it('creates at most two single-use invites for a bought tour and stores only token hashes', async () => {
@@ -320,6 +346,9 @@ describe('invites', () => {
         'source',
       ),
     ).toBe('invite');
+    await expect(
+      authorizeContent(deps(), 'bob', { tourId: 'tour1', mode: 'tour', poiIds: [] }),
+    ).resolves.toEqual({ reason: 'tour' });
     await expect(redeemInvite(deps(), 'carol', { token })).rejects.toMatchObject({
       details: { reason: 'already_redeemed' },
     });
@@ -384,7 +413,7 @@ describe('RevenueCat webhook processing', () => {
       authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] }),
     ).rejects.toMatchObject({
       code: 'permission-denied',
-      details: { reason: 'tour_start_required' },
+      details: { reason: 'tour_time_required' },
     });
     await expect(
       claimTourStart(deps(), 'u1', {
@@ -392,9 +421,16 @@ describe('RevenueCat webhook processing', () => {
         sessionId: '00000000-0000-4000-8000-000000000001',
         mode: 'tour',
       }),
-    ).resolves.toEqual({ counted: true, remaining: 9 });
+    ).resolves.toEqual({ counted: true, remaining: 500 });
     expect(
-      (await authorizeContent(deps(), 'u1', { tourId: 'tour1', mode: 'tour', poiIds: ['wd_Q82425'] })).reason,
+      (
+        await authorizeContent(deps(), 'u1', {
+          tourId: 'tour1',
+          mode: 'tour',
+          poiIds: ['wd_Q82425'],
+          sessionId: '00000000-0000-4000-8000-000000000001',
+        })
+      ).reason,
     ).toBe('subscription');
     await processRevenueCatEvent(
       deps(),
@@ -600,6 +636,7 @@ describe('getNarration is locked before generation (spec 6.4)', () => {
           await authorizeContent(deps(), uid, {
             tourId: access?.tourId,
             mode: access?.mode,
+            sessionId: access?.sessionId,
             poiIds: [p.id],
             tile: p.tile,
           });
@@ -609,7 +646,12 @@ describe('getNarration is locked before generation (spec 6.4)', () => {
         }
       },
     };
-    const req = { poiId: poi.id, lang: 'de', lengthTier: 'short', access: { tourId: 'tour1', mode: 'tour' } };
+    const req = {
+      poiId: poi.id,
+      lang: 'de',
+      lengthTier: 'short',
+      access: { tourId: 'tour1', mode: 'tour', sessionId: 'paid-narration' },
+    };
     await expect(getNarration(nd, 'u1', req)).rejects.toMatchObject({ code: 'permission-denied' });
     await expect(getNarration(nd, 'u1', { ...req, access: undefined })).rejects.toMatchObject({
       code: 'permission-denied',
@@ -617,6 +659,13 @@ describe('getNarration is locked before generation (spec 6.4)', () => {
     expect(llm.calls).toBe(0);
     await wallet('u1', 1);
     await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
+    await updateTourTime(deps(), 'u1', {
+      tourId: 'tour1',
+      mode: 'tour',
+      sessionId: 'paid-narration',
+      sequence: 1,
+      state: 'active',
+    });
     expect((await getNarration(nd, 'u1', req)).cached).toBe(false);
     // a different user hitting the cache is still locked
     await expect(getNarration(nd, 'u2', req)).rejects.toMatchObject({ code: 'permission-denied' });
@@ -639,7 +688,7 @@ describe('production wiring enforces entitlements', () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it('narrationDeps() denies locked content and lets the internal pre-generation through', async () => {
+  it('narrationDeps() denies unpaid audio, including internally named pre-generation callers', async () => {
     const poi = buildPois(REGION_FIXTURES[0]!.raw, { now: 1 }).pois.find((p) => p.id === 'wd_Q82425')!;
     await seedTour();
     const authorize = narrationDeps().authorize!;
@@ -647,13 +696,24 @@ describe('production wiring enforces entitlements', () => {
       code: 'permission-denied',
     });
     await expect(authorize('u1', poi, undefined)).rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(authorize('system-pregen', poi, undefined)).resolves.toBeUndefined();
+    await expect(authorize('system-pregen', poi, undefined)).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
     await wallet('u1', 1);
     await spendCredit(deps(), 'u1', { kind: 'tour', tourId: 'tour1' });
-    await expect(authorize('u1', poi, { tourId: 'tour1', mode: 'tour' })).resolves.toBeUndefined();
+    await updateTourTime({ db, now: Date.now }, 'u1', {
+      tourId: 'tour1',
+      mode: 'tour',
+      sessionId: 'wiring',
+      sequence: 1,
+      state: 'active',
+    });
+    await expect(
+      authorize('u1', poi, { tourId: 'tour1', mode: 'tour', sessionId: 'wiring' }),
+    ).resolves.toBeUndefined();
   });
 
-  it('plannedRouteDeps() requires an unlocked session before a planned route is composed', async () => {
+  it('plannedRouteDeps() composes free text navigation without spending a credit or granting audio', async () => {
     const pois = buildPois(REGION_FIXTURES[0]!.raw, { now: 1 })
       .pois.filter((p) => p.accessible && p.score > 30)
       .slice(0, 3);
@@ -669,12 +729,8 @@ describe('production wiring enforces entitlements', () => {
       lang: 'de',
       interests: [],
     };
-    await expect(composePlannedRoute(plannedRouteDeps(), 'u1', req)).rejects.toMatchObject({
-      code: 'failed-precondition',
-    });
-    await wallet('u1', 1);
-    // production deps use the real clock, so unlock with the real clock as well
-    await spendCredit({ db, now: Date.now }, 'u1', { kind: 'session', placeId: 'DE_berlin' });
     await expect(composePlannedRoute(plannedRouteDeps(), 'u1', req)).resolves.toBeDefined();
+    expect((await db.doc('users/u1/credits/wallet').get()).exists).toBe(false);
+    expect((await db.collection('users/u1/entitlements').get()).empty).toBe(true);
   });
 });

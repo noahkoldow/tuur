@@ -200,6 +200,11 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
               </View>
               <View style={{ marginHorizontal: -metrics.margin }}>
                 <StopCards
+                  access={{
+                    mode: session.mode,
+                    ...(session.tour ? { tourId: session.tour.id } : {}),
+                    ...(session.groupId ? { groupId: session.groupId } : {}),
+                  }}
                   poi={stopPois.get(selectedStop.id)}
                   name={selectedStop.name}
                   lang={lang}
@@ -274,6 +279,11 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
         </View>
       </Sheet>
       <StopInfoSheet
+        access={{
+          mode: session.mode,
+          ...(session.tour ? { tourId: session.tour.id } : {}),
+          ...(session.groupId ? { groupId: session.groupId } : {}),
+        }}
         stop={
           readingStop
             ? { ...readingStop, ...(savedNarration ? { narration: savedNarration } : {}) }

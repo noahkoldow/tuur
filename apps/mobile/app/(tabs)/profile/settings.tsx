@@ -1,9 +1,16 @@
-import { useEffect, useState } from 'react';
-import { Alert, Linking, Share, Switch, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, Share, Switch, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useTranslation } from 'react-i18next';
-import { DEFAULT_VOICE_CAST, INTERESTS, SUPPORTED_UI_LANGUAGES } from '@tuur/shared';
+import {
+  AI_CONSENT_COPY,
+  DEFAULT_VOICE_CAST,
+  INTERESTS,
+  SUPPORTED_UI_LANGUAGES,
+  voiceDisplayName,
+} from '@tuur/shared';
+import { askAiConsent } from '../../../src/privacy/aiConsent';
 import { getAds } from '../../../src/billing/entitlements';
 import { useBackend } from '../../../src/backend';
 import { Banner } from '../../../src/components/Banner';
@@ -15,8 +22,6 @@ import { Text } from '../../../src/components/Text';
 import { config, isDev } from '../../../src/config';
 import { setCrashReporting } from '../../../src/telemetry';
 import { endSession } from '../../../src/guide/session';
-import { getDownloadManager } from '../../../src/offline';
-import { useHistory } from '../../../src/state/history';
 import { useSettings, type NarrationFrequency } from '../../../src/state/settings';
 import { metrics, sys } from '../../../src/theme';
 
@@ -40,13 +45,67 @@ export default function Settings() {
     set,
   } = useSettings();
   const backend = useBackend();
+  const [aiConsent, setAiConsent] = useState<boolean>();
+  const [aiLoadFailed, setAiLoadFailed] = useState(false);
+  const aiRequest = useRef(0);
+  const [aiBusy, setAiBusy] = useState(false);
+  const aiCopy = AI_CONSENT_COPY[language === 'de' ? 'de' : 'en'];
   const [notice, setNotice] = useState<{ tone: 'info' | 'warning'; text: string } | undefined>();
   const [user, setUser] = useState(backend.auth.current());
+  const userUid = user?.uid;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [openPicker, setOpenPicker] = useState<string | undefined>();
   const toggle = (id: string) => setOpenPicker((cur) => (cur === id ? undefined : id));
 
   useEffect(() => backend.auth.onChange(setUser), [backend]);
+  const loadAiConsent = useCallback(() => {
+    const request = ++aiRequest.current;
+    const isCurrent = () => request === aiRequest.current && backend.auth.current()?.uid === userUid;
+    setAiConsent(undefined);
+    setAiLoadFailed(false);
+    if (userUid)
+      void backend
+        .getAiConsent()
+        .then((state) => {
+          if (isCurrent()) setAiConsent(state.granted);
+        })
+        .catch(() => {
+          if (isCurrent()) setAiLoadFailed(true);
+        });
+  }, [backend, userUid]);
+  useFocusEffect(
+    useCallback(() => {
+      loadAiConsent();
+      return () => {
+        aiRequest.current++;
+      };
+    }, [loadAiConsent]),
+  );
+  const toggleAi = async (enabled: boolean) => {
+    if (aiBusy || aiConsent === undefined) return;
+    const accountUid = backend.auth.current()?.uid;
+    if (!accountUid) return;
+    setAiBusy(true);
+    try {
+      if (enabled) {
+        const { pauseSessionForAiConsent } = await import('../../../src/guide/session');
+        await pauseSessionForAiConsent();
+        if (!(await askAiConsent())) return;
+      }
+      if (backend.auth.current()?.uid !== accountUid) return;
+      const state = await backend.updateAiConsent(enabled);
+      if (backend.auth.current()?.uid !== accountUid) return;
+      setAiConsent(state.granted);
+      if (!state.granted) {
+        const { continueSessionAsText } = await import('../../../src/guide/session');
+        await continueSessionAsText();
+      }
+    } catch {
+      setNotice({ tone: 'warning', text: aiCopy.failed });
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const toggleAnalytics = (v: boolean) => {
     set({ analyticsConsent: v });
@@ -74,34 +133,16 @@ export default function Settings() {
       setNotice({ tone: 'warning', text: t('account.exportFailed') });
     }
   };
-  const deleteAccount = () =>
-    Alert.alert(t('account.deleteTitle'), t('account.deleteBody'), [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('account.deleteConfirm'),
-        style: 'destructive',
-        onPress: () =>
-          void (async () => {
-            try {
-              await endSession();
-              await getDownloadManager().clearAll();
-              await backend.deleteAccount();
-              set({ onboarded: false, interests: [], analyticsConsent: false });
-              useHistory.getState().clear();
-              void setCrashReporting(false);
-              router.replace('/');
-            } catch {
-              setNotice({ tone: 'warning', text: t('account.deleteFailed') });
-            }
-          })(),
-      },
-    ]);
+  const deleteAccount = () => router.push('/account/delete');
   const legal = (doc: 'imprint' | 'privacy' | 'terms') =>
     router.push({ pathname: '/legal/[doc]', params: { doc } });
   const accountName = user?.email ?? user?.phoneNumber;
 
   return (
     <ScrollScreen>
+      <ListGroup>
+        <ListRow icon="flag" label={t('safety.title')} onPress={() => router.push('/report')} />
+      </ListGroup>
       {!config.paywall ? <Banner icon="unlock" text={t('settings.previewNotice')} /> : null}
       {notice ? <Banner tone={notice.tone} text={notice.text} /> : null}
 
@@ -130,7 +171,7 @@ export default function Settings() {
           hint={t('settings.voiceHint')}
           choices={DEFAULT_VOICE_CAST.map((v) => ({
             id: v.id,
-            label: v.names[language] ?? v.names['en'] ?? v.id,
+            label: voiceDisplayName(v, language),
             detail: v.blurb[language] ?? v.blurb['en'] ?? '',
           }))}
           selected={[voiceId]}
@@ -198,6 +239,31 @@ export default function Settings() {
       </ListGroup>
 
       <ListGroup title={t('settings.sectionPrivacy')} footer={t('account.aiInfo')}>
+        <ListRow
+          icon="sparkles"
+          label={aiCopy.setting}
+          hint={aiCopy.hint}
+          trailing={
+            aiConsent === undefined ? (
+              aiLoadFailed ? undefined : (
+                <ActivityIndicator accessibilityLabel={t('common.loading')} />
+              )
+            ) : (
+              <Switch
+                value={aiConsent}
+                disabled={aiBusy}
+                onValueChange={(enabled) => void toggleAi(enabled)}
+                accessibilityLabel={aiCopy.setting}
+              />
+            )
+          }
+        />
+        {aiLoadFailed ? (
+          <View style={{ padding: 16, gap: 8 }}>
+            <Banner tone="warning" text={t('errors.network')} />
+            <Button variant="secondary" label={t('common.retry')} onPress={loadAiConsent} />
+          </View>
+        ) : null}
         <ListRow
           icon="map-pin"
           label={t('settings.location')}

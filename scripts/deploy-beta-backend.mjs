@@ -6,19 +6,24 @@ import { parseEnv } from 'node:util';
 import { assertBetaProject, projectId } from './lib/firebase-beta.mjs';
 import { releaseProblems } from './check-release.mjs';
 
-// Explicitly excludes ingestion/tasks, schedulers, partner billing and admin endpoints.
+// Ingestion and moderation are separate opt-ins. Schedulers and partner billing stay excluded.
 export const endpoints = [
   'ensureArea',
   'getNarration',
   'getTransition',
   'reportNarration',
+  'reportContent',
+  'getAiConsent',
+  'updateAiConsent',
   'generateAutoTours',
   'composePlannedRoute',
   'getWalkingRoute',
   'getTeaser',
+  'getPoiText',
   'selectNearby',
   'spendCredit',
   'claimTourStart',
+  'updateTourTime',
   'prepareTourDownload',
   'recordPurchaseConsent',
   'createInvite',
@@ -37,13 +42,23 @@ export const endpoints = [
   'exportMyData',
 ];
 const root = resolve(import.meta.dirname, '..');
+// Store callback updates require a separate opt-in; consumer deployment never expands its secret boundary.
+const includeRevenueCat = process.argv.includes('--include-revenuecat');
+const includeModeration = process.argv.includes('--include-moderation');
+const includeIngestion = process.argv.includes('--include-ingestion');
+const allowedEndpoints = [
+  ...endpoints,
+  ...(includeRevenueCat ? ['revenueCatWebhook'] : []),
+  ...(includeModeration ? ['adminModerateOffer'] : []),
+  ...(includeIngestion ? ['ingestArea'] : []),
+];
 const requested =
   process.argv
     .find((arg) => arg.startsWith('--functions='))
     ?.slice('--functions='.length)
-    .split(',') ?? endpoints;
-if (!requested.length || requested.some((name) => !endpoints.includes(name)))
-  throw new Error('Requested functions must belong to the reviewed consumer allowlist');
+    .split(',') ?? allowedEndpoints;
+if (!requested.length || requested.some((name) => !allowedEndpoints.includes(name)))
+  throw new Error('Requested functions must belong to the reviewed beta allowlist');
 process.chdir(root);
 const require = createRequire(import.meta.url);
 const env = parseEnv(readFileSync(`functions/deploy/.env.${projectId}`, 'utf8'));
@@ -54,8 +69,16 @@ const problems = releaseProblems(
   { target: 'server', channel: 'beta' },
 );
 if (problems.length) throw new Error(problems.join('\n'));
-if (!env.TUUR_BETA_SNAPSHOT_TILES || !env.TUUR_CORE_SERVICE_ACCOUNT || !env.TUUR_AI_SERVICE_ACCOUNT)
-  throw new Error('Bounded beta snapshot and explicit runtime identities are required');
+if (!env.TUUR_CORE_SERVICE_ACCOUNT || !env.TUUR_AI_SERVICE_ACCOUNT)
+  throw new Error('Explicit beta runtime identities are required');
+if (includeIngestion) {
+  if (env.TUUR_BETA_SNAPSHOT_TILES || !env.OVERPASS_ENDPOINT)
+    throw new Error('Live ingestion requires OVERPASS_ENDPOINT and removal of the beta snapshot restriction');
+} else if (!env.TUUR_BETA_SNAPSHOT_TILES) {
+  throw new Error('Live area access requires --include-ingestion so its worker is included');
+}
+if (includeRevenueCat && (!env.TUUR_REVENUECAT_SERVICE_ACCOUNT || !env.REVENUECAT_PROJECT_ID))
+  throw new Error('RevenueCat callback requires its dedicated identity and project');
 Object.assign(process.env, env, { DEBUG: '', GCLOUD_PROJECT: projectId, FUNCTIONS_EMULATOR: 'false' });
 delete process.env.FIRESTORE_EMULATOR_HOST;
 delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
@@ -74,8 +97,12 @@ const { stackToWire } = require(
 );
 const stack = JSON.parse(JSON.stringify(stackToWire(await loadStack(resolve(root, 'functions/deploy')))));
 const selected = Object.fromEntries(
-  endpoints.map((name) => {
-    if (!stack.endpoints[name]?.callableTrigger && !stack.endpoints[name]?.httpsTrigger)
+  allowedEndpoints.map((name) => {
+    if (
+      !stack.endpoints[name]?.callableTrigger &&
+      !stack.endpoints[name]?.httpsTrigger &&
+      !(includeIngestion && name === 'ingestArea' && stack.endpoints[name]?.taskQueueTrigger)
+    )
       throw new Error(`Unexpected or missing endpoint: ${name}`);
     return [name, stack.endpoints[name]];
   }),
@@ -83,18 +110,25 @@ const selected = Object.fromEntries(
 const secrets = new Set(
   Object.values(selected).flatMap((fn) => (fn.secretEnvironmentVariables ?? []).map((s) => s.key)),
 );
-if ([...secrets].some((key) => !['GEMINI_API_KEY', 'ORS_API_KEY'].includes(key)))
-  throw new Error('Unexpected provider secret in beta consumer backend');
+const allowedSecrets = [
+  'GEMINI_API_KEY',
+  'ORS_API_KEY',
+  ...(includeRevenueCat ? ['REVENUECAT_WEBHOOK_SECRET', 'REVENUECAT_API_V2_KEY'] : []),
+];
+if ([...secrets].some((key) => !allowedSecrets.includes(key)))
+  throw new Error('Unexpected provider secret in beta backend');
 const manifest = {
   specVersion: stack.specVersion,
   endpoints: selected,
   params: stack.params.filter((p) => p.type !== 'secret' || secrets.has(p.name)),
-  requiredAPIs: [],
+  requiredAPIs: includeIngestion
+    ? [{ api: 'cloudtasks.googleapis.com', reason: 'On-demand OSM area ingestion' }]
+    : [],
 };
 const proof = resolve(root, '.firebase/beta-backend-manifest.json');
 writeFileSync(proof, JSON.stringify(manifest, null, 2) + '\n');
 console.log(
-  `Prepared ${endpoints.length} endpoints for ${projectId}; providers: ${[...secrets].join(', ')}. No ingestion or store upload.`,
+  `Prepared ${allowedEndpoints.length} endpoints for ${projectId}; providers: ${[...secrets].join(', ')}. Ingestion: ${includeIngestion ? 'enabled' : 'disabled'}. No store upload.`,
 );
 if (!process.argv.includes('--apply')) {
   console.log('Local manifest prepared. Pass --apply to deploy this explicit beta subset.');

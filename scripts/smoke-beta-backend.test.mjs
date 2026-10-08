@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { runSmoke } from './smoke-beta-backend.mjs';
 import { firestoreFields, projectId } from './lib/firebase-beta.mjs';
 
@@ -31,6 +32,7 @@ function fixture(options = {}) {
         functions: [
           'ensureArea',
           'prepareTourDownload',
+          'updateTourTime',
           'getNarration',
           'getWalkingRoute',
           'generateAutoTours',
@@ -185,6 +187,8 @@ function fixture(options = {}) {
     if (name === 'getNarration') {
       docs.set(`rateLimits/narr_dl_${uid}`, document({ count: 1 }));
       assert.equal(body.data.context.script.instanceId, uid);
+      assert.equal(body.data.access.downloadId, uid);
+      assert.ok(docs.has(`users/${uid}/tourDownloads/${createHash('sha256').update(uid).digest('hex')}`));
       const key = `personal__${'a'.repeat(64)}`;
       const cached = docs.has(`narrations/${key}`);
       docs.set(`narrations/${key}`, document({ ownerUid: uid, scriptInstanceId: uid }));
@@ -210,11 +214,32 @@ function fixture(options = {}) {
       users.delete(uid);
       return response(200, { result: { deleted: true, summary: { personalNarrations: 1 } } });
     }
+    if (name === 'updateTourTime') {
+      const { sessionId, state, sequence } = body.data;
+      const result = {
+        sessionId,
+        state,
+        sequence,
+        source: 'subscription',
+        remainingSeconds: 30000,
+        leaseExpiresAt: state === 'active' ? Date.now() + 60000 : null,
+      };
+      docs.set(`users/${uid}/tourTime/budget`, document({ usedSeconds: 0 }));
+      docs.set(`users/${uid}/tourTimeSessions/${sessionId}`, document({ result }));
+      return response(200, { result });
+    }
     assert.equal(name, 'prepareTourDownload');
     if (options.downloadFailure) return response(500, { error: { message: 'private-auth-token' } });
     const fields = docs.get(`users/${uid}/entitlements/smoke`)?.fields;
-    if (fields?.type?.stringValue === 'subscription' && Number(fields.expiresAt.integerValue) > Date.now())
+    if (fields?.type?.stringValue === 'subscription' && Number(fields.expiresAt.integerValue) > Date.now()) {
+      assert.ok(body.data.scriptInstanceId);
+      docs.set(`users/${uid}/tourTime/budget`, document({ usedSeconds: 5400 }));
+      docs.set(
+        `users/${uid}/tourDownloads/${createHash('sha256').update(body.data.scriptInstanceId).digest('hex')}`,
+        document({ tourId: body.data.tourId }),
+      );
       return response(200, { result: { ...body.data, grantedAt: Date.now(), expiresAt: null } });
+    }
     if (fields?.type?.stringValue === 'tour' && fields.source?.stringValue === 'credit')
       return response(200, { result: { ...body.data, grantedAt: Date.now(), expiresAt: null } });
     return response(403, {
@@ -264,6 +289,10 @@ test('runs both authorization gates and seeded download checks; removes only own
       assert.ok(result.checks.some((check) => check.name === `download:${mode}:${suffix}`));
   assert.equal(f.users.size + f.docs.size + f.debug.size, 0);
   assert.ok(result.cleanup.every((entry) => entry.passed));
+  assert.deepEqual(
+    f.callableCalls.filter((call) => call.name === 'updateTourTime').map((call) => call.data.state),
+    ['active', 'paused', 'ended'],
+  );
   assert.equal(
     f.calls.filter((call) => call.method !== 'GET' && call.path.endsWith('/tours/existing')).length,
     0,

@@ -9,7 +9,7 @@ export type ProductId =
 /** A purchasable product. Prices always come from the store (localized, incl. tax), never from our code. */
 export interface Offer {
   id: ProductId;
-  kind: 'credit' | 'subscription';
+  kind: 'credit' | 'subscription' | 'seat';
   title: string;
   priceString: string;
   /** Numeric price and ISO currency (for the per-month equivalent and the savings badge). */

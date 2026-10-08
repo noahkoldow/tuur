@@ -27,7 +27,7 @@ export default function JoinGroupScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const backend = useBackend();
-  const { language, interests, simulator } = useSettings();
+  const { language, simulator } = useSettings();
   const [state, setState] = useState<State>({ phase: 'working' });
   const [starting, setStarting] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -58,14 +58,17 @@ export default function JoinGroupScreen() {
   const start = async (group: GroupInfo) => {
     setStarting(true);
     try {
+      if (!group.audio) throw new Error('This group needs a new invitation');
       await startTourSession({
         tour: group.tour,
-        lang: language,
+        lang: group.audio.lang,
+        script: group.audio.script,
+        ...(group.audio.voice ? { voice: group.audio.voice } : {}),
         planned: group.mode === 'planned',
         groupId: group.id,
         guest: true,
         simulate: simulator,
-        ...(interests[0] ? { interest: interests[0] } : {}),
+        ...(group.audio.primaryInterest ? { interest: group.audio.primaryInterest } : {}),
       });
       router.replace('/play');
     } catch {

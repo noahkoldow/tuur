@@ -36,11 +36,32 @@ const narration = (backend: Backend, tourId: string, poiId: string) =>
     poiId,
     lang: 'de',
     lengthTier: 'short',
-    access: { tourId, mode: 'tour' },
+    access: { tourId, mode: 'tour', sessionId: 'billing-test' },
   });
 
 describe('gating and unlocking (demo backend mirrors the server rules)', () => {
-  it('serves the free tour, locks the paid one and unlocks it with a credit', async () => {
+  it('keeps the annual demo purchase annual while granting 500 minutes per month', async () => {
+    const { backend, paid, state } = await setup();
+    const now = Date.now();
+    await createDemoBilling(backend).purchase('tuur_sub_yearly');
+    expect(state().entitlements.find((e) => e.type === 'subscription')).toMatchObject({
+      productId: 'tuur_sub_yearly',
+      active: true,
+    });
+    expect(state().entitlements.find((e) => e.type === 'subscription')!.expiresAt).toBeGreaterThan(
+      now + 364 * 86400_000,
+    );
+    expect(
+      await backend.updateTourTime({
+        sessionId: 'annual',
+        sequence: 0,
+        state: 'active',
+        mode: 'tour',
+        tourId: paid.id,
+      }),
+    ).toMatchObject({ source: 'subscription', remainingSeconds: 30_000 });
+  });
+  it('keeps audio paid even for free tours and unlocks it with a credit', async () => {
     const { backend, free, paid, state } = await setup();
     // the free tour of a city is claimed once (verified phone + rewarded ad, server rule since the release work)
     await expect(narration(backend, free.id, free.stops[0]!.poiId)).rejects.toMatchObject({ code: 'locked' });
@@ -49,7 +70,8 @@ describe('gating and unlocking (demo backend mirrors the server rules)', () => {
       '000000',
     );
     await backend.createRewardNonce({ tourId: free.id });
-    await expect(narration(backend, free.id, free.stops[0]!.poiId)).resolves.toBeTruthy();
+    await expect(narration(backend, free.id, free.stops[0]!.poiId)).rejects.toMatchObject({ code: 'locked' });
+    await expect(backend.getTeaser({ poiId: free.stops[0]!.poiId, lang: 'de' })).resolves.toBeTruthy();
     const err = await narration(backend, paid.id, paid.stops[0]!.poiId).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BackendError);
     expect((err as BackendError).code).toBe('locked');
@@ -63,19 +85,30 @@ describe('gating and unlocking (demo backend mirrors the server rules)', () => {
     await backend.spendCredit({ kind: 'tour', tourId: paid.id });
     expect(state().wallet.balance).toBe(0);
     expect(canStartTour(state(), paid.id, paid.free)).toBe(true);
+    await backend.updateTourTime({
+      sessionId: 'billing-test',
+      sequence: 0,
+      state: 'active',
+      mode: 'tour',
+      tourId: paid.id,
+    });
     await expect(narration(backend, paid.id, paid.stops[0]!.poiId)).resolves.toBeTruthy();
   });
 
-  it('spends reward credits first for tours, but they never unlock a 24 h session', async () => {
+  it('preserves reward balances and requires bought credits for all audio', async () => {
     const { backend, paid, state, placeId } = await setup();
     await createDemoAds(backend).showRewarded({ userId: 'u', nonce: 'n' });
     expect(state().wallet.rewardBalance).toBe(1);
     await expect(backend.spendCredit({ kind: 'session', placeId })).rejects.toMatchObject({
       code: 'insufficient_credit',
     });
+    await expect(backend.spendCredit({ kind: 'tour', tourId: paid.id })).rejects.toMatchObject({
+      code: 'insufficient_credit',
+    });
+    await createDemoBilling(backend).purchase('tuur_credit_1');
     await backend.spendCredit({ kind: 'tour', tourId: paid.id });
-    expect(state().wallet.rewardBalance).toBe(0);
-    expect(state().entitlements.find((e) => e.type === 'tour')).toMatchObject({ source: 'reward' });
+    expect(state().wallet.rewardBalance).toBe(1);
+    expect(state().entitlements.find((e) => e.type === 'tour')).toMatchObject({ source: 'credit' });
   });
 
   it('dynamic modes need a session or a subscription; a subscription unlocks everything', async () => {
@@ -89,7 +122,16 @@ describe('gating and unlocking (demo backend mirrors the server rules)', () => {
     await billing.purchase('tuur_credit_1');
     await backend.spendCredit({ kind: 'session', placeId });
     expect(canUseSession(state(), 'roam', placeId)).toBe(true);
-    await expect(backend.getNarration({ ...req, access: { mode: 'roam' } })).resolves.toBeTruthy();
+    await backend.updateTourTime({
+      sessionId: 'billing-roam',
+      sequence: 0,
+      state: 'active',
+      mode: 'roam',
+      placeId,
+    });
+    await expect(
+      backend.getNarration({ ...req, access: { mode: 'roam', sessionId: 'billing-roam' } }),
+    ).resolves.toBeTruthy();
     // a session does not unlock a paid standard tour
     expect(canStartTour(state(), paid.id, false)).toBe(false);
 
@@ -109,20 +151,13 @@ describe('gating and unlocking (demo backend mirrors the server rules)', () => {
 });
 
 describe('invites', () => {
-  it('only bought tours can be shared, at most twice; redeeming unlocks the tour', async () => {
+  it('uses live groups for new metered purchases instead of gifting permanent copies', async () => {
     const { backend, paid, state } = await setup();
     await expect(backend.createInvite(paid.id)).rejects.toMatchObject({ reason: 'not_purchased' });
     await createDemoBilling(backend).purchase('tuur_credit_1');
     await backend.spendCredit({ kind: 'tour', tourId: paid.id });
-    const a = await backend.createInvite(paid.id);
-    const b = await backend.createInvite(paid.id);
-    expect([a.remaining, b.remaining]).toEqual([1, 0]);
-    await expect(backend.createInvite(paid.id)).rejects.toMatchObject({ reason: 'limit_reached' });
-    expect(a.token).not.toBe(b.token);
-
-    await expect(backend.redeemInvite(a.token)).resolves.toEqual({ tourId: paid.id });
-    expect(state().entitlements.some((e) => e.type === 'tour' && e.source === 'invite')).toBe(true);
-    await expect(backend.redeemInvite(a.token)).rejects.toMatchObject({ code: 'invite_invalid' });
+    await expect(backend.createInvite(paid.id)).rejects.toMatchObject({ reason: 'not_purchased' });
+    expect(state().entitlements.find((e) => e.type === 'tour')).toMatchObject({ timeRemainingSeconds: 5400 });
   });
 });
 

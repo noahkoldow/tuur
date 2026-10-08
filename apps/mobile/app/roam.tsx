@@ -17,7 +17,7 @@ import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
 import { TuuSays, useTip } from '../src/components/TuuSays';
 import { TuurMap } from '../src/components/TuurMap';
-import { startRoamSession } from '../src/guide/session';
+import { FreeTourIntroCancelled, startRoamSession } from '../src/guide/session';
 import { usePoiPool } from '../src/hooks/usePoiPool';
 import { usePosition } from '../src/location/usePosition';
 import { requestBackground } from '../src/location/real';
@@ -97,8 +97,8 @@ export default function Roam() {
         });
         haptics.start();
         if (mounted.current) router.replace('/play');
-      } catch {
-        setStartError('failed');
+      } catch (error) {
+        if (!(error instanceof FreeTourIntroCancelled)) setStartError('failed');
       } finally {
         inFlight.current = false;
         setBusy(undefined);

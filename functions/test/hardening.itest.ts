@@ -4,7 +4,15 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebas
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { getBytes, ref as sref } from 'firebase/storage';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_AI_CONFIG, NarrationLangSchema, REGION_FIXTURES, buildPois, type Poi } from '@tuur/shared';
+import {
+  AI_CONSENT_VERSION,
+  DEFAULT_AI_CONFIG,
+  NarrationLangSchema,
+  REGION_FIXTURES,
+  buildPois,
+  createTourScript,
+  type Poi,
+} from '@tuur/shared';
 import { ensureAreas } from '../src/area/ensureArea';
 import { createRewardNonce, processRevenueCatEvent } from '../src/billing/entitlements';
 import { getNarration, type NarrationDeps } from '../src/narration/service';
@@ -29,6 +37,13 @@ let poi: Poi;
 
 beforeEach(async () => {
   await clearFirestore();
+  for (const uid of ['u1', 'u2'])
+    await db
+      .collection('users')
+      .doc(uid)
+      .collection('consents')
+      .doc('ai')
+      .set({ granted: true, version: AI_CONSENT_VERSION, updatedAt: clock });
   clock += 3 * 3600_000;
   const { pois } = buildPois(REGION_FIXTURES[0]!.raw, { now: clock });
   poi = { ...pois[0]!, baseScore: 50, score: 50 };
@@ -109,14 +124,25 @@ describe('paid audio is served through signed URLs only', () => {
       now: () => clock,
       config: async () => DEFAULT_AI_CONFIG,
     };
-    const req = { poiId: poi.id, lang: 'de', lengthTier: 'short' };
+    const req = {
+      poiId: poi.id,
+      lang: 'de',
+      lengthTier: 'short',
+      context: {
+        script: createTourScript({ lang: 'de', interests: ['history'], instanceId: 'signed-url-test' }),
+      },
+    };
     const fresh = await getNarration(deps, 'u1', req);
-    const cached = await getNarration(deps, 'u2', req);
+    const cached = await getNarration(deps, 'u1', req);
+    const anotherOwner = await getNarration(deps, 'u2', req);
     expect(fresh.cached).toBe(false);
     expect(cached.cached).toBe(true);
-    for (const r of [fresh, cached])
+    expect(cached.key).toBe(fresh.key);
+    expect(anotherOwner.cached).toBe(false);
+    expect(anotherOwner.key).not.toBe(fresh.key);
+    for (const r of [fresh, cached, anotherOwner])
       expect(r.audioUrl).toBe(`https://signed.test/${r.audioPath}?ttl=21600000`);
-    expect(signed).toHaveLength(2);
+    expect(signed).toHaveLength(3);
   });
 });
 
@@ -260,11 +286,11 @@ describe('partner payments', () => {
       'mock',
     );
   const profile = {
-    name: 'Café Linde',
+    name: 'CafÃ© Linde',
     category: 'cafe',
     address: 'Unter den Linden 1',
     countryCode: 'DE',
-    description: 'Traditionelles Café mit hausgemachtem Kuchen und Blick auf die Allee.',
+    description: 'Traditionelles CafÃ© mit hausgemachtem Kuchen und Blick auf die Allee.',
     acceptTerms: true,
   };
 

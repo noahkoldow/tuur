@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   REGION_FIXTURES,
+  OfflineManifestSchema,
   createTourScript,
   narrationContextFor,
   decodePolyline,
@@ -59,6 +60,88 @@ async function setup() {
 }
 
 describe('offline downloads', () => {
+  it('preserves a complete archive when a replacement has no remaining download minutes', async () => {
+    const { backend, tour, files, library, maps, manager } = await setup();
+    const saved = await manager.start(tour, 'de', () => undefined);
+    const denied = new DownloadManager({
+      backend: {
+        ...backend,
+        prepareTourDownload: async () => {
+          throw new BackendError('locked', 'No minutes left', undefined, 'tour_time_exhausted');
+        },
+      },
+      files,
+      library,
+      maps,
+    });
+    await expect(denied.start(tour, 'en', () => undefined)).rejects.toMatchObject({
+      reason: 'tour_time_exhausted',
+    });
+    expect(library.available(tour.id)).toEqual(saved);
+    const restarted = new OfflineLibrary(files);
+    await restarted.load();
+    expect(restarted.available(tour.id)).toEqual(OfflineManifestSchema.parse(saved));
+    for (const narration of Object.values(saved.narrations))
+      expect(await files.exists(narration.audioFile)).toBe(true);
+  });
+
+  it('reuses a lost reservation response across restart without replacing the old archive or changing voice', async () => {
+    const { backend, tour, files, library, maps, manager } = await setup();
+    const saved = await manager.start(tour, 'de', () => undefined);
+    const reserved: (string | undefined)[] = [];
+    const voices: (string | undefined)[] = [];
+    let dropResponse = true;
+    let createdIds = 0;
+    let voice = 'classic';
+    const source: Backend = {
+      ...backend,
+      prepareTourDownload: async (...args) => {
+        reserved.push(args[2]);
+        const result = await backend.prepareTourDownload(...args);
+        if (dropResponse) {
+          dropResponse = false;
+          throw new BackendError('network', 'Response lost');
+        }
+        return result;
+      },
+      getNarration: async (req) => {
+        voices.push(req.voice);
+        voice = 'changed';
+        return backend.getNarration(req);
+      },
+      getTransition: async (req) => {
+        voices.push(req.voice);
+        return backend.getTransition(req);
+      },
+    };
+    const deps = {
+      backend: source,
+      files,
+      maps,
+      library,
+      voice: () => voice,
+      newScriptInstanceId: () => `replacement-${++createdIds}`,
+    };
+    await expect(new DownloadManager(deps).start(tour, 'en', () => undefined)).rejects.toMatchObject({
+      code: 'network',
+    });
+    expect(library.available(tour.id)).toEqual(saved);
+    const restarted = new OfflineLibrary(files);
+    await restarted.load();
+    expect(restarted.available(tour.id)).toEqual(OfflineManifestSchema.parse(saved));
+    voice = 'different';
+    const replacement = await new DownloadManager({ ...deps, library: restarted }).start(
+      tour,
+      'en',
+      () => undefined,
+    );
+    expect(createdIds).toBe(1);
+    expect(reserved).toEqual(['replacement-1', 'replacement-1']);
+    expect(replacement).toMatchObject({ lang: 'en', complete: true, voiceId: 'classic' });
+    expect(voices.length).toBeGreaterThan(0);
+    expect(new Set(voices)).toEqual(new Set(['classic']));
+  });
+
   it('downloads audio and texts without claiming a map when no offline source is available', async () => {
     const { backend, tour, files, library } = await setup();
     const maps = new UnavailableMapPackManager();
@@ -300,9 +383,10 @@ describe('offline downloads', () => {
     let starts = 0;
     const source: Backend = {
       ...backend,
-      prepareTourDownload: async (tourId, mode) => {
+      prepareTourDownload: async (tourId, mode, scriptInstanceId) => {
         prepares++;
         expect({ tourId, mode }).toEqual({ tourId: planned.id, mode: 'planned' });
+        await backend.prepareTourDownload(tour.id, 'tour', scriptInstanceId);
         return { tourId, mode, grantedAt: Date.now(), expiresAt: null };
       },
       claimTourStart: async () => {
@@ -310,15 +394,25 @@ describe('offline downloads', () => {
         throw new Error('Download must not count as a start');
       },
       getNarration: async (req) => {
-        expect(req.access).toEqual({ tourId: planned.id, mode: 'planned' });
+        expect(req.access).toEqual({
+          tourId: planned.id,
+          mode: 'planned',
+          downloadId: req.context?.script?.instanceId,
+        });
         expect(req.download).toBe(true);
-        const n = await backend.getNarration({ ...req, access: { tourId: tour.id, mode: 'tour' } });
+        const n = await backend.getNarration({
+          ...req,
+          access: { ...req.access, tourId: tour.id, mode: 'tour' },
+        });
         return { ...n, audioUrl: `https://signed.example/${n.key}` };
       },
       getTransition: async (req) => {
-        expect(req.access).toEqual({ tourId: planned.id, mode: 'planned' });
+        expect(req.access).toEqual({ tourId: planned.id, mode: 'planned', downloadId: req.scriptInstanceId });
         expect(req.download).toBe(true);
-        const n = await backend.getTransition({ ...req, access: { tourId: tour.id, mode: 'tour' } });
+        const n = await backend.getTransition({
+          ...req,
+          access: { ...req.access, tourId: tour.id, mode: 'tour' },
+        });
         return { ...n, audioUrl: `https://signed.example/${n.key}` };
       },
       audioUrl: async () => {
@@ -339,6 +433,7 @@ describe('offline downloads', () => {
         ...source,
         getTour: dead,
         claimTourStart: dead,
+        updateTourTime: dead,
         getNarration: dead,
         getTransition: dead,
         audioUrl: dead,
@@ -350,6 +445,22 @@ describe('offline downloads', () => {
     await expect(offline.claimTourStart(planned.id, 'saved', 'planned')).resolves.toEqual({
       counted: false,
       remaining: null,
+    });
+    const localTime = {
+      sessionId: 'saved',
+      sequence: 1,
+      state: 'active' as const,
+      tourId: planned.id,
+      mode: 'planned' as const,
+      scriptInstanceId: downloadedTourScript(restored.get(planned.id)!).instanceId,
+    };
+    await expect(offline.updateTourTime(localTime)).resolves.toMatchObject({
+      offline: true,
+      remainingSeconds: null,
+      leaseExpiresAt: null,
+    });
+    await expect(offline.updateTourTime({ ...localTime, mode: 'roam' })).rejects.toMatchObject({
+      code: 'network',
     });
     const req = {
       poiId: planned.stops[0]!.poiId,
@@ -510,6 +621,9 @@ describe('offline downloads', () => {
     };
     const offlineNet: Backend = {
       kind: 'demo',
+      getAiConsent: dead,
+      updateAiConsent: dead,
+      reportContent: dead,
       auth: {
         current: () => ({ uid: 'demo-user', isAnonymous: false, phoneNumber: '+491701234567' }),
         onChange: () => () => undefined,
@@ -532,12 +646,14 @@ describe('offline downloads', () => {
       getExploredSpots: dead,
       composePlannedRoute: dead,
       getTeaser: dead,
+      getPoiText: dead,
       getNarration: dead,
       getTransition: dead,
       audioUrl: dead,
       reportNarration: dead,
       watchEntitlements: () => () => undefined,
       claimTourStart: dead,
+      updateTourTime: dead,
       prepareTourDownload: dead,
       spendCredit: dead,
       createInvite: dead,

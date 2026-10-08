@@ -182,12 +182,11 @@ describe('generateAutoTours', () => {
     await expect(generateAutoTours(deps, 'u1', req)).rejects.toMatchObject({ code: 'unavailable' });
   });
 
-  it('pre-generates only the first stops (cost brake)', async () => {
+  it('never pre-generates audio during free tour creation', async () => {
     const calls: string[][] = [];
     const { deps } = mk({ pregenerate: async (ids) => void calls.push(ids) });
     await generateAutoTours(deps, 'u1', req);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toHaveLength(2);
+    expect(calls).toHaveLength(0);
   });
 });
 

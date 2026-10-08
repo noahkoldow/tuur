@@ -3,7 +3,7 @@ import { Animated, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { ImageRef, Interest, Poi } from '@tuur/shared';
 import { formatKm } from '../format';
-import { colors, radii, shadow, sys } from '../theme';
+import { colors, radii, shadow } from '../theme';
 import { CategoryBadge } from './category-badge';
 import { FlipCard } from './flip-card';
 import { Icon } from './Icon';
@@ -13,6 +13,9 @@ import { PhotoInfo, type PhotoTextSource } from './photo-info';
 import { placeInformation, placeSummary } from './placeDetails';
 import { SnapCarousel, type SnapCarouselItem } from './SnapCarousel';
 import { Text } from './Text';
+import type { AccessInfo } from '../backend/types';
+import { usePoiText } from '../hooks/usePoiText';
+import { PlaceTextStatus, type PlaceTextStatusProps } from './place-text-status';
 
 const CARD_H = 218;
 type CardImage = Omit<ImageRef, 'file'>;
@@ -32,6 +35,7 @@ export function StopCards({
   keyFacts,
   images: narrationImages,
   lang,
+  access,
 }: {
   poi: Poi | undefined;
   name: string;
@@ -40,8 +44,11 @@ export function StopCards({
   /** Narration photos also carry local file URLs for downloaded tours. */
   images?: CardImage[] | undefined;
   lang: string;
+  access?: AccessInfo | undefined;
 }) {
   const { t } = useTranslation();
+  const textInfo = usePoiText(poi, lang, true, access);
+  const textPoi = textInfo.poi;
   const pop = useRef(new Animated.Value(0)).current;
   const id = poi?.id ?? name;
   useEffect(() => {
@@ -51,8 +58,8 @@ export function StopCards({
 
   const interest = interestOf(poi);
   const images = narrationImages?.length ? narrationImages : (poi?.imageRefs ?? []);
-  const extract = poi ? placeSummary(poi, lang) : undefined;
-  const information = poi ? placeInformation(poi, lang) : undefined;
+  const extract = textPoi ? placeSummary(textPoi, lang) : undefined;
+  const information = textPoi ? placeInformation(textPoi, lang) : undefined;
   const distance =
     distanceM === undefined
       ? undefined
@@ -75,6 +82,7 @@ export function StopCards({
           distance={distance}
           information={information}
           keyFacts={keyFacts}
+          textStatus={textInfo}
         />
       ),
     },
@@ -98,6 +106,7 @@ export function StopCards({
           distance={distance}
           information={information}
           keyFacts={keyFacts}
+          textStatus={textInfo}
         />
       ),
     }),
@@ -137,9 +146,10 @@ interface StopCardInformation {
   distance?: string | undefined;
   information?: PhotoTextSource | undefined;
   keyFacts?: string[] | undefined;
+  textStatus?: PlaceTextStatusProps | undefined;
 }
 
-function HeroCard({
+export function HeroCard({
   identity,
   name,
   interest,
@@ -147,6 +157,7 @@ function HeroCard({
   distance,
   information,
   keyFacts,
+  textStatus,
 }: StopCardInformation & {
   image?: CardImage | undefined;
 }) {
@@ -194,9 +205,10 @@ function HeroCard({
           distance={distance}
           information={information}
           keyFacts={keyFacts}
+          textStatus={textStatus}
         />
       }
-      overlay={<PhotoInfo image={image} name={name} summary={information} />}
+      overlay={<PhotoInfo image={image} name={name} summary={information} textStatus={textStatus} />}
     />
   );
 }
@@ -210,7 +222,14 @@ function PhotoCard({ image, identity, name, ...information }: StopCardInformatio
       frontAccessibilityLabel={name}
       front={<PlacePhoto image={image} name={name} showInfo={false} />}
       back={<StopDetails name={name} {...information} />}
-      overlay={<PhotoInfo image={image} name={name} summary={information.information} />}
+      overlay={
+        <PhotoInfo
+          image={image}
+          name={name}
+          summary={information.information}
+          textStatus={information.textStatus}
+        />
+      }
     />
   );
 }
@@ -221,6 +240,7 @@ function StopDetails({
   distance,
   information,
   keyFacts,
+  textStatus,
 }: Omit<StopCardInformation, 'identity'>) {
   const { t } = useTranslation();
   return (
@@ -243,11 +263,12 @@ function StopDetails({
         </>
       ) : information ? (
         <Text variant="body">{information.text}</Text>
+      ) : textStatus ? (
+        <PlaceTextStatus {...textStatus} />
       ) : (
-        <Text variant="body" color={sys.labelSecondary}>
-          {t('stopInfo.unavailable')}
-        </Text>
+        <Text variant="body">{t('stopInfo.unavailable')}</Text>
       )}
+      {information && textStatus?.error ? <PlaceTextStatus {...textStatus} /> : null}
     </>
   );
 }

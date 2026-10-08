@@ -50,6 +50,19 @@ afterEach(() => vi.unstubAllEnvs());
 
 // The first cold import includes provider SDKs and can exceed 30 s on a synced Windows workspace.
 describe('function deployment boundaries', { timeout: 90_000 }, () => {
+  it('rejects unsupported area precision before reserving quota or enqueueing a discarded task', async () => {
+    const { ensureArea } = await import('./index');
+    // The worker accepts exactly six characters. The mocked database cannot reserve a claim,
+    // so accidentally accepting one of these requests also fails this validation regression.
+    for (const geohash of ['u33d', 'u33db', 'u33dbbb', 'u33dbbbb'])
+      await expect(
+        ensureArea.run({
+          auth: { uid: 'user-1', token: {} },
+          data: { geohash, withNeighbors: false },
+        } as Parameters<typeof ensureArea.run>[0]),
+      ).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+
   it('uses no provider credentials for bounded beta snapshot lookup', async () => {
     vi.stubEnv('TUUR_BETA_SNAPSHOT_TILES', 'u33dbb');
     const functions = await import('./index');
@@ -67,10 +80,28 @@ describe('function deployment boundaries', { timeout: 90_000 }, () => {
     expect(secrets(functions.composePlannedRoute)).toEqual(['GEMINI_API_KEY', 'ORS_API_KEY']);
     expect(secrets(functions.getWalkingRoute)).toEqual(['ORS_API_KEY']);
     expect(secrets(functions.getTeaser)).toEqual(['GEMINI_API_KEY']);
+    expect(secrets(functions.getPoiText)).toEqual([]);
     expect(secrets(functions.selectNearby)).toEqual(['GEMINI_API_KEY']);
     expect(secrets(functions.reportNarration)).toEqual([]);
+    expect(secrets(functions.reportContent)).toEqual([]);
+    expect(secrets(functions.getAiConsent)).toEqual([]);
+    expect(secrets(functions.updateAiConsent)).toEqual([]);
+    expect(secrets(functions.adminModerateOffer)).toEqual([]);
     expect(secrets(functions.deleteAccount)).toEqual([]);
     expect(secrets(functions.exportMyData)).toEqual([]);
+  });
+
+  it('queues live discovery without provider credentials and serializes its protected worker', async () => {
+    vi.stubEnv('TUUR_BETA_SNAPSHOT_TILES', '');
+    vi.stubEnv('TUUR_CORE_SERVICE_ACCOUNT', 'core@tuur-beta-test.iam.gserviceaccount.com');
+    const functions = await import('./index');
+    expect(secrets(functions.ensureArea)).toEqual([]);
+    expect(functions.ensureArea.__endpoint.callableTrigger).toBeDefined();
+    expect(functions.ingestArea.__endpoint.taskQueueTrigger).toMatchObject({
+      invoker: ['core@tuur-beta-test.iam.gserviceaccount.com'],
+      rateLimits: { maxConcurrentDispatches: 1, maxDispatchesPerSecond: 1 },
+      retryConfig: { maxAttempts: 3, minBackoffSeconds: 120 },
+    });
   });
 
   it('adds OpenAI only to endpoints that actually synthesize audio in explicit live mode', async () => {
@@ -103,8 +134,13 @@ describe('function deployment boundaries', { timeout: 90_000 }, () => {
     const functions = await import('./index');
     for (const fn of [
       functions.spendCredit,
+      functions.getPoiText,
       functions.prepareTourDownload,
       functions.reportNarration,
+      functions.reportContent,
+      functions.getAiConsent,
+      functions.updateAiConsent,
+      functions.adminModerateOffer,
       functions.deleteAccount,
       functions.exportMyData,
     ])
@@ -159,6 +195,38 @@ describe('function deployment boundaries', { timeout: 90_000 }, () => {
     await expect(
       getWalkingRoute.run({ data: {} } as Parameters<typeof getWalkingRoute.run>[0]),
     ).rejects.toMatchObject({ code: 'unauthenticated' });
+  });
+
+  it('protects report/consent writes and refuses unversioned consent or non-admin moderation', async () => {
+    const functions = await import('./index');
+    for (const fn of [functions.reportContent, functions.getAiConsent, functions.updateAiConsent]) {
+      await expect(fn.run({ data: {} } as Parameters<typeof fn.run>[0])).rejects.toMatchObject({
+        code: 'unauthenticated',
+      });
+    }
+    await expect(
+      functions.updateAiConsent.run({
+        auth: { uid: 'user-1', token: {} },
+        data: { granted: true },
+      } as Parameters<typeof functions.updateAiConsent.run>[0]),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(
+      functions.adminModerateOffer.run({ auth: { uid: 'user-1', token: {} }, data: {} } as Parameters<
+        typeof functions.adminModerateOffer.run
+      >[0]),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+  it('requires authentication for POI text and constructs no AI providers for source text', async () => {
+    vi.stubEnv('TUUR_LLM_PROVIDER', 'invalid');
+    vi.stubEnv('TUUR_TTS_PROVIDER', 'invalid');
+    const { getPoiText } = await import('./index');
+    await expect(getPoiText.run({ data: {} } as Parameters<typeof getPoiText.run>[0])).rejects.toMatchObject({
+      code: 'unauthenticated',
+    });
+    const { poiTextDeps } = await import('./config');
+    expect(Object.keys(poiTextDeps()).sort()).toEqual(['db', 'now', 'sources']);
+    expect(secrets(getPoiText)).toEqual([]);
   });
 
   it('constructs teaser dependencies without configuring TTS or an audio encoder/store', async () => {

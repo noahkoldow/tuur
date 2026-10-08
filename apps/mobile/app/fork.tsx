@@ -16,7 +16,7 @@ import { ScrollScreen } from '../src/components/Screen';
 import { SpinningMark } from '../src/components/SpinningMark';
 import { Text } from '../src/components/Text';
 import { ForkController, type ForkChoice } from '../src/guide/modes';
-import { startForkSession } from '../src/guide/session';
+import { FreeTourIntroCancelled, startForkSession } from '../src/guide/session';
 import { usePoiPool } from '../src/hooks/usePoiPool';
 import { usePosition } from '../src/location/usePosition';
 import { requestBackground } from '../src/location/real';
@@ -154,8 +154,8 @@ export default function Fork() {
         ...(interests[0] ? { interest: interests[0] } : {}),
       });
       router.replace('/play');
-    } catch {
-      setStartError('failed');
+    } catch (error) {
+      if (!(error instanceof FreeTourIntroCancelled)) setStartError('failed');
     } finally {
       inFlight.current = false;
       setBusy(false);

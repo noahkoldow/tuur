@@ -31,6 +31,7 @@
     "testflight": {
       "extends": "production",
       "environment": "preview",
+      "env": { "EXPO_PUBLIC_ADMOB_TEST_ADS": "true" },
       "distribution": "store"
     }
   },

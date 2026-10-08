@@ -3,6 +3,7 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { RevenueCatEventSchema, planRevenueCatEvent, type ProductMap, type Wallet } from '@tuur/shared';
 import { z } from 'zod';
 import { BillingError } from './errors';
+import { readTourTimeTransfer } from './timeBudget';
 import { loadBillingConfig, type BillingDeps } from './entitlements';
 import {
   purchaseKey,
@@ -246,7 +247,16 @@ async function processTransfer(deps: BillingDeps, raw: unknown): Promise<Result>
         lot: { ...lot, ownerUid: target.uid, remaining, refunded, updatedAt: now },
       });
     }
+    const writeTimeTransfer = subscriptionOwners.size
+      ? await readTourTimeTransfer(
+          tx,
+          db,
+          participants.map(({ uid }) => uid),
+          now,
+        )
+      : () => {};
     // All reads have completed. Ownership, both balances, subscriptions and idempotency commit together.
+    writeTimeTransfer();
     for (const entry of changes) tx.set(entry.ref, entry.lot);
     for (const { uid, customer } of participants) {
       tx.set(walletRef(db, uid), wallets.get(uid)!);

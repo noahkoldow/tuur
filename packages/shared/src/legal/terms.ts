@@ -1,4 +1,5 @@
 import { LEGAL_VERSION, MISSING, type LegalDocument, type OperatorInfo } from './types';
+import { CREDIT_TOUR_MINUTES, SUBSCRIPTION_TOUR_MINUTES_PER_MONTH } from '../billing/timeBudget';
 
 const v = (s: string | undefined) => (s && s.trim() ? s.trim() : MISSING);
 
@@ -11,15 +12,19 @@ export function termsDe(o: OperatorInfo): LegalDocument {
       {
         heading: '1. Geltungsbereich und Anbieter',
         paragraphs: [
-          `Diese Bedingungen gelten für die Nutzung der App tuur von ${v(o.name)}, ${v(o.address)} (Anbieter). tuur ist ein KI-gestützter Audio-Stadtguide für unterwegs: zu Fuß, mit dem Rad, im Auto oder in öffentlichen Verkehrsmitteln.`,
+          `Diese Bedingungen gelten für die Nutzung der App tuur von ${v(o.name)}, ${v(o.address)} (Anbieter). tuur ist ein KI-gestützter Stadtguide mit Texten und Audioguide für unterwegs: zu Fuß, mit dem Rad, im Auto oder in öffentlichen Verkehrsmitteln.`,
         ],
       },
       {
         heading: '2. Leistungen',
         paragraphs: [
-          'Die erste (kürzeste) Standardtour eines Ortes ist kostenlos. Weitere Standardtouren schaltest du mit einem Tour-Guthaben dauerhaft frei. Die Modi „Geplante Route“, „Weggabelung“ und „Streifzug“ gelten nach Einlösung eines Guthabens für 24 Stunden an dem jeweiligen Ort. Mit einem Abonnement sind alle Touren und Modi ohne Werbung nutzbar.',
-          'Kostenlose Nutzer können durch das Ansehen einer belohnten Anzeige (täglich begrenzt) ein Guthaben für eine Standardtour erhalten. Diese Guthaben gelten nicht für die Modi mit 24-Stunden-Freischaltung.',
-          'Gekaufte Standardtouren kannst du zweimal per Einladungslink verschenken. Geschenkte oder durch Anzeigen erworbene Touren können nicht weiterverschenkt werden. Ein Einladungslink gilt einmal und läuft nach 14 Tagen ab.',
+          'Online-Texttouren mit Infokarten und Wegführung sind kostenlos und werbefinanziert. Ohne Premium starten Touren im Textmodus; vorhandenen bezahlten Audiozugang kannst du gesondert aktivieren. Vor einer neuen kostenlosen Tour wird eine feste, als KI-generiert gekennzeichnete Stimmvorstellung abgespielt und anschließend, soweit verfügbar und nach deinen Datenschutzeinstellungen zulässig, eine Anzeige gezeigt. Weitere Anzeigen können zwischen Stationen erscheinen. Fehlt eine verfügbare oder zulässige Anzeige, bleibt die Texttour nutzbar.',
+          `Ein Tour-Guthaben enthält bis zu ${CREDIT_TOUR_MINUTES} Minuten aktive Audiotourzeit. Du löst es für den Audioguide einer Standardtour oder für die Modi „Geplante Route“, „Weggabelung“ und „Streifzug“ an einem Ort ein. Pausen, die Nutzung im Textmodus und die festen Stimmvorstellungen verbrauchen keine Audiominuten; das verbleibende Zeitguthaben verfällt nicht während einer Pause. Bereits gekaufte dauerhafte Tourfreischaltungen und ältere gekaufte 24-Stunden-Freischaltungen behalten ihre ursprünglichen Rechte.`,
+          `Monats- und Jahresabonnements (Premium) enthalten jeweils ${SUBSCRIPTION_TOUR_MINUTES_PER_MONTH} Minuten aktive Audiotourzeit pro Kalendermonat für alle Touren und Modi, ohne Werbeanzeigen. Das Monatskontingent erneuert sich am ersten Tag des Monats um 00:00 Uhr UTC, solange dein Abonnement aktiv ist. Nicht verbrauchte Abominuten werden nicht in den nächsten Monat übertragen. Das Wiederherstellen eines Kaufs füllt bereits verbrauchte Minuten nicht erneut auf.`,
+          'Der Audioguide erfordert bezahlten Audiozugang; die festen Stimmvorstellungen sind kostenlos. Das Ansehen einer Anzeige sowie frühere kostenlose oder durch Werbung erworbene Freischaltungen gewähren keinen kostenpflichtigen Audioguide und keinen Offline-Download.',
+          'Für Offline-Downloads einer festen Standardtour oder geplanten Route brauchst du ein Abonnement oder bezahlten Zugang. Bei zeitbegrenztem Zugang wird die angegebene Tourdauer bei der Vorbereitung einmalig vom verbleibenden Minutenkontingent abgezogen. Die vollständig gespeicherte Fassung kannst du auf deinem Gerät anschließend ohne weiteren Minutenverbrauch abspielen; eine neue Fassung kann erneut Minuten benötigen.',
+          'Bei einer Live-Gruppentour hören Gäste die Erzählungen aus dem bezahlten Audiozugang des Gastgebers. Nur die aktive Audiotourzeit des Gastgebers wird angerechnet. Die Teilnahme funktioniert online und endet mit der Gruppe; sie vermittelt keinen eigenen dauerhaften Zugang und keinen Offline-Download. Die verfügbare Teilnehmerzahl und gegebenenfalls kostenpflichtige Zusatzplätze werden in der App angezeigt.',
+          'Ältere, dauerhaft mit einem bezahlten Guthaben freigeschaltete Standardtouren kannst du weiterhin bis zu zweimal per Geschenklink weitergeben. Daraus entstandene Audiofreischaltungen bleiben erhalten; sie umfassen keinen Offline-Download und können nicht weiter verschenkt werden. Neue Freischaltungen mit Minutenkontingent sowie kostenlose und durch Anzeigen erworbene Touren sind nicht verschenkbar. Ein Geschenklink gilt einmal und läuft nach 30 Tagen ab. Die Teilnahme an einer vom Gastgeber finanzierten Live-Gruppentour ist davon unabhängig.',
           'Wir stellen Inhalte für viele Orte automatisch zusammen. Es besteht kein Anspruch auf Verfügbarkeit für einen bestimmten Ort oder eine bestimmte Sprache.',
         ],
       },
@@ -83,15 +88,19 @@ export function termsEn(o: OperatorInfo): LegalDocument {
       {
         heading: '1. Scope and provider',
         paragraphs: [
-          `These terms apply to the use of the tuur app provided by ${v(o.name)}, ${v(o.address)} (provider). tuur is an AI-assisted audio city guide for exploring on foot, by bike, in a car or on public transport.`,
+          `These terms apply to the use of the tuur app provided by ${v(o.name)}, ${v(o.address)} (provider). tuur is an AI-assisted city guide with text and audio for exploring on foot, by bike, in a car or on public transport.`,
         ],
       },
       {
         heading: '2. Services',
         paragraphs: [
-          'The first (shortest) standard tour of a place is free. You unlock further standard tours permanently with a tour credit. The modes "planned route", "crossroads" and "roam" work for 24 hours at the respective place after a credit is redeemed. A subscription unlocks all tours and modes without ads.',
-          'Free users can earn a credit for one standard tour by watching a rewarded ad (limited per day). These credits do not apply to the modes with 24-hour unlock.',
-          'You can gift a purchased standard tour twice with an invite link. Tours received as a gift or earned through ads cannot be gifted again. An invite link works once and expires after 14 days.',
+          'Online text tours with info cards and navigation are free and supported by ads. Without Premium, tours start in text mode; you can separately enable any paid audio access you hold. Before a new free tour, a fixed voice introduction labeled as AI-generated plays, followed by an ad when available and permitted by your privacy choices. Further ads may appear between stops. The text tour remains available if an ad is unavailable or not permitted.',
+          `One tour credit includes up to ${CREDIT_TOUR_MINUTES} minutes of active audio tour time. You redeem it for the audio guide of one standard tour or for the modes "planned route", "crossroads" and "roam" at one place. Pauses, text mode and the fixed voice introductions use no audio minutes, and remaining credit minutes do not expire while paused. Existing purchased permanent tour unlocks and older purchased 24-hour unlocks retain their original rights.`,
+          `Both monthly and yearly subscriptions (Premium) include ${SUBSCRIPTION_TOUR_MINUTES_PER_MONTH} minutes of active audio tour time per calendar month for all tours and modes, without ads. The monthly allowance renews on the first day of each month at 00:00 UTC while your subscription is active. Unused subscription minutes do not roll over to the next month. Restoring a purchase does not refill minutes already used.`,
+          'The audio guide requires paid audio access; the fixed voice introductions are free. Watching an ad or holding an earlier free or ad-earned unlock does not grant the paid audio guide or an offline download.',
+          'Offline downloads of a fixed standard tour or planned route require a subscription or paid access. For access with a time allowance, the stated tour duration is deducted once from your remaining minutes when the download is prepared. You can then replay the fully saved version on your device without using more minutes; preparing a new version may use minutes again.',
+          'On a live group tour, guests hear narrations funded by the host’s paid audio access. Only the host’s active audio tour time is counted. Participation works online and ends with the group; it does not grant separate permanent access or an offline download. The available group capacity and any paid extra places are shown in the app.',
+          'Older standard tours permanently unlocked with a paid credit can still be gifted up to twice using a gift link. Audio unlocks originating from these purchases are preserved; they do not include an offline download and cannot be gifted again. New unlocks with a time allowance, free tours and tours earned through ads cannot be gifted. A gift link works once and expires after 30 days. Participation in a live group tour funded by its host is separate.',
           'We compile content for many places automatically. There is no entitlement to availability for a particular place or language.',
         ],
       },

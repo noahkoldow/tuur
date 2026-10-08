@@ -1,19 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { collection, limit, orderBy, query, where } from 'firebase/firestore';
 import { callFn, fb } from '@/lib/firebase';
 import { useLive } from '@/lib/adminData';
 import { useT } from '@/lib/i18n';
+import { parseFeedback, feedbackNarrationKeys, type Feedback } from '@/lib/feedback';
 import { Badge, Button, Card, Loading, Notice } from '@/components/ui';
 
-interface Feedback {
-  id: string;
-  narrationKey: string;
-  reason: 'wrong_fact' | 'offensive' | 'audio_issue' | 'other';
-  text?: string;
-  createdAt: number;
-}
 interface Narr {
   key: string;
   title: string;
@@ -40,13 +35,7 @@ export default function QualityPage() {
             limit(100),
           )
         : null,
-    (id, d) => ({
-      id,
-      narrationKey: String(d['narrationKey']),
-      reason: d['reason'] as Feedback['reason'],
-      ...(d['text'] ? { text: String(d['text']) } : {}),
-      createdAt: Number(d['createdAt']),
-    }),
+    parseFeedback,
     [tab],
   );
   const narrations = useLive<Narr>(
@@ -66,17 +55,11 @@ export default function QualityPage() {
     [tab],
   );
   // narration text for the feedback entries that are open
+  const narrationKeys = feedbackNarrationKeys(feedback);
   const forFeedback = useLive<Narr>(
     () =>
-      tab === 'feedback' && feedback?.length
-        ? query(
-            collection(fb().db, 'narrations'),
-            where(
-              'key',
-              'in',
-              feedback.slice(0, 30).map((f) => f.narrationKey),
-            ),
-          )
+      tab === 'feedback' && narrationKeys.length
+        ? query(collection(fb().db, 'narrations'), where('key', 'in', narrationKeys))
         : null,
     (_id, d) => ({
       key: String(d['key']),
@@ -86,7 +69,7 @@ export default function QualityPage() {
       status: (d['status'] as Narr['status'] | undefined) ?? 'ok',
       sponsored: d['sponsored'] === true,
     }),
-    [tab, feedback?.map((f) => f.narrationKey).join('|')],
+    [tab, narrationKeys.join('|')],
   );
 
   const run = async (name: string, data: object) => {
@@ -118,16 +101,33 @@ export default function QualityPage() {
           <p className="muted">{t('admin.quality.none')}</p>
         ) : (
           feedback.map((f) => {
-            const n = forFeedback?.find((x) => x.key === f.narrationKey);
+            const n = f.kind === 'narration' ? forFeedback?.find((x) => x.key === f.narrationKey) : undefined;
             return (
               <Card key={f.id}>
                 <div className="row between">
-                  <h3>{n?.title ?? f.narrationKey}</h3>
+                  <h3>{n?.title ?? f.narrationKey ?? t(`admin.quality.kind.${f.kind}`)}</h3>
                   <Badge tone={f.reason === 'offensive' || f.reason === 'wrong_fact' ? 'bad' : 'wait'}>
                     {t(`admin.quality.reason.${f.reason}`)}
                   </Badge>
                 </div>
                 {f.text ? <p>“{f.text}”</p> : null}
+                {f.offerId ? (
+                  <p>
+                    {t('admin.quality.offerId')}: {f.offerId}
+                  </p>
+                ) : null}
+                {f.partnerId ? (
+                  <p>
+                    {t('admin.quality.partnerId')}: {f.partnerId}
+                  </p>
+                ) : null}
+                {f.kind === 'offer' || f.partnerId ? (
+                  <p>
+                    <Link href="/admin/partners#offers">{t('admin.quality.reviewOffer')}</Link>
+                  </p>
+                ) : f.kind === 'ad' ? (
+                  <p className="muted">{t('admin.quality.adAction')}</p>
+                ) : null}
                 <p className="muted">{new Date(f.createdAt).toLocaleString()}</p>
                 {n ? (
                   <>

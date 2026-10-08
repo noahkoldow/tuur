@@ -2,7 +2,13 @@ import type { Firestore } from 'firebase-admin/firestore';
 
 type Data = Record<string, unknown>;
 type Ref = { path: string; id: string };
-type Query = { path: string; filters: [string, string, unknown][]; group?: string; count?: number };
+type Query = {
+  path: string;
+  filters: [string, string, unknown][];
+  group?: string;
+  count?: number;
+  fields?: string[];
+};
 
 /** Transactional in-memory test double. Transactions commit atomically and enforce reads before writes. */
 export function memoryFirestore() {
@@ -61,23 +67,61 @@ export function memoryFirestore() {
         );
       })
       .slice(0, q.count ?? Infinity)
-      .map(([path]) => snapshot({ path, id: path.split('/').at(-1)! }));
+      .map(([path]) => {
+        const snap = snapshot({ path, id: path.split('/').at(-1)! });
+        if (q.fields === undefined) return snap;
+        const data = snap.data() ?? {};
+        const projected = Object.fromEntries(
+          q.fields.filter((field) => field in data).map((field) => [field, data[field]]),
+        );
+        return { ...snap, data: () => projected, get: (key: string) => projected[key] };
+      });
     return { docs: rows, empty: rows.length === 0, size: rows.length };
   };
   const query = (q: Query): unknown => ({
     ...q,
     doc: (id = `auto-${++nextId}`) => doc(`${q.path}/${id}`),
+    add: async (data: Data) => {
+      const id = `auto-${++nextId}`;
+      const ref = { path: `${q.path}/${id}`, id };
+      write(ref, data);
+      return doc(ref.path);
+    },
     where: (key: string, op: string, value: unknown) => {
       if (op !== '==' && op !== '>' && op !== 'in') throw new Error(`Unsupported memory query: ${op}`);
       return query({ ...q, filters: [...q.filters, [key, op, value]] });
     },
     limit: (count: number) => query({ ...q, count }),
+    select: (...fields: string[]) => query({ ...q, fields }),
     get: async () => querySnapshot(q),
   });
   const collection = (path: string) => query({ path, filters: [] });
   const db = {
     collection,
     collectionGroup: (group: string) => query({ path: '', group, filters: [] }),
+    batch: () => {
+      const pending: (() => void)[] = [];
+      const batch = {
+        set: (ref: Ref, data: Data, options?: { merge: boolean }) => {
+          pending.push(() => {
+            write(ref, data, options?.merge);
+          });
+          return batch;
+        },
+        delete: (ref: Ref) => {
+          pending.push(() => {
+            docs.delete(ref.path);
+          });
+          return batch;
+        },
+        commit: async () => {
+          pending.forEach((apply) => apply());
+          pending.length = 0;
+          return [];
+        },
+      };
+      return batch;
+    },
     async runTransaction<T>(run: (tx: unknown) => Promise<T>): Promise<T> {
       let release!: () => void;
       const before = queue;

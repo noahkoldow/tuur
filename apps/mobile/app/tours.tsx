@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { View } from 'react-native';
 import { tilesAround, type ExploredSpot } from '@tuur/shared';
 import { useBackend } from '../src/backend';
-import { canStartTour, useEntitlementStore } from '../src/billing/entitlements';
 import { Banner } from '../src/components/Banner';
 import { Button } from '../src/components/Button';
 import { CurationProgress } from '../src/components/curation-progress';
@@ -13,6 +12,7 @@ import { ScrollScreen } from '../src/components/Screen';
 import { Text } from '../src/components/Text';
 import { TourCard } from '../src/components/TourCard';
 import { useArea } from '../src/location/useArea';
+import { areaErrorKeys } from '../src/location/areaErrors';
 import { usePosition } from '../src/location/usePosition';
 import { useSettings } from '../src/state/settings';
 
@@ -22,7 +22,6 @@ export default function Tours() {
   const router = useRouter();
   const backend = useBackend();
   const lang = useSettings((s) => s.language);
-  const entitlements = useEntitlementStore();
   const { position, request } = usePosition();
   const area = useArea(position);
   const availableTours = area.tours;
@@ -85,10 +84,7 @@ export default function Tours() {
         ) : null}
         {area.phase === 'failed' ? (
           <View style={{ gap: 12 }}>
-            <Banner
-              tone="error"
-              text={t(area.errorCode === 'network' ? 'errors.network' : 'errors.generic')}
-            />
+            <Banner tone="error" text={t(areaErrorKeys[area.errorCode ?? 'generic'])} />
             <Button variant="tinted" label={t('common.retry')} onPress={area.reload} />
           </View>
         ) : null}
@@ -103,7 +99,6 @@ export default function Tours() {
             key={tour.id}
             tour={tour}
             lang={lang}
-            locked={!canStartTour(entitlements, tour.id, Boolean(tour.free))}
             onPress={() => router.push({ pathname: '/tour/[id]', params: { id: tour.id } })}
           />
         ))}

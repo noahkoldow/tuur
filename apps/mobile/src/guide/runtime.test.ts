@@ -10,6 +10,7 @@ import {
 } from '@tuur/shared';
 import { SimulatedAudioEngine } from '../audio/simulatedEngine';
 import { createDemoBackend } from '../backend/demoBackend';
+import { BackendError } from '../backend/types';
 import { SimulatedLocationSource } from '../location/simulated';
 import { FakeClock } from '../testing/fakeClock';
 import { GuideRuntime } from './runtime';
@@ -232,6 +233,35 @@ describe('continuing a planned tour in Explore', () => {
     await runtime.dispose();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['ai_consent_updated', 'ai_consent_pause_failed'] as const)(
+    'keeps the unheard stop pending after %s and retries only when the listener resumes',
+    async (reason) => {
+      const { runtime, clock, audio, narration } = await setup();
+      narration.mockImplementationOnce(async () => {
+        runtime.pause();
+        throw new BackendError('unavailable', 'Privacy choice needs attention', undefined, reason);
+      });
+      runtime.onFix({ ...first.location, ts: clock.now(), accuracy: 5, speed: 0 });
+      await clock.flush();
+      expect(runtime.getState().paused).toBe(true);
+      expect(runtime.getState().narrated).not.toContain(first.id);
+      expect(runtime.getSnapshot().notice).toBe(reason);
+      expect(audio.isPlaying()).toBe(false);
+      const requestsWhilePaused = narration.mock.calls.length;
+      await clock.advance(60_000);
+      expect(narration).toHaveBeenCalledTimes(requestsWhilePaused);
+      expect(runtime.getState().narrated).not.toContain(first.id);
+
+      runtime.resume();
+      await clock.flush();
+      await clock.advance(1_000);
+      expect(narration.mock.calls.length).toBeGreaterThan(requestsWhilePaused);
+      expect(audio.isPlaying()).toBe(true);
+      expect(runtime.getSnapshot().narration?.title).toBe(first.id);
+      await runtime.dispose();
+    },
+  );
 
   it('drops queued stories and handovers for removed stops without losing the visited stop', async () => {
     const { runtime, clock, audio, play, transition } = await setup();

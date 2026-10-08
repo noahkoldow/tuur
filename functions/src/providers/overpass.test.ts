@@ -205,14 +205,14 @@ describe('global Overpass request guard', () => {
     expect(docs.get(quotaPath)?.count).toBe(2);
   });
 
-  it('stops at50 attempts perUTCday and resumes after midnight', async () => {
+  it('stops at the daily attempt limit per UTC day and resumes after midnight', async () => {
     const { db, docs } = memoryFirestore();
     for (let i = 0; i < OVERPASS_DAILY_LIMIT; i++)
       await (await reserveOverpassRequest(db, now, () => now)).release();
     await expect(reserveOverpassRequest(db, now, () => now)).rejects.toMatchObject({
       retryAfterMs: 43_200_000,
     });
-    expect(docs.get(quotaPath)?.count).toBe(50);
+    expect(docs.get(quotaPath)?.count).toBe(OVERPASS_DAILY_LIMIT);
     const tomorrow = now + 43_200_000;
     await expect(reserveOverpassRequest(db, tomorrow, () => tomorrow)).resolves.toBeDefined();
     expect(docs.get(quotaPath)?.count).toBe(1);

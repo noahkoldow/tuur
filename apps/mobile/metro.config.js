@@ -2,6 +2,24 @@ const fs = require('fs');
 const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
+// Windows can label pnpm hard-linked files as symlinks in Dirent even though
+// lstat identifies them correctly. Expo's cold crawler trusts Dirent, attempts
+// readlink, and then drops these regular files. Confirm only reported links;
+// real package junctions retain their symlink identity.
+if (process.platform === 'win32') {
+  const isSymbolicLink = fs.Dirent.prototype.isSymbolicLink;
+  fs.Dirent.prototype.isSymbolicLink = function () {
+    if (!isSymbolicLink.call(this)) return false;
+    const parent = this.parentPath ?? this.path;
+    if (typeof parent !== 'string') return true;
+    try {
+      return fs.lstatSync(path.join(parent, this.name.toString())).isSymbolicLink();
+    } catch {
+      return true;
+    }
+  };
+}
+
 // Expo detects pnpm/Turborepo monorepos automatically; assets live outside the app dir.
 const config = getDefaultConfig(__dirname);
 config.watchFolders = [...(config.watchFolders ?? []), path.resolve(__dirname, '../../assets')];

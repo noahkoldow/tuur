@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REGION_FIXTURES, SESSION_DURATION_MS, encodeGeohash, type Tour } from '@tuur/shared';
+import {
+  REGION_FIXTURES,
+  SESSION_DURATION_MS,
+  createTourScript,
+  encodeGeohash,
+  type Tour,
+} from '@tuur/shared';
 import { createDemoBackend } from './demoBackend';
 import type { Backend, EntitlementState } from './types';
 
@@ -15,7 +21,7 @@ async function setup() {
   await backend.ensureArea(tile);
   const generated = await backend.getAutoTours(tile, 'de');
   const tours = (await Promise.all(generated.tours.map((t) => backend.getTour(t.id)))) as Tour[];
-  const paid = tours.find((t) => !t.free)!;
+  const paid = tours.find((t) => !t.free && t.durationMinutes <= 90)!;
   const free = tours.find((t) => t.free)!;
   expect(paid).toBeDefined();
   expect(free).toBeDefined();
@@ -30,7 +36,12 @@ const narration = (backend: Backend, tour: Tour, download = true) =>
     lang: 'de',
     lengthTier: 'short',
     download,
-    access: { tourId: tour.id, mode: tour.source === 'planned' ? 'planned' : 'tour' },
+    context: { script: createTourScript({ tour, lang: 'de', instanceId: 'test-download' }) },
+    access: {
+      tourId: tour.id,
+      mode: tour.source === 'planned' ? 'planned' : 'tour',
+      downloadId: 'test-download',
+    },
   });
 const transition = (backend: Backend, tour: Tour) =>
   backend.getTransition({
@@ -39,12 +50,17 @@ const transition = (backend: Backend, tour: Tour) =>
     lang: 'de',
     walkMinutes: 2,
     download: true,
-    access: { tourId: tour.id, mode: tour.source === 'planned' ? 'planned' : 'tour' },
+    scriptInstanceId: 'test-download',
+    access: {
+      tourId: tour.id,
+      mode: tour.source === 'planned' ? 'planned' : 'tour',
+      downloadId: 'test-download',
+    },
   });
 async function expectDownloadLocked(backend: Backend, tour: Tour) {
   const mode = tour.source === 'planned' ? 'planned' : 'tour';
   for (const call of [
-    () => backend.prepareTourDownload(tour.id, mode),
+    () => backend.prepareTourDownload(tour.id, mode, 'test-download'),
     () => narration(backend, tour),
     () => transition(backend, tour),
   ])
@@ -52,6 +68,26 @@ async function expectDownloadLocked(backend: Backend, tour: Tour) {
 }
 
 describe('demo download billing parity', () => {
+  it('does not spend again for a purchased legacy gift unless a download upgrade is explicit', async () => {
+    const { backend, paid, state } = await setup();
+    backend.demo!.grantCredits(2);
+    await backend.spendCredit({ kind: 'tour', tourId: paid.id });
+    const legacy = state().entitlements.find((grant) => grant.type === 'tour')!;
+    // Model an older server-written purchase from before minute budgets.
+    if (legacy.type !== 'tour') throw new Error('Missing tour grant');
+    delete legacy.timeAllowanceSeconds;
+    delete legacy.timeRemainingSeconds;
+    const invitation = await backend.createInvite(paid.id);
+    legacy.tourId = 'other-legacy-tour';
+    await backend.redeemInvite(invitation.token);
+    await expect(backend.spendCredit({ kind: 'tour', tourId: paid.id })).rejects.toMatchObject({
+      reason: 'already_unlocked',
+    });
+    expect(state().wallet.balance).toBe(1);
+    await expect(
+      backend.spendCredit({ kind: 'tour', tourId: paid.id, paidOnly: true }),
+    ).resolves.toMatchObject({ used: 'paid' });
+  });
   it('checks preparation and direct audio downloads even with preview gates off and unused paid credits', async () => {
     const { backend, paid } = await setup();
     backend.demo!.grantCredits(1);
@@ -59,21 +95,21 @@ describe('demo download billing parity', () => {
     await expectDownloadLocked(backend, paid);
   });
 
-  it('upgrades a reward-unlocked tour using only purchased credits and never charges twice', async () => {
+  it('requires purchased credits despite a reward balance and never charges a paid unlock twice', async () => {
     const { backend, paid, state } = await setup();
     backend.demo!.grantRewardCredit();
-    expect((await backend.spendCredit({ kind: 'tour', tourId: paid.id })).used).toBe('reward');
+    await expect(backend.spendCredit({ kind: 'tour', tourId: paid.id })).rejects.toMatchObject({
+      code: 'insufficient_credit',
+    });
     await expectDownloadLocked(backend, paid);
     backend.demo!.grantCredits(2);
-    backend.demo!.grantRewardCredit();
-    await expect(backend.spendCredit({ kind: 'tour', tourId: paid.id })).rejects.toMatchObject({
-      reason: 'already_unlocked',
-    });
-    expect(await backend.spendCredit({ kind: 'tour', tourId: paid.id, paidOnly: true })).toMatchObject({
+    expect(await backend.spendCredit({ kind: 'tour', tourId: paid.id })).toMatchObject({
       used: 'paid',
       wallet: { balance: 1, rewardBalance: 1 },
     });
-    await expect(backend.prepareTourDownload(paid.id, 'tour')).resolves.toMatchObject({ expiresAt: null });
+    await expect(backend.prepareTourDownload(paid.id, 'tour', 'test-download')).resolves.toMatchObject({
+      expiresAt: null,
+    });
     await expect(narration(backend, paid)).resolves.toBeTruthy();
     await expect(transition(backend, paid)).resolves.toBeTruthy();
     await expect(
@@ -106,7 +142,9 @@ describe('demo download billing parity', () => {
     await expectDownloadLocked(backend, free);
     backend.demo!.grantCredits(1);
     await backend.spendCredit({ kind: 'tour', tourId: free.id, paidOnly: true });
-    await expect(backend.prepareTourDownload(free.id, 'tour')).resolves.toMatchObject({ expiresAt: null });
+    await expect(backend.prepareTourDownload(free.id, 'tour', 'test-download')).resolves.toMatchObject({
+      expiresAt: null,
+    });
     await expectDownloadLocked(backend, paid);
     await expect(backend.createRewardNonce({ tourId: free.id })).rejects.toMatchObject({ code: 'locked' });
   });
@@ -114,7 +152,7 @@ describe('demo download billing parity', () => {
   it('requires active Premium for new downloads while retaining the permanent receipt already issued', async () => {
     const { backend, paid } = await setup();
     backend.demo!.grantSubscription();
-    const receipt = await backend.prepareTourDownload(paid.id, 'tour');
+    const receipt = await backend.prepareTourDownload(paid.id, 'tour', 'test-download');
     await expect(narration(backend, paid)).resolves.toBeTruthy();
     await expect(transition(backend, paid)).resolves.toBeTruthy();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31 * 86400_000);
@@ -136,7 +174,9 @@ describe('demo download billing parity', () => {
     await backend.spendCredit({ kind: 'session', placeId: 'another-city' });
     await expectDownloadLocked(backend, tour);
     await backend.spendCredit({ kind: 'session', placeId: tour.placeId });
-    await expect(backend.prepareTourDownload(tour.id, 'planned')).resolves.toMatchObject({ expiresAt: null });
+    await expect(backend.prepareTourDownload(tour.id, 'planned', 'test-download')).resolves.toMatchObject({
+      expiresAt: null,
+    });
     await expect(narration(backend, tour)).resolves.toBeTruthy();
     await expect(transition(backend, tour)).resolves.toBeTruthy();
     await expect(backend.prepareTourDownload('planned_unknown', 'planned')).rejects.toMatchObject({
@@ -145,7 +185,7 @@ describe('demo download billing parity', () => {
     await expect(backend.prepareTourDownload(tour.id, 'tour')).rejects.toMatchObject({ code: 'not_found' });
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + SESSION_DURATION_MS + 1);
     for (const call of [
-      () => backend.prepareTourDownload(tour.id, 'planned'),
+      () => backend.prepareTourDownload(tour.id, 'planned', 'test-download'),
       () => narration(backend, tour),
       () => transition(backend, tour),
     ])

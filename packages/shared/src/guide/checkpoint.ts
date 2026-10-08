@@ -11,10 +11,13 @@ export const SessionCheckpointSchema = z
     version: z.literal(1),
     ownerUid: z.string().min(1).max(200),
     mode: z.enum(['tour', 'planned', 'fork', 'roam']),
+    // Checkpoints written before text tours retain their audio behavior.
+    contentMode: z.enum(['text', 'audio']).optional(),
     recordId: z.string().min(1).max(200),
     startedAt: z.number().nonnegative(),
     savedAt: z.number().nonnegative(),
     lang: z.string().min(2).max(20),
+    voice: z.string().max(40).optional(),
     interests: z.array(z.enum(INTERESTS)).max(8),
     frequency: z.enum(['low', 'normal', 'high']),
     profile: z.enum(ROUTING_PROFILES),
@@ -24,6 +27,14 @@ export const SessionCheckpointSchema = z
     tour: TourSchema.optional(),
     script: TourScriptSchema.optional(),
     claimId: z.string().max(200).optional(),
+    billingContext: z
+      .object({
+        mode: z.enum(['tour', 'planned', 'fork', 'roam']),
+        tourId: z.string().max(200).optional(),
+        placeId: z.string().max(200).optional(),
+        tile: z.string().max(30).optional(),
+      })
+      .optional(),
     groupId: z.string().max(200).optional(),
     guest: z.boolean().optional(),
     position: LatLngSchema.optional(),

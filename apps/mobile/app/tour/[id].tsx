@@ -4,12 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
 import { BackendError, useBackend } from '../../src/backend';
-import {
-  canDownloadTour,
-  canStartTour,
-  canUseSession,
-  useEntitlementStore,
-} from '../../src/billing/entitlements';
+import { canDownloadTour, subscribed, useEntitlementStore } from '../../src/billing/entitlements';
 import { formatKm } from '../../src/format';
 import { config } from '../../src/config';
 import { PlacePhoto } from '../../src/components/PlacePhoto';
@@ -25,7 +20,7 @@ import { Screen } from '../../src/components/Screen';
 import { Text } from '../../src/components/Text';
 import { TuuSays } from '../../src/components/TuuSays';
 import { TuurMap } from '../../src/components/TuurMap';
-import { startTourSession, tourPath } from '../../src/guide/session';
+import { FreeTourIntroCancelled, startTourSession, tourPath } from '../../src/guide/session';
 import { requestBackground } from '../../src/location/real';
 import { useTourDownload } from '../../src/offline/useDownload';
 import { getFileStore, getOfflineLibrary } from '../../src/offline';
@@ -115,9 +110,7 @@ export default function TourDetail() {
   const text = tour.texts[language] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
 
   const planned = tour.source === 'planned';
-  const unlocked =
-    dl.complete ||
-    (planned ? canUseSession(ent, 'planned', tour.placeId) : canStartTour(ent, tour.id, tour.free));
+  const premium = subscribed(ent);
   const bought = ent.entitlements.some(
     (e) => e.type === 'tour' && e.tourId === tour.id && e.source === 'credit',
   );
@@ -158,7 +151,6 @@ export default function TourDetail() {
   const start = async () => {
     if (startInFlight.current || dl.phase === 'running') return;
     if (download === '1' && !dl.complete) return;
-    if (!unlocked) return openPaywall();
     startInFlight.current = true;
     setStarting(true);
     setStartError(false);
@@ -180,8 +172,8 @@ export default function TourDetail() {
         ...(foregroundOnly ? { foregroundOnly } : {}),
       });
       router.replace('/play');
-    } catch {
-      setStartError('failed');
+    } catch (error) {
+      if (!(error instanceof FreeTourIntroCancelled)) setStartError('failed');
     } finally {
       startInFlight.current = false;
       setStarting(false);
@@ -400,8 +392,8 @@ export default function TourDetail() {
             />
           ) : null}
           <Button
-            label={unlocked ? t('tour.start') : t('paywall.title')}
-            icon={unlocked ? 'play' : 'lock'}
+            label={premium ? t('tour.start') : t('tour.startText')}
+            icon={premium ? 'play' : 'map'}
             loading={starting}
             disabled={dl.phase === 'running' || (download === '1' && !dl.complete)}
             style={{ flex: 1 }}

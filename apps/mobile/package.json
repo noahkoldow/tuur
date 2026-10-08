@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "web": "EXPO_PUBLIC_BACKEND=demo EXPO_PUBLIC_PAYWALL=off expo start --web",
+    "web": "EXPO_PUBLIC_BACKEND=demo EXPO_PUBLIC_PAYWALL=on expo start --web",
     "go": "node ../../scripts/start-expo-go.mjs"
   },
   "dependencies": {

@@ -42,6 +42,10 @@ import { budgetedLlm } from '../providers/budgeted';
 import { MAX_TTS_TEXT_CHARS } from '../providers/limits';
 import { loadPartner } from '../partners/service';
 import { personalAudioPrefix, personalNarrationScope } from './personalScope';
+import { bindDownloadRecording } from '../billing/timeBudget';
+import { authorizedGroup } from '../groups/service';
+import { GroupAudioPendingError, recordingFromResponse, sharedGroupRecording } from '../groups/recordings';
+import { consentBoundLlm, requireAiConsent } from '../privacy/aiConsent';
 
 export interface ObjectStore {
   put(path: string, data: Buffer, mimeType: string): Promise<void>;
@@ -78,12 +82,16 @@ export interface NarrationDeps {
           tourId?: string | undefined;
           mode?: 'tour' | 'planned' | 'fork' | 'roam' | undefined;
           groupId?: string | undefined;
+          sessionId?: string | undefined;
+          downloadId?: string | undefined;
         }
       | undefined,
     opts?: { download?: boolean },
   ) => Promise<void>;
   /** Overrides config loading in tests. */
   config?: () => Promise<AiConfig>;
+  /** Request-scoped provider boundary; rechecked before every external AI request. */
+  beforeAiRequest?: () => Promise<void>;
 }
 
 export class NarrationError extends Error {
@@ -102,14 +110,38 @@ export class NarrationError extends Error {
   }
 }
 
+/** A paused host is a waiting state for guests, while ended membership is a permanent denial. */
+export async function groupForAudio(
+  deps: Pick<NarrationDeps, 'db' | 'now'>,
+  uid: string,
+  groupId: string,
+  poiIds: string[],
+  download = false,
+) {
+  try {
+    return await authorizedGroup(deps, uid, groupId, { poiIds, download, waitForHost: true });
+  } catch (error) {
+    if (error instanceof GroupAudioPendingError)
+      throw new NarrationError(error.code, error.message, error.details);
+    throw error;
+  }
+}
+
 /** Partner content that may be spoken for a POI (only while the partner is live), plus its revision for the cache key. */
 interface PartnerContext {
   rev: number;
   facts: string[];
 }
 
-async function partnerContext(db: Firestore, poi: Poi, now: number): Promise<PartnerContext | undefined> {
+async function partnerContext(
+  db: Firestore,
+  poi: Poi,
+  now: number,
+  uid: string,
+): Promise<PartnerContext | undefined> {
   if (!poi.partnerId) return undefined;
+  if ((await db.collection('users').doc(uid).collection('blockedPartners').doc(poi.partnerId).get()).exists)
+    return undefined;
   const p = await loadPartner(db, poi.partnerId);
   if (!p || !isPartnerLive(p, now)) return undefined;
   return {
@@ -123,7 +155,7 @@ async function partnerContext(db: Firestore, poi: Poi, now: number): Promise<Par
 
 export const REPORTS_TO_BLOCK = 3;
 
-const LOCK_TTL_MS = 3 * 60_000;
+const LOCK_TTL_MS = 6 * 60_000;
 const MAX_FAILURES_PER_DAY = 3;
 
 function toResponse(
@@ -151,7 +183,7 @@ function toResponse(
     })),
     cached,
     aiGenerated: true,
-    ...(grounding ? { grounding } : {}),
+    ...((grounding ?? doc.grounding) ? { grounding: grounding ?? doc.grounding } : {}),
   };
 }
 
@@ -168,6 +200,48 @@ async function loadPoi(db: Firestore, poiId: string): Promise<Poi> {
  * Cache hits are free and never rate limited; only generation is gated by rate limits and budgets.
  */
 export async function getNarration(deps: NarrationDeps, uid: string, rawReq: unknown) {
+  const parsed = GetNarrationRequestSchema.safeParse(rawReq);
+  if (!parsed.success) throw new NarrationError('invalid-argument', 'Invalid request');
+  const req = parsed.data;
+  if (req.access?.downloadId && req.access.downloadId !== req.context?.script?.instanceId)
+    throw new NarrationError('permission-denied', 'Download recording identity does not match');
+  if (req.access?.groupId) {
+    const group = await groupForAudio(deps, uid, req.access.groupId, [req.poiId], Boolean(req.download));
+    if (!group)
+      throw new NarrationError('permission-denied', 'Group access has ended', { reason: 'group_ended' });
+    if (!group.audio)
+      throw new NarrationError('failed-precondition', 'The host must create a new group', {
+        reason: 'group_audio_unavailable',
+      });
+    const poi = await loadPoi(deps.db, req.poiId);
+    if (
+      poi.partnerId &&
+      (await deps.db.collection('users').doc(uid).collection('blockedPartners').doc(poi.partnerId).get())
+        .exists
+    )
+      throw new NarrationError('permission-denied', 'This partner is hidden', { reason: 'partner_blocked' });
+    try {
+      const recording = await sharedGroupRecording(deps, group, uid, { poiId: req.poiId }, async () => {
+        const result = await getNarrationChecked(deps, uid, {
+          ...req,
+          lang: group.audio!.lang,
+          voice: group.audio!.voice,
+          primaryInterest: group.audio!.primaryInterest ?? req.primaryInterest,
+          context: { ...req.context, script: group.audio!.script },
+          access: { ...req.access, tourId: group.tour.id, mode: group.mode, sessionId: group.sessionId },
+        });
+        return recordingFromResponse(deps, group, result);
+      });
+      // Do not issue a fresh signed URL after the host ends or pauses the walk during generation.
+      if (!(await groupForAudio(deps, uid, group.id, [poi.id])))
+        throw new NarrationError('permission-denied', 'Group access has ended', { reason: 'group_ended' });
+      return withAudioUrl(deps.store, toResponse(recording.doc, poi, true, recording.grounding));
+    } catch (error) {
+      if (error instanceof GroupAudioPendingError)
+        throw new NarrationError(error.code, error.message, error.details);
+      throw error;
+    }
+  }
   return withAudioUrl(deps.store, await getNarrationChecked(deps, uid, rawReq));
 }
 
@@ -182,11 +256,24 @@ async function getNarrationChecked(deps: NarrationDeps, uid: string, rawReq: unk
     throw new NarrationError('permission-denied', 'Only fixed itineraries can be downloaded', {
       reason: 'download_not_supported',
     });
+  const beforeAiRequest = () => requireAiConsent(deps.db, uid);
+  deps = { ...deps, beforeAiRequest, llm: consentBoundLlm(deps.llm, beforeAiRequest) };
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   const poi = await loadPoi(deps.db, req.poiId);
   await deps.authorize?.(uid, poi, req.access, { download: Boolean(req.download) });
+  if (req.download && req.access?.downloadId)
+    await bindDownloadRecording(deps, uid, {
+      downloadId: req.access.downloadId,
+      slot: { poiId: req.poiId, lengthTier: req.lengthTier },
+      identity: JSON.stringify({
+        lang: req.lang,
+        voice: req.voice,
+        primaryInterest: req.primaryInterest,
+        context: req.context,
+      }),
+    });
 
-  const partner = await partnerContext(deps.db, poi, deps.now());
+  const partner = await partnerContext(deps.db, poi, deps.now(), uid);
   const scope = personalNarrationScope(uid, req.context?.script?.instanceId);
   const key = scope.key(
     narrationKey(
@@ -440,6 +527,7 @@ async function generate(
       ? layout[layout.length - 1]!.startMs + layout[layout.length - 1]!.durationMs
       : 0,
     grounded,
+    ...(grounding ? { grounding } : {}),
     ...(grounded ? { groundedExpiresAt: deps.now() + 30 * 24 * 3600_000 } : {}),
     status: 'ok',
     models: { text: cfg.models.narration, tts: cfg.models.tts },
@@ -463,7 +551,7 @@ const VoiceVariantSchema = z.object({
  * other voices only render audio, stored in `voices/{personaId}` under the narration (timings differ per voice).
  */
 export async function inVoice(
-  deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now'>,
+  deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now' | 'beforeAiRequest'>,
   cfg: AiConfig,
   doc: NarrationDoc,
   ref: FirebaseFirestore.DocumentReference,
@@ -507,7 +595,7 @@ export async function inVoice(
 
 /** TTS per paragraph (exact timings), joined with pauses, MP3-encoded and stored. Shared by narrations and transitions. */
 export async function renderAudio(
-  deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now'>,
+  deps: Pick<NarrationDeps, 'db' | 'tts' | 'encoder' | 'store' | 'now' | 'beforeAiRequest'>,
   cfg: AiConfig,
   paragraphs: string[],
   lang: string,
@@ -534,6 +622,7 @@ export async function renderAudio(
       { kind: 'tts', model, ...attribution },
       { ttsChars: text.length, ttsProvider: provider },
       async () => {
+        await deps.beforeAiRequest?.();
         const result = await tts.synthesize(provider, {
           text,
           lang,

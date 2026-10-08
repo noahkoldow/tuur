@@ -3,24 +3,12 @@ import { useTranslation } from 'react-i18next';
 import type { Tour } from '@tuur/shared';
 import { formatKm } from '../format';
 import { metrics, sys } from '../theme';
-import { Icon } from './Icon';
 import { PlacePhoto } from './PlacePhoto';
 import { PhotoInfo } from './photo-info';
 import { Text } from './Text';
 
-/** Card in the tour list (spec 5.1): cover, title, duration, length, themes, free / partner markers. */
-export function TourCard({
-  tour,
-  lang,
-  locked,
-  onPress,
-}: {
-  tour: Tour;
-  lang: string;
-  /** Not yet unlocked (paid tour): shows a lock so the price wall is no surprise. */
-  locked?: boolean;
-  onPress: () => void;
-}) {
+/** Card in the tour list (spec 5.1): cover, title, duration, length, themes, free text / partner markers. */
+export function TourCard({ tour, lang, onPress }: { tour: Tour; lang: string; onPress: () => void }) {
   const { t } = useTranslation();
   const text = tour.texts[lang] ?? tour.texts['en'] ?? Object.values(tour.texts)[0];
   const km = formatKm(tour.distanceMeters, lang);
@@ -66,28 +54,18 @@ export function TourCard({
                 t('common.stops', { count: tour.stops.length }),
               ].join(' · ')}
             </Text>
-            {locked && !tour.free ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Icon name="lock" size={13} color="#FFFFFF" />
-                <Text variant="caption" color="#FFFFFF">
-                  {t('paywall.locked')}
-                </Text>
-              </View>
-            ) : null}
-            {tour.free ? (
-              <View
-                style={{
-                  paddingHorizontal: 8,
-                  paddingVertical: 2,
-                  borderRadius: 8,
-                  backgroundColor: '#FFFFFF',
-                }}
-              >
-                <Text variant="caption" color="#48484A" style={{ fontWeight: '600' }}>
-                  {t('common.free')}
-                </Text>
-              </View>
-            ) : null}
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 8,
+                backgroundColor: '#FFFFFF',
+              }}
+            >
+              <Text variant="caption" color="#48484A" style={{ fontWeight: '600' }}>
+                {t('player.textMode')}
+              </Text>
+            </View>
             {tour.hasPartner ? (
               <View
                 style={{

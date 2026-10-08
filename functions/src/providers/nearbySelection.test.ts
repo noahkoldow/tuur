@@ -23,6 +23,24 @@ const input: NearbySelectionInput = {
 beforeEach(() => generateContent.mockReset());
 
 describe('Gemini nearby selection provider', () => {
+  it('drops unknown identifiers and exact positions from the actual provider payload', async () => {
+    generateContent.mockResolvedValue({
+      text: '["known-place"]',
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+    });
+    await new GeminiLlmProvider('test-key').selectNearby({
+      ...input,
+      uid: 'private-user',
+      sessionId: 'private-session',
+      candidates: [
+        { ...input.candidates[0]!, location: { lat: 52.123456, lng: 13.987654 }, ownerUid: 'private-owner' },
+      ],
+    } as unknown as NearbySelectionInput);
+    const sent = generateContent.mock.calls[0]![0].contents;
+    for (const value of ['private-user', 'private-session', 'private-owner', '52.123456', '13.987654'])
+      expect(sent).not.toContain(value);
+    expect(sent).toContain('known-place');
+  });
   it('requests IDs only with a 256-token limit, no search tools, and accounts for lite usage', async () => {
     generateContent.mockResolvedValue({
       text: '["known-place"]',

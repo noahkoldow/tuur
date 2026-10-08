@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-08T08:18:47.881Z",
+  "project": "tuur-beta-noehxpo",
+  "purpose": "Fixed AI voice introductions for the paywall and before an ad on each new free tour",
+  "provider": "gemini",
+  "model": "gemini-3.8-flash-tts",
+  "sampleRate": 24000,
+  "channels": 1,
+  "bitrateKbps": 48,
+  "aiGenerated": true,
+  "clips": [
+    {
+      "persona": "mara",
+      "language": "de",
+      "voice": "Sulafat",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Na, bereit für eine kleine Entdeckungstour? Mit tuur findest du spannende Orte und liest ihre Geschichten auf den Infokarten. Kostenlos, dank einer kurzen Werbung. Du hörst lieber zu? Dann begleite ich dich unterwegs. Den Audioguide schaltest du mit einem Guthaben oder Premium frei. Such dir deine Lieblingsstimme aus, und los geht’s.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: warm, curious and lively, like a friend who knows every corner of the city. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/mara-de.mp3",
+      "durationMs": 21480,
+      "bytes": 129259,
+      "sha256": "b594e932a6a319598a33cfa87fa3854d18b2a54f3341075eff5f2b8d1acc21b2"
+    },
+    {
+      "persona": "mara",
+      "language": "en",
+      "voice": "Sulafat",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Ready for a little adventure? With tuur, you can discover interesting places and read their stories on the info cards. It’s free, thanks to a short ad. Prefer to listen? Then I’ll join you along the way. Unlock the audio guide with a credit or Premium. Choose your favourite voice, and let’s go.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: warm, curious and lively, like a friend who knows every corner of the city. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/mara-en.mp3",
+      "durationMs": 17000,
+      "bytes": 102475,
+      "sha256": "583dc42385ad944e332f14ce3573b3ee63edfd1404fcff36e1f16580bca66252"
+    },
+    {
+      "persona": "jonas",
+      "language": "de",
+      "voice": "Sadaltager",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Na, bereit für eine kleine Entdeckungstour? Mit tuur findest du spannende Orte und liest ihre Geschichten auf den Infokarten. Kostenlos, dank einer kurzen Werbung. Du hörst lieber zu? Dann begleite ich dich unterwegs. Den Audioguide schaltest du mit einem Guthaben oder Premium frei. Such dir deine Lieblingsstimme aus, und los geht’s.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: calm, grounded storyteller with a low, relaxed voice who lets moments land. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/jonas-de.mp3",
+      "durationMs": 21400,
+      "bytes": 128827,
+      "sha256": "28fad61288350ac8548f2d496daf704cb86adcbbb0f0d4acfb1d7f3539d6e633"
+    },
+    {
+      "persona": "jonas",
+      "language": "en",
+      "voice": "Sadaltager",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Ready for a little adventure? With tuur, you can discover interesting places and read their stories on the info cards. It’s free, thanks to a short ad. Prefer to listen? Then I’ll join you along the way. Unlock the audio guide with a credit or Premium. Choose your favourite voice, and let’s go.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: calm, grounded storyteller with a low, relaxed voice who lets moments land. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/jonas-en.mp3",
+      "durationMs": 18280,
+      "bytes": 110107,
+      "sha256": "8f5280dc0fa311f7b558768083dd6934ad4fb4f70eb83ebdd9b870cbd733783e"
+    },
+    {
+      "persona": "lina",
+      "language": "de",
+      "voice": "Achird",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Na, bereit für eine kleine Entdeckungstour? Mit tuur findest du spannende Orte und liest ihre Geschichten auf den Infokarten. Kostenlos, dank einer kurzen Werbung. Du hörst lieber zu? Dann begleite ich dich unterwegs. Den Audioguide schaltest du mit einem Guthaben oder Premium frei. Such dir deine Lieblingsstimme aus, und los geht’s.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: friendly, upbeat and a little playful, enjoys the odd anecdote. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/lina-de.mp3",
+      "durationMs": 18720,
+      "bytes": 112699,
+      "sha256": "e9761e39a8e40a9971497a28b78c76db7cb3bff007d44684096c5cea39a67db5"
+    },
+    {
+      "persona": "lina",
+      "language": "en",
+      "voice": "Achird",
+      "model": "gemini-3.8-flash-tts",
+      "text": "Ready for a little adventure? With tuur, you can discover interesting places and read their stories on the info cards. It’s free, thanks to a short ad. Prefer to listen? Then I’ll join you along the way. Unlock the audio guide with a credit or Premium. Choose your favourite voice, and let’s go.",
+      "style": "You are a local city guide talking to one person walking next to you. Sound like a real human in a relaxed conversation, not like an announcer or an audiobook: natural rhythm, small pauses where a person would breathe or think, a light smile in the voice, stress on the surprising detail. Keep the language of the text and say local names the way locals do. Personality: friendly, upbeat and a little playful, enjoys the odd anecdote. A friendly introduction to the app, not an advertisement or an announcer. Conversational pace, around 22 to 25 seconds, never rushed. No music or sound effects. Pronounce the brand tuur like the word tour. Read only the supplied words.",
+      "path": "apps/mobile/assets/voice-previews/lina-en.mp3",
+      "durationMs": 17920,
+      "bytes": 107947,
+      "sha256": "396bdc880dfd1e78632c417219cea0ee91cce4e6087f905e10af37b1a74b8af2"
+    }
+  ]
+}

@@ -5,7 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { REGION_FIXTURES, rankRoamStarts, spotScale, tilesAround, type ExploredSpot } from '@tuur/shared';
 import { useBackend } from '../../src/backend';
+import { isApplePlacesAvailable } from '../../modules/tuur-apple-places';
+import { AppleNearbyFallback } from '../../src/components/apple-nearby-fallback';
 import { Banner } from '../../src/components/Banner';
+import { shouldOfferAppleFallback } from '../../src/guide/apple-pause-places';
 import { ActiveHome } from '../../src/components/ActiveHome';
 import { WordmarkPill } from '../../src/components/Brand';
 import { Button, IconButton } from '../../src/components/Button';
@@ -23,6 +26,7 @@ import { usePoiPool } from '../../src/hooks/usePoiPool';
 import { useSelectedPlace } from '../../src/hooks/useSelectedPlace';
 import { useActiveSession } from '../../src/guide/session';
 import { useArea } from '../../src/location/useArea';
+import { areaErrorKeys } from '../../src/location/areaErrors';
 import { usePosition } from '../../src/location/usePosition';
 import { useSettings } from '../../src/state/settings';
 import { metrics, sys } from '../../src/theme';
@@ -64,25 +68,34 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
   const { height: screenH } = useWindowDimensions();
   const backend = useBackend();
   const { position, permission, request } = usePosition();
-  const area = useArea(position, { tours: false });
+  const area = useArea(position, { tours: false, ensure: false });
   const center = position ?? REGION_FIXTURES[0]!.center;
   const interests = useSettings((s) => s.interests);
-  // without a position the carousel still shows the demo region's best places, so the first launch is never empty
-  const { pois, ready: poolReady } = usePoiPool(position ?? REGION_FIXTURES[0]!.center, 2);
+  // Fixtures are useful in the demo; live discovery needs the listener's actual location.
+  const discoveryPosition = position ?? (backend.kind === 'demo' ? center : null);
+  const hasDiscoveryPosition = discoveryPosition !== null;
+  const {
+    pois,
+    ready: poolReady,
+    error: poolError,
+    errorCode: poolErrorCode,
+    reload: reloadPlaces,
+  } = usePoiPool(discoveryPosition, 2);
+  const discoveryError = poolErrorCode ?? (area.phase === 'failed' ? (area.errorCode ?? 'temporary') : null);
   // the best places to start nearby: what makes the app understandable at a glance
   const places = useMemo(
-    () => (poolReady ? rankRoamStarts(position ?? center, pois, interests, 8) : []),
-    [poolReady, position, center, pois, interests],
+    () => (discoveryPosition ? rankRoamStarts(discoveryPosition, pois, interests, 8) : []),
+    [discoveryPosition, pois, interests],
   );
   const [sheetIndex, setSheetIndex] = useState(1);
   const [recenterKey, recenterMap] = useReducer((key: number) => key + 1, 0);
   const [pauseFinderOpen, setPauseFinderOpen] = useState(false);
   const [slow, setSlow] = useState(false);
   useEffect(() => {
-    if (poolReady) return setSlow(false);
+    if (!hasDiscoveryPosition || poolReady) return setSlow(false);
     const id = setTimeout(() => setSlow(true), 4000);
     return () => clearTimeout(id);
-  }, [poolReady]);
+  }, [hasDiscoveryPosition, poolReady]);
   const [spots, setSpots] = useState<ExploredSpot[]>([]);
   const [selected, setSelected] = useState<ExploredSpot | undefined>();
   const [selectionKey, selectAgain] = useReducer((key: number) => key + 1, 0);
@@ -240,17 +253,17 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
               onPress={() => void (permission === 'denied' ? Linking.openSettings() : request())}
             />
           ) : null}
-          {area.phase === 'failed' ? (
+          {discoveryError ? (
             <View style={{ gap: 12 }}>
               <Banner
-                tone="error"
-                text={area.errorCode === 'network' ? t('errors.network') : t('errors.generic')}
+                tone={displayedPlaces.length ? 'warning' : 'error'}
+                text={t(areaErrorKeys[discoveryError])}
               />
-              <Button variant="tinted" label={t('common.retry')} onPress={area.reload} />
+              <Button variant="tinted" label={t('common.retry')} onPress={reloadPlaces} />
             </View>
           ) : null}
 
-          {area.phase !== 'failed' && !(selected && selection.poi) ? (
+          {discoveryPosition && !(selected && selection.poi) ? (
             <View style={{ gap: 12 }}>
               {displayedPlaces.length > 0 ? (
                 <View style={{ marginHorizontal: -metrics.margin }}>
@@ -263,8 +276,15 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
                     onNavigate={(poi) => void openPlace(poi.id)}
                   />
                 </View>
-              ) : poolReady || slow ? (
-                <Text variant="subheadline">{poolReady ? t('home.noPlaces') : t('home.loadingPlaces')}</Text>
+              ) : discoveryError || poolError ? null : poolReady || slow ? (
+                <>
+                  <Text variant="subheadline">
+                    {poolReady ? t('home.noPlaces') : t('home.loadingPlaces')}
+                  </Text>
+                  {poolReady ? (
+                    <Button variant="tinted" label={t('common.retry')} onPress={reloadPlaces} />
+                  ) : null}
+                </>
               ) : (
                 <ScrollView
                   horizontal
@@ -280,6 +300,17 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
                 </ScrollView>
               )}
             </View>
+          ) : null}
+
+          {discoveryPosition &&
+          shouldOfferAppleFallback({
+            available: process.env.EXPO_OS === 'ios' && isApplePlacesAvailable,
+            hasPosition: position !== null,
+            osmPlaceCount: displayedPlaces.length,
+            osmReady: poolReady,
+            osmFailed: Boolean(discoveryError || poolError),
+          }) ? (
+            <AppleNearbyFallback position={discoveryPosition} />
           ) : null}
 
           <ListGroup title={t('home.moreWays')}>

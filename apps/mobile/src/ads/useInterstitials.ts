@@ -3,8 +3,7 @@ import { AppState } from 'react-native';
 import { decideInterstitial } from '@tuur/shared';
 import { getAds, subscribed, useEntitlementStore } from '../billing/entitlements';
 import type { GuideRuntime, GuideUi } from '../guide/runtime';
-
-const DAY = 24 * 3600_000;
+import { readInterstitialFrequency, recordInterstitialShown } from './interstitialFrequency';
 
 /**
  * Interstitial policy (spec 6.2) applied to a running session: only in the gap between two stops (walking to the next
@@ -16,9 +15,9 @@ export function useInterstitials(runtime: GuideRuntime, ui: GuideUi) {
   const loaded = useEntitlementStore((s) => s.loaded);
   const inFlight = useRef(false);
   const stopsSince = useRef(0);
-  const shown = useRef<{ at: number[]; last?: number }>({ at: [] });
   const sub = subscribed({ entitlements: ent });
   const targetId = ui.target?.id;
+  const textMode = runtime.getContentMode() === 'text';
 
   useEffect(
     () =>
@@ -30,41 +29,53 @@ export function useInterstitials(runtime: GuideRuntime, ui: GuideUi) {
 
   useEffect(() => {
     // wait until the entitlements are known, so subscribers never see the consent form or an ad request
-    if (!loaded || sub) return;
+    if (!loaded || sub || !textMode) return;
     const ads = getAds();
-    void ads.gatherConsent().then(() => ads.preloadInterstitial());
-  }, [sub, loaded]);
+    let active = true;
+    void ads.gatherConsent().then(() => {
+      if (active) ads.preloadInterstitial();
+    });
+    return () => {
+      active = false;
+    };
+  }, [sub, loaded, textMode]);
 
   useEffect(() => {
-    if (!loaded || inFlight.current || AppState.currentState !== 'active') return;
-    const now = Date.now();
-    shown.current.at = shown.current.at.filter((t) => now - t < DAY);
+    if (!loaded || !textMode || sub || inFlight.current || AppState.currentState !== 'active') return;
     const ads = getAds();
-    const d = decideInterstitial({
-      now,
-      lastShownAt: shown.current.last,
-      shownToday: shown.current.at.length,
-      stopsSinceLast: stopsSince.current,
-      subscriber: sub,
-      consent: ads.consent(),
-      audioPlaying: ui.playing,
-      betweenWaypoints: ui.phase === 'approaching' && targetId !== undefined,
-    });
-    if (!d.show) return;
+    const controller = new AbortController();
     inFlight.current = true;
-    ads
-      .showInterstitial()
-      .then((ok) => {
-        if (!ok) return;
-        shown.current.at.push(now);
-        shown.current.last = now;
+    void (async () => {
+      const now = Date.now();
+      const frequency = await readInterstitialFrequency(now);
+      if (
+        !frequency ||
+        controller.signal.aborted ||
+        runtime.getContentMode() !== 'text' ||
+        AppState.currentState !== 'active'
+      )
+        return;
+      const d = decideInterstitial({
+        now,
+        ...frequency,
+        stopsSinceLast: stopsSince.current,
+        subscriber: sub,
+        consent: ads.consent(),
+        audioPlaying: ui.playing,
+        betweenWaypoints: ui.phase === 'approaching' && targetId !== undefined,
+      });
+      if (!d.show) return;
+      if (await ads.showInterstitial({ signal: controller.signal })) {
+        await recordInterstitialShown();
         stopsSince.current = 0;
-        ads.preloadInterstitial();
-      })
+        if (!controller.signal.aborted) ads.preloadInterstitial();
+      }
+    })()
       .catch(() => undefined)
       .finally(() => {
         inFlight.current = false;
       });
+    return () => controller.abort();
     // depend on primitives: `ui.target` is a new object on every GPS fix
-  }, [ui.phase, ui.playing, targetId, sub, loaded]);
+  }, [runtime, ui.phase, ui.playing, targetId, sub, loaded, textMode]);
 }

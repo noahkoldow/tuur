@@ -1,7 +1,9 @@
 import { authDe } from './auth';
+import { safetyDe } from './safety';
 
 export const de = {
   auth: authDe,
+  safety: safetyDe,
   pauseFinder: {
     title: 'Pause finden',
     close: 'Pausensuche schließen',
@@ -12,8 +14,21 @@ export const de = {
     coffee: 'Kaffee & Gebäck',
     food: 'Etwas essen',
     rest: 'Durchatmen',
+    toilets: 'Toiletten',
     distance: '{{meters}} m Luftlinie',
     navigate: 'Weg in Google Maps öffnen',
+    navigateApple: 'Weg in Apple Karten öffnen',
+    searchApple: 'In Apple Karten suchen',
+    appleUnavailable:
+      'Für die Pausensuche in der App brauchst du eine neuere App-Version. Du kannst direkt in Apple Karten suchen.',
+    appleSourceHint: 'Orte von Apple Karten. Öffnungszeiten und freie Plätze sind nicht geprüft.',
+    search: {
+      all: 'Cafés Restaurants Parks öffentliche Toiletten',
+      coffee: 'Cafés Bäckereien',
+      food: 'Restaurants',
+      rest: 'Parks',
+      toilets: 'Öffentliche Toiletten',
+    },
     loading: 'Pausenorte in deiner Nähe werden gesucht …',
     location: 'Für nahe Pausenorte brauchst du deinen aktuellen Standort.',
     empty: 'Hier ist in dieser Kategorie noch kein Pausenort erfasst. Probiere eine andere Kategorie.',
@@ -36,7 +51,7 @@ export const de = {
     tipsHint: 'Kurze Hinweise beim ersten Mal',
     resetTips: 'Tipps erneut zeigen',
     resetTipsDone: 'Tuu zeigt seine Tipps wieder.',
-    roamIntro: 'Ich führe dich zum nächsten spannenden Ort und erzähle unterwegs.',
+    roamIntro: 'Ich führe dich zum nächsten spannenden Ort. Seine Geschichte findest du auf der Infokarte.',
     roamPick: 'Tipp auf einen Ort, dann geht es dort los.',
     planIntro: 'Wähle Zeit, Fortbewegung und Interessen. Daraus baue ich dir eine Route mit Geschichten.',
     planThinking: 'Ich überlege mir gerade den besten Weg für dich…',
@@ -44,7 +59,8 @@ export const de = {
     playControls: 'Pause, zurück und weiter findest du unten. Zieh das Blatt hoch, dann kannst du mitlesen.',
     playListen: 'Ich erzähle gerade. Tipp auf "Transkript", wenn du mitlesen möchtest.',
     playArrived: 'Wir sind da! Schau dich um, ich erzähle dir gleich mehr.',
-    tourStart: 'Wenn du startest, führe ich dich von Station zu Station und erzähle an jedem Ort.',
+    tourStart:
+      'Wenn du startest, führe ich dich von Station zu Station. Die Infokarten zeigen dir die Geschichten dazu.',
     tourOffline: 'Lade die Tour vorab herunter, dann hörst du sie auch ohne Netz.',
     summary: 'Das war eine tolle Runde! Teile sie gern mit Freunden.',
     downloadsTip: 'Lade eine Tour vor dem Losgehen herunter, dann hörst du ihre Geschichten auch ohne Netz.',
@@ -80,10 +96,12 @@ export const de = {
     tours: 'tuur stellt Touren für dich zusammen…',
   },
   onboarding: {
-    slide1Title: 'Dein Audio-Guide für unterwegs',
-    slide1Body: 'Geh einfach los. tuur erzählt dir Geschichten zu den Orten, an denen du vorbeikommst.',
+    slide1Title: 'Dein Stadtführer für unterwegs',
+    slide1Body:
+      'Geh einfach los und entdecke die Geschichten um dich herum. Kostenlos als Texttour mit Werbung.',
     slide2Title: 'Jeder Ort hat eine Geschichte',
-    slide2Body: 'Tippe auf einen Ort und hör zu, während du hingehst. Mit Bildern und Text zum Mitlesen.',
+    slide2Body:
+      'Bilder und Infokarten begleiten dich zum nächsten Ort. Lieber zuhören? Schalte den Audioguide mit Guthaben oder Premium frei.',
     slide3Title: 'Du bestimmst, wie',
     slide3Body: 'Einfach losziehen, eine Route planen oder an jeder Weggabelung selbst wählen.',
     sampleName: 'Brandenburger Tor',
@@ -93,30 +111,30 @@ export const de = {
     pageOf: 'Seite {{index}} von {{total}}',
     welcomeTitle: 'Willkommen bei tuur',
     start: "Los geht's",
-    welcomeBody: 'Dein persönlicher Stadtführer im Ohr. Einfach loslaufen, tuur erzählt.',
+    welcomeBody: 'Einfach loslaufen und entdecken. Kostenlos lesen oder den Audioguide dazubuchen.',
     languageTitle: 'In welcher Sprache soll tuur erzählen?',
     languageHint: 'Du kannst das später jederzeit ändern.',
     interestsTitle: 'Was interessiert dich?',
     interestsHint: 'Optional. Ohne Auswahl gibt es einen ausgewogenen Mix.',
-    permissionsTitle: 'Standort für deine Führung',
+    permissionsTitle: 'Orte in deiner Nähe',
     permissionsBody:
-      'tuur nutzt deinen Standort auf dem Gerät, um Geschichten beim Ankommen zu erzählen. Für Inhalte wird nur ein grobes Kartenquadrat an unsere Server gesendet. Für die Wegführung, auch beim Abweichen von der Route, werden dein aktueller Standort und das Ziel an unseren Routingdienst übermittelt, ohne einen Standortverlauf zu speichern. Beim Einlösen eines Partnerangebots wird deine Position einmalig übermittelt.',
+      'Für deine Route erhält unser Routingdienst Standort und Ziel. Ein Standortverlauf wird nicht gespeichert.',
     permissionsBackground:
       'Damit die Führung auch bei ausgeschaltetem Bildschirm weiterläuft, brauchen wir „Immer erlauben“. Das fragen wir erst, wenn du eine Tour startest.',
     allowLocation: 'Standort erlauben',
     notNow: 'Später',
     accountTitle: 'Bei tuur anmelden',
     accountBody:
-      'Melde dich mit Apple, Google oder E-Mail an und bestätige deine Mobilnummer. Dein Konto sichert deine Käufe auf allen Geräten.',
+      'Melde dich mit Apple, Google oder E-Mail an. Dein Konto sichert deine Käufe auf allen Geräten. Eine Telefonnummer ist optional.',
     signInApple: 'Mit Apple anmelden',
     signInGoogle: 'Mit Google anmelden',
     signInEmail: 'Mit E-Mail anmelden',
     safetyTitle: 'Sicher unterwegs',
-    safetyBody: 'Achte auf den Verkehr. tuur erzählt dir alles per Audio, der Bildschirm kann aus bleiben.',
+    safetyBody:
+      'Achte auf Verkehr und Absperrungen. Bleib zum Lesen stehen und nutze tuur nicht während du fährst. Wege können sich ändern.',
     safetyOk: 'Verstanden',
     tuuHello: 'Ich bin Tuu, dein Guide. Ich zeig dir die Stadt.',
-    legalConsent:
-      'Mit dem Start akzeptierst du unsere AGB. Wie wir mit deinen Daten umgehen, erklärt die Datenschutzerklärung.',
+    legalConsent: 'Mit dem Start akzeptierst du die AGB. Mehr in der Datenschutzerklärung.',
     consentPre: 'Mit dem Start stimmst du den ',
     consentAnd: ' und der ',
     consentPost: ' zu.',
@@ -137,7 +155,7 @@ export const de = {
     selectedPlaceUnavailable:
       'Dieser Ort ist gerade nicht verfügbar. Versuche es noch einmal oder wähle einen anderen Ort.',
     heroTitle: 'Hör dir deine Stadt an',
-    heroBody: 'Tippe auf einen Ort und hör zu.',
+    heroBody: 'Tippe auf einen Ort und entdecke seine Geschichte.',
     examplesTitle: 'Geschichten zum Reinhören',
     examplesBody: 'Beispiele aus Berlin. Aktiviere den Standort für deine Umgebung.',
     storiesNearby: 'Geschichten in deiner Nähe',
@@ -171,6 +189,13 @@ export const de = {
     introTip: 'Tippe auf einen Ort mit „Anhören“. Ich begleite dich hin und erzähle unterwegs.',
     loadingPlaces: 'tuur sucht Geschichten in deiner Nähe…',
     noPlaces: 'Hier habe ich noch keine Orte gefunden. Probier den Streifzug.',
+    appleFallbackTitle: 'Museen und Kultur in der Nähe',
+    appleFallbackHint:
+      'Für diese Gegend habe ich noch keine Geschichten. Apple Karten zeigt, was in der Nähe ist; diese Orte kommen ohne tuur-Geschichte.',
+    appleFallbackEmpty: 'Apple Karten findet im Umkreis von 1,5 km keine Museen oder Kulturorte.',
+    appleFallbackError: 'Apple Karten ist gerade nicht erreichbar.',
+    appleFallbackMuseum: 'Museum',
+    appleFallbackCulture: 'Kultur',
     modes: 'Wie möchtest du unterwegs sein?',
     toursNearby: 'Touren in {{place}}',
     toursNearbyNoPlace: 'Touren in deiner Nähe',
@@ -190,7 +215,7 @@ export const de = {
     enableLocation: 'Standort aktivieren',
     continueTour: 'Tour fortsetzen',
     generating: 'Touren werden erstellt…',
-    firstFree: 'Erste Tour gratis',
+    firstFree: 'Texttouren kostenlos',
     greeting: 'Wie willst du los?',
     swipeHint: 'Wische, um zwischen den Modi zu wechseln',
     yourArea: 'Deine Umgebung',
@@ -227,6 +252,7 @@ export const de = {
     mapHint: 'Tippe auf die Karte, um entdeckte Orte zu sehen',
   },
   tour: {
+    startText: 'Texttour starten',
     start: 'Tour starten',
     download: 'Für offline laden',
     duration: 'Dauer',
@@ -261,6 +287,13 @@ export const de = {
     detected: 'Erkannte Fortbewegung: {{mode}}',
   },
   business: {
+    contactTitle: 'Kontakt für Unternehmen',
+    contactBody:
+      'Du hast eine Frage zu den Angaben über deinen Ort oder zu bestehenden Partnerinformationen? Unser Support hilft dir bei Korrekturen und Fragen zu deinem Konto.',
+    contactAction: 'E-Mail schreiben',
+    contactFailed:
+      'Die E-Mail-App konnte nicht geöffnet werden. Nutze die angezeigte Adresse für deine Nachricht.',
+    partnerTerms: 'Partnerbedingungen',
     heroTitle: 'Mehr Gäste, die zu dir finden',
     heroBody:
       'tuur führt Menschen zu Orten, die zu ihrer Route passen. Du zahlst nur, wenn jemand wirklich ankommt.',
@@ -314,22 +347,35 @@ export const de = {
     cat_other: 'Anderes',
   },
   group: {
+    offlineHint: 'Für eine Gruppe starte eine Online-Tour. Gespeicherte Touren hörst du hier allein offline.',
     invite: 'Freunde einladen',
     inviteMore: 'Link erneut teilen',
-    inviteHint: 'Bis zu 2 Freunde hören die Tour gratis mit, live und online auf ihrem eigenen Handy.',
+    inviteHint:
+      'Bis zu 2 Freunde hören gratis dieselben Aufnahmen mit, live und online. Die Tourzeit zählt nur bei dir.',
     shareMessage: 'Komm mit auf meine tuur-Tour! Öffne den Link, dann hören wir dieselbe Tour: {{url}}',
     live: 'Gruppen-Tour live',
     ended: 'Gruppen-Tour beendet',
     status: '{{members}} von {{capacity}} dabei',
     buySeat: 'Weiteren Platz freischalten',
     seatAdded: 'Ein weiterer Platz ist frei.',
-    seatPending: 'Der Kauf wird noch bestätigt. Der Platz erscheint gleich.',
+    seatPending:
+      'Dein Kauf wird noch bestätigt. Wir prüfen weiter und schalten den Platz frei, sobald dein Guthaben ankommt. Bitte kaufe ihn nicht erneut.',
+    buySeatPrice: '1 Gruppenplatz · {{price}}',
+    useSeatCredit: 'Vorhandenes Platzguthaben einlösen',
+    seatBalance: 'Dein Platzguthaben: {{count}}',
+    seatTerms:
+      'Ein zusätzlicher Platz für diese laufende Gruppe, bis sie endet (höchstens 12 Stunden ab Gruppenstart). Noch nicht eingelöstes Platzguthaben verfällt nicht.',
+    seatRetryHint:
+      'Die Freischaltung konnte noch nicht bestätigt werden. Prüfe den Kauf erneut; es wird kein weiterer Kauf gestartet.',
+    checkPurchase: 'Freischaltung prüfen',
+    seatRetained:
+      'Diese Gruppe kann keinen weiteren Platz aufnehmen. Noch nicht eingelöstes Platzguthaben bleibt für deine nächste Gruppe verfügbar.',
     failed: 'Das hat nicht geklappt. Bitte versuch es noch einmal.',
     guestEnded: 'Die Gruppe wurde beendet. Weitere Erzählungen gibt es mit einer eigenen Tour.',
     joining: 'Du trittst der Tour bei…',
     welcome: 'Du bist dabei!',
     welcomeBody:
-      '{{members}} von {{capacity}} Plätzen sind belegt. Ihr hört dieselbe Tour, jeder auf seinem Handy.',
+      '{{members}} von {{capacity}} Plätzen sind belegt. Ihr hört dieselben Aufnahmen mit der vom Gastgeber gewählten Stimme und Sprache. Nur dessen Tourzeit wird verbraucht.',
     startTogether: 'Tour starten',
     full: 'Diese Gruppe ist schon voll.',
     joinEnded: 'Diese Gruppen-Tour ist schon vorbei.',
@@ -427,12 +473,21 @@ export const de = {
     ahead: 'Das erwartet dich',
     didYouKnow: 'Wusstest du?',
     fromWikipedia: 'Aus Wikipedia',
+    wikipediaEdited: 'Gekürzter und aufbereiteter Wikipedia-Auszug',
+    osmCredit: '© OpenStreetMap-Mitwirkende',
     source: 'Quelle: {{source}}',
     away: '{{distance}}',
     here: 'Du bist da',
     swipe: 'Wische für mehr',
   },
   player: {
+    textMode: 'Entdecken & lesen',
+    enableAudio: 'Audioguide freischalten',
+    audioMode: 'Audioguide',
+    audioUpgradeFailed: 'Audio konnte nicht gestartet werden. Versuche es erneut.',
+    continueText: 'Ohne Audioguide fortfahren',
+    minutesRemaining: '{{count}} Min. Tourzeit übrig',
+    timePaused: 'Zeit angehalten',
     closePlace: 'Ortsauswahl schließen',
     straightLineDistance: '{{distance}} Luftlinie',
     routeDistance: '{{distance}} entlang der Route',
@@ -552,7 +607,7 @@ export const de = {
       'Dieser Ort ist hier nicht verfügbar. Wähle einen Ort in deiner Nähe oder lade die Vorschläge erneut.',
     chooseAnother: 'Andere Orte entdecken',
     title: 'Explore',
-    intro: 'Geh einfach los. tuur erkennt deine Richtung und erzählt über das, was vor dir liegt.',
+    intro: 'Geh einfach los. tuur erkennt deine Richtung und zeigt dir spannende Orte auf deinem Weg.',
     startRoam: 'Losziehen',
     frequency: 'Wie viel soll tuur erzählen?',
     hint: 'Geh weiter, tuur meldet sich.',
@@ -611,6 +666,11 @@ export const de = {
     openSettings: 'Einstellungen öffnen',
   },
   errors: {
+    areaCoverage: 'Für diesen Standort sind noch keine Ortsdaten verfügbar.',
+    placesUnavailable:
+      'Die Orte in deiner Nähe konnten gerade nicht geladen werden. Bitte versuche es erneut.',
+    tourTimeExhausted: 'Deine Tourminuten sind aufgebraucht. Die Tour wurde pausiert.',
+    groupAudioPending: 'Die Aufnahme des Gastgebers wird geladen. Ihr hört dieselbe Geschichte.',
     locationUnavailable:
       'Dein Standort konnte nicht ermittelt werden. Prüfe die Standortfreigabe und versuche es erneut.',
     generic: 'Etwas ist schiefgelaufen.',
@@ -620,6 +680,10 @@ export const de = {
       'Ohne Standortfreigabe kann tuur nicht erzählen. Erlaube den Standort in den Einstellungen deines Geräts.',
     startFailed: 'Die Tour konnte nicht gestartet werden. Bitte versuche es erneut.',
     locked: 'Dieser Inhalt ist gesperrt. Schalte ihn frei, um weiterzuhören.',
+    aiConsentUpdated:
+      'Deine KI-Auswahl ist gespeichert. Die Tour ist pausiert. Setze sie fort, wenn du bereit bist.',
+    aiConsentPauseFailed:
+      'Die Tour ist pausiert. Die Zeitabrechnung konnte noch nicht bestätigt werden. Prüfe deine Verbindung und versuche es erneut.',
     rateLimited: 'Zu viele Anfragen. Bitte gleich nochmal versuchen.',
   },
   legal: {
@@ -627,36 +691,50 @@ export const de = {
       'Dieser Text wird vom Betreiber bereitgestellt. Die aktuelle Fassung findest du unter {{url}} oder per E-Mail an {{email}}.',
   },
   paywall: {
+    freeTextTitle: 'Entdecken geht auch kostenlos',
+    freeTextHint:
+      'Routen und Infokarten sind mit Werbung kostenlos. Nur der Audioguide braucht Guthaben oder Premium. Die Hörproben kannst du jederzeit gratis anhören.',
+    continueText: 'Bei der Texttour bleiben',
     pricingTitle: 'Preise & Abos',
-    pricingHint: 'Einzelne Touren mit Guthaben oder alle Touren und Modi im Abo.',
+    pricingHint:
+      'Texttouren sind mit Werbung kostenlos. Mit Guthaben oder Premium hörst du die Geschichten unterwegs: bis zu 90 Minuten pro Guthaben oder 500 Minuten pro Monat im Abo.',
     offersUnavailable: 'Gerade sind keine Preise verfügbar. Versuche es erneut.',
     demoNotice:
       'Demo: Hier kannst du die Preise ansehen und Käufe kostenlos ausprobieren. Es wird kein Geld abgebucht.',
     demoAction: 'Kostenloser Demo-Kauf; es wird kein Geld abgebucht.',
     demoPurchased: 'Demo-Kauf abgeschlossen. Es wurde kein Geld abgebucht.',
     demoSubDisclosure:
-      'Das Abo umfasst alle Touren und Modi ohne Werbung. In dieser Demo wird es nur simuliert: keine Zahlung, keine automatische Verlängerung.',
+      'Monats- und Jahresabo enthalten jeweils 500 Minuten aktive Tourzeit mit Audio pro Monat für alle Touren und Modi, ohne Werbung. Texttouren und Pausen zählen nicht mit. In dieser Demo: keine Zahlung, keine automatische Verlängerung.',
     titleDownload: 'Tour offline speichern',
     subtitleDownload:
       'Mit Premium oder einer bezahlten Freischaltung kannst du diese Tour herunterladen und in tuur abspielen. Werbe- und Einladungsfreigaben enthalten keinen Download.',
-    title: 'Tour freischalten',
-    titleSession: 'Modus für 24 Stunden freischalten',
+    title: 'Deine Tour zum Zuhören',
+    titleSession: 'Audioguide freischalten',
     subtitleTour:
-      'Die erste Tour pro Ort ist gratis. Für diese Tour brauchst du ein Guthaben, einen Einladungslink oder ein Abo.',
+      'Die Route und ihre Infokarten bleiben kostenlos. Schalte den Audioguide frei und hör dir die Geschichten unterwegs an.',
     subtitleSession:
-      'Geplante Route, Weggabelung und Streifzug gelten für 24 Stunden an diesem Ort und kosten 1 Guthaben.',
+      'Ein Guthaben enthält bis zu 90 Minuten aktive Tourzeit mit Audioguide – für Route, Weggabelung oder Explore. Texttouren und Pausen verbrauchen keine Minuten.',
     balance: 'Dein Guthaben: {{count}}',
     balanceReward: 'davon {{count}} aus Werbung (nur für Touren)',
     unlockWithCredit: 'Mit 1 Guthaben freischalten',
     unlocking: 'Wird freigeschaltet…',
-    buyCredit: '1 Tour-Guthaben',
-    buyCredits5: '5 Tour-Guthaben',
-    creditHint: 'Ein Guthaben schaltet eine Tour dauerhaft oder einen Modus für 24 Stunden frei. Einmalkauf.',
+    buyCredit: '1 Guthaben · bis zu 90 Min.',
+    buyCredits5: '5 Guthaben · bis zu 450 Min.',
+    creditHint:
+      'Ein Guthaben enthält bis zu 90 Minuten aktive Tourzeit mit Audio. Fünf Guthaben ergeben bis zu 450 Minuten. Texttouren und Pausen zählen nicht mit. Einmalkauf, kein Abo.',
     subscribe: 'tuur Abo',
+    subscriptionMinutes:
+      '500 Minuten aktive Tourzeit mit Audio pro Monat – auch beim Jahresabo. Ohne Werbung.',
+    calendarMonth:
+      'Das Kontingent erneuert sich am 1. jedes Kalendermonats um 00:00 Uhr UTC, solange dein Abo aktiv ist. Ungenutzte Abominuten werden nicht übertragen.',
+    aiConsentHint:
+      'Neue persönliche KI-Aufnahmen benötigen deine freiwillige Einwilligung. Prüfe die Datenweitergabe vor dem Kauf unter Einstellungen → Datenschutz.',
+    aiConsentDetails: 'Datenschutzeinstellungen öffnen',
+    monthlyBonus: '50 Minuten mehr als fünf einzelne Guthaben. Frei auf deine Touren verteilt.',
     subMonthly: '{{price}} pro Monat',
     subYearly: '{{price}} pro Jahr',
     subDisclosure:
-      'Das Abo schaltet alle Touren und Modi ohne Werbung frei. Es verlängert sich automatisch um den gleichen Zeitraum, wenn du es nicht mindestens 24 Stunden vor Ablauf in den Einstellungen deines App-Store-Kontos kündigst. Die Zahlung erfolgt über dein Store-Konto.',
+      'Monats- und Jahresabo enthalten jeweils 500 Minuten aktive Tourzeit mit Audio pro Monat für alle Touren und Modi, ohne Werbung. Texttouren und Pausen zählen nicht mit. Das Abo verlängert sich automatisch um den gleichen Zeitraum, wenn du es nicht mindestens 24 Stunden vor Ablauf in den Einstellungen deines App-Store-Kontos kündigst. Die Zahlung erfolgt über dein Store-Konto.',
     watchAd: 'Werbung ansehen für 1 Tour',
     watchAdHint: 'Kostenlos, begrenzt pro Tag. Nur für Standardtouren.',
     adPending: 'Belohnung wird gutgeschrieben – einen Moment…',
@@ -684,7 +762,48 @@ export const de = {
     shareLimit: 'Du hast bereits zwei Einladungen für diese Tour erstellt.',
     shareOnlyBought: 'Nur mit Guthaben gekaufte Touren können geteilt werden.',
     locked: 'Gesperrt',
-    lockedTitle: 'Diese Tour ist gesperrt',
+    lockedTitle: 'Den Audioguide freischalten',
+  },
+  voicePreview: {
+    title: 'So klingt dein Audioguide',
+    hint: 'Hör kurz rein und such dir deine Lieblingsstimme aus.',
+    selectVoice: 'Diese Stimme für Hörprobe und Audioguide auswählen',
+    replay: 'Von vorne anhören',
+    stop: 'Hörprobe stoppen',
+    failed: 'Die Hörprobe konnte nicht abgespielt werden. Tippe auf Abspielen, um es erneut zu versuchen.',
+    ai: 'Kostenlose Hörprobe · KI-generierte Stimmen · verbraucht keine Tourminuten',
+  },
+  freeTourIntro: {
+    continue: 'Ohne Audioguide fortfahren',
+    countdown: 'Weiter in {{count}} s',
+    buy: 'Audio freischalten',
+    adHint: 'Ohne Audioguide · mit kurzer Werbung',
+  },
+  tuuPromo: {
+    eyebrow: 'Eine kleine Vorschau',
+    places: 'Orte entdecken',
+    voices: 'Wer soll dich begleiten?',
+    start: 'Hörprobe starten',
+    resume: 'Weiterhören',
+    replay: 'Nochmal anhören',
+    idle: 'Deine Stadt. Deine Lieblingsstimme.',
+    playing: 'Schau dich um. Ich erzähle dir mehr.',
+    paused: 'Bereit, wenn du es bist.',
+    done: 'Und jetzt: raus und entdecken.',
+    loading: 'Die Hörprobe lädt …',
+    footer: 'KI-Stimmen · Kostenlose Hörprobe',
+    scene0: 'Hey, ich bin Tuu.',
+    scene1: 'Jeder Ort erzählt was.',
+    scene2: 'Lust, einfach zuzuhören?',
+    art0: 'Tuu winkt dir zu.',
+    art1: 'Tuu entdeckt mit dir Orte und ihre Geschichten auf einer Karte.',
+    art2: 'Tuu hört mit Kopfhörern dem Audioguide zu.',
+    voice: '{{name}} · KI-Stimme',
+    progress: 'Fortschritt der Hörprobe',
+    remaining: 'Weiter in {{count}} s',
+    ready: 'Bereit zum Entdecken',
+    listen: 'Hör Tuu kurz zu',
+    failed: 'Ton gerade nicht verfügbar. Du kannst trotzdem weiter.',
   },
   invite: {
     title: 'Einladung',
@@ -723,7 +842,7 @@ export const de = {
     anonymous: 'Bei tuur anmelden',
     phoneTitle: 'Telefonnummer bestätigen',
     phoneHint:
-      'Für eine werbefinanzierte Gratis-Tour pro Stadt bestätigen wir einmalig deine Telefonnummer. Sie wird nicht öffentlich angezeigt.',
+      'Optional für Einladungs- und Werbeprämien: Bestätige deine Telefonnummer. Für Texttouren und gekaufte Audioguides brauchst du sie nicht. Sie wird nicht öffentlich angezeigt.',
     phonePlaceholder: '+49 151 23456789',
     phoneSendCode: 'SMS-Code senden',
     phoneCodePlaceholder: 'SMS-Code',
@@ -737,7 +856,7 @@ export const de = {
     adChoices: 'Werbe-Einstellungen',
     adChoicesNone: 'Für dein Land sind keine Werbe-Einstellungen nötig.',
     aiInfo:
-      'Erzählungen werden von KI aus öffentlichen Quellen erstellt und als KI-generiert gekennzeichnet.',
+      'Neue persönliche KI-Inhalte verwenden nach deiner Einwilligung auch Tourorte und Vorlieben. Du kannst die Einwilligung hier widerrufen. Texttouren bleiben verfügbar.',
     export: 'Meine Daten exportieren',
     exportFailed: 'Der Export hat nicht geklappt.',
     delete: 'Konto löschen',

@@ -1,6 +1,7 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { estimateCostUsd, type AiConfig, type Usage } from '@tuur/shared';
 import { warn } from 'firebase-functions/logger';
+import { AiConsentError } from '../privacy/aiConsent';
 
 export type UsageKind = 'narration' | 'factcheck' | 'tts' | 'transition' | 'classify' | 'routing' | 'teaser';
 export type BudgetConfig = Pick<AiConfig, 'pricing' | 'dailyBudgetUsd' | 'areaDailyBudgetUsd' | 'killSwitch'>;
@@ -190,6 +191,18 @@ export async function withBudget<T extends { usage: Usage }>(
   try {
     result = await run();
   } catch (error) {
+    if (error instanceof AiConsentError) {
+      // The privacy boundary refuses before sending anything upstream. Unlike a provider
+      // timeout, this is known to incur no cost and must not consume the spending allowance.
+      await settleBudget(
+        db,
+        cfg,
+        reservation,
+        { ...entry, usage: {}, ok: false, note: 'ai_consent_required' },
+        now(),
+      );
+      throw error;
+    }
     // Operational diagnostics deliberately omit messages, URLs, payloads and credentials.
     const failure = error as { name?: unknown; status?: unknown; code?: unknown; cause?: { code?: unknown } };
     warn('Bounded provider request failed', {

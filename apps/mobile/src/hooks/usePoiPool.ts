@@ -3,6 +3,7 @@ import { encodeGeohash, tilesAround } from '@tuur/shared';
 import { useBackend } from '../backend';
 import { config } from '../config';
 import { PoiPool } from '../guide/modes';
+import { areaErrorCode, type AreaErrorCode } from '../location/areaErrors';
 
 /**
  * Loads the POIs around a position, including live positions. Only a tile change starts a new request;
@@ -21,6 +22,7 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
     pois: pool.all(),
     revision: 0,
     error: null as string | null,
+    errorCode: null as AreaErrorCode | null,
   });
   const reload = useCallback(() => setRetry((n) => n + 1), []);
 
@@ -41,21 +43,30 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
     let finishedInitialWait = false;
     let areaError: string | null = null;
     let refreshError: string | null = null;
+    let areaCode: AreaErrorCode | null = null;
+    let refreshCode: AreaErrorCode | null = null;
     const update = () => {
       if (cancelled) return;
       const pois = pool.all();
-      const error = areaError ?? refreshError ?? (failed.size ? 'Could not load nearby places' : null);
+      const hasPlaces = pois.some((poi) => inArea.has(poi.tile));
+      // An unfinished search is not empty. Late watcher results clear this timeout automatically.
+      const timedOut = finishedInitialWait && completed.size < tiles.length && !hasPlaces;
+      const error =
+        areaError ??
+        refreshError ??
+        (failed.size
+          ? 'Could not load nearby places'
+          : timedOut
+            ? 'Nearby places are taking too long to load'
+            : null);
       setState({
         request,
-        ready:
-          finishedInitialWait ||
-          completed.size === tiles.length ||
-          pois.some((poi) => inArea.has(poi.tile)) ||
-          !!error,
+        ready: finishedInitialWait || completed.size === tiles.length || hasPlaces || !!error,
         count: pois.length,
         pois,
         revision: pool.revision,
         error,
+        errorCode: areaCode ?? refreshCode ?? (failed.size || timedOut ? 'temporary' : null),
       });
     };
     const flushRefresh = async () => {
@@ -70,10 +81,12 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
             if (cancelled) return;
             for (const tile of batch) completed.add(tile);
             refreshError = null;
+            refreshCode = null;
             update();
           } catch (error) {
             if (cancelled) return;
             refreshError = error instanceof Error ? error.message : 'Could not refresh nearby places';
+            refreshCode = areaErrorCode(error);
             for (const tile of batch) pendingRefresh.add(tile);
             update();
             clearTimeout(refreshRetry);
@@ -118,6 +131,7 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
         } catch (error) {
           // Existing server/cache POIs can still be available if starting ingestion fails.
           areaError = error instanceof Error ? error.message : 'Could not load nearby places';
+          areaCode = areaErrorCode(error);
         }
         for (let attempt = 0; attempt < 30 && !cancelled; attempt++) {
           await pool.load(tiles);
@@ -135,6 +149,7 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
         update();
       } catch (error) {
         areaError = error instanceof Error ? error.message : 'Could not load nearby places';
+        areaCode = areaErrorCode(error);
         finishedInitialWait = true;
         update();
       }
@@ -158,6 +173,7 @@ export function usePoiPool(position: { lat: number; lng: number } | null, rings:
     revision: current ? state.revision : pool.revision,
     loading: tile !== null && !ready,
     error: current ? state.error : null,
+    errorCode: current ? state.errorCode : null,
     reload,
   };
 }

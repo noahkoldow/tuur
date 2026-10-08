@@ -65,16 +65,22 @@ export async function ingestArea(
   const area = await db.collection(AREAS).doc(geohash).get();
   const retryAt = area.get('ingestRetryAt');
   const startAt = deps.now();
+  if (
+    ['ready', 'low_content'].includes(String(area.get('status'))) &&
+    (area.get('locked') === true || Number(area.get('expiresAt') ?? 0) > startAt)
+  )
+    return { status: String(area.get('status')), poiCount: Number(area.get('poiCount') ?? 0), warnings: [] };
   if (area.get('status') === 'failed' && typeof retryAt === 'number' && retryAt > startAt)
     throw new RateLimitError(retryAt - startAt);
   const warnings: string[] = [];
   const bounds = geohashBounds(geohash);
   const center = geohashCenter(geohash);
   try {
+    // OSM is required. Do not spend geocoding/enrichment calls when it is unavailable or quota-blocked.
+    const osm = await deps.sources.fetchOsm(bounds);
     const place = placeFromGeocode(await deps.geocoder.reverse(center), center, deps.now());
     const langs = sourceLangsFor(place.countryCode);
-    const [osm, wikidata, ...wikis] = await Promise.all([
-      deps.sources.fetchOsm(bounds),
+    const [wikidata, ...wikis] = await Promise.all([
       settled(deps.sources.fetchWikidata(bounds), [] as RawPoi[], 'wikidata', warnings),
       ...langs.map((l) =>
         settled(deps.sources.fetchWikipedia(bounds, l), [] as RawPoi[], `wikipedia:${l}`, warnings),

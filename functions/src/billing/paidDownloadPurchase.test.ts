@@ -17,6 +17,7 @@ function fixture() {
     placeId: 'berlin',
     free: false,
     locked: false,
+    durationMinutes: 30,
     stops: [{ poiId: 'p1' }],
   });
   docs.set(walletPath, { balance: 2, rewardBalance: 3, seatBalance: 4 });
@@ -52,7 +53,9 @@ describe('explicit paid tour purchase for downloading', () => {
         expiresAt: null,
       });
       if (source === 'free') docs.get('tours/t')!['free'] = true;
-      await expect(prepareTourDownload(deps, 'u', { tourId: 't', mode: 'tour' })).rejects.toMatchObject({
+      await expect(
+        prepareTourDownload(deps, 'u', { tourId: 't', mode: 'tour', scriptInstanceId: 'download-script' }),
+      ).rejects.toMatchObject({
         details: { reason: 'download_requires_purchase' },
       });
       const request = { kind: 'tour', tourId: 't', paidOnly: true };
@@ -68,19 +71,26 @@ describe('explicit paid tour purchase for downloading', () => {
       });
       if (source === 'free') expect(docs.get(previousGrantPath)?.source).toBe('free');
       expect(docs.get(lotPath)?.remaining).toBe(1);
-      await expect(prepareTourDownload(deps, 'u', { tourId: 't', mode: 'tour' })).resolves.toMatchObject({
+      await expect(
+        prepareTourDownload(deps, 'u', { tourId: 't', mode: 'tour', scriptInstanceId: 'download-script' }),
+      ).resolves.toMatchObject({
         expiresAt: null,
       });
-      await expect(
-        authorizeContent(deps, 'u', { tourId: 't', mode: 'tour', poiIds: ['p1'] }),
-      ).resolves.toMatchObject({ reason: 'tour' });
       await expect(
         claimTourStart(deps, 'u', {
           tourId: 't',
           mode: 'tour',
           sessionId: '00000000-0000-4000-8000-000000000001',
         }),
-      ).resolves.toEqual({ counted: false, remaining: null });
+      ).resolves.toEqual({ counted: false, remaining: 60 });
+      await expect(
+        authorizeContent(deps, 'u', {
+          tourId: 't',
+          mode: 'tour',
+          poiIds: ['p1'],
+          sessionId: '00000000-0000-4000-8000-000000000001',
+        }),
+      ).resolves.toMatchObject({ reason: 'tour' });
       const beforeReplay = structuredClone([...docs]);
       await expect(spendCredit(deps, 'u', request)).rejects.toMatchObject({
         details: { reason: 'already_unlocked' },
@@ -135,16 +145,16 @@ describe('explicit paid tour purchase for downloading', () => {
     expect([...docs]).toEqual(before);
   });
 
-  it('keeps ordinary reward-first spending and its free-tour refusal unchanged', async () => {
+  it('uses paid audio credits by default and preserves old rewarded balances', async () => {
     const { docs, deps, lotPath } = fixture();
     expect(await spendCredit(deps, 'u', { kind: 'tour', tourId: 't' })).toMatchObject({
-      used: 'reward',
-      wallet: { balance: 2, rewardBalance: 2 },
+      used: 'paid',
+      wallet: { balance: 1, rewardBalance: 3 },
     });
-    expect(docs.get(lotPath)?.remaining).toBe(2);
+    expect(docs.get(lotPath)?.remaining).toBe(1);
     docs.get('tours/t')!['free'] = true;
     await expect(spendCredit(deps, 'u', { kind: 'tour', tourId: 't' })).rejects.toMatchObject({
-      details: { reason: 'free' },
+      details: { reason: 'already_unlocked' },
     });
   });
 

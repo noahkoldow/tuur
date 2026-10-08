@@ -44,6 +44,7 @@ export function withOfflineFirst(
     getExploredSpots: (tiles) => base.getExploredSpots(tiles),
     composePlannedRoute: (req) => base.composePlannedRoute(req),
     getTeaser: (req) => base.getTeaser(req),
+    getPoiText: (req) => base.getPoiText(req),
     reportNarration: (i) => base.reportNarration(i),
     async getAutoTours(tile, lang) {
       try {
@@ -94,7 +95,29 @@ export function withOfflineFirst(
         return { counted: false, remaining: null };
       return base.claimTourStart(tourId, sessionId, mode);
     },
+    async updateTourTime(request) {
+      await ensureOwner();
+      const saved = request.tourId ? library.available(request.tourId) : undefined;
+      if (
+        saved &&
+        downloadTourMode(saved.tour) === request.mode &&
+        coversTour(saved, saved.tour) &&
+        downloadedTourScript(saved).instanceId === request.scriptInstanceId
+      )
+        return {
+          sessionId: request.sessionId,
+          sequence: request.sequence,
+          source: 'legacy',
+          offline: true,
+          state: request.state,
+          remainingSeconds: null,
+          leaseExpiresAt: null,
+          serverNow: Date.now(),
+        };
+      return base.updateTourTime(request);
+    },
     async getNarration(req) {
+      if (req.access?.groupId) return base.getNarration(req);
       if (req.access?.mode === 'roam' || req.access?.mode === 'fork') return base.getNarration(req);
       await ensureOwner();
       const tourId = req.access?.tourId;
@@ -108,6 +131,7 @@ export function withOfflineFirst(
       return base.getNarration(req);
     },
     async getTransition(req) {
+      if (req.access?.groupId) return base.getTransition(req);
       if (req.access?.mode === 'roam' || req.access?.mode === 'fork') return base.getTransition(req);
       await ensureOwner();
       const saved = req.access?.tourId ? library.available(req.access.tourId) : undefined;

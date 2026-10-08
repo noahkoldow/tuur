@@ -7,6 +7,8 @@ import {
   getAuth,
   linkWithCredential,
   onIdTokenChanged,
+  reauthenticateWithCredential,
+  revokeToken,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut,
@@ -47,6 +49,8 @@ import {
   type Tour,
   EntitlementSchema,
   LEGAL_VERSION,
+  AI_CONSENT_VERSION,
+  type AiConsentState,
   type Entitlement,
   type Wallet,
 } from '@tuur/shared';
@@ -54,7 +58,8 @@ import { config } from '../config';
 import { toBackendError } from './errors';
 import { reachableAudioUrl } from './audioUrl';
 import { linkOrSignIn } from './linkOrSignIn';
-import { accountStep, requireVerifiedAccount } from '../auth/policy';
+import { accountStep, requirePrimaryAccount } from '../auth/policy';
+import { deleteAccountWithAppleRevocation } from '../auth/delete-account';
 import { requestNativePhoneCode } from '../auth/phone-verification';
 import {
   BackendError,
@@ -112,7 +117,7 @@ export function createFirebaseBackend(): Backend {
     onChange: (cb) => onIdTokenChanged(auth, (u) => cb(toUser(u))),
     ensureSignedIn: async () => {
       await auth.authStateReady();
-      return requireVerifiedAccount(toUser(auth.currentUser));
+      return requirePrimaryAccount(toUser(auth.currentUser));
     },
     async signInWithEmail(email, password, create) {
       const current = auth.currentUser;
@@ -333,6 +338,7 @@ export function createFirebaseBackend(): Backend {
     async getTeaser(req) {
       return (await call<{ poiId: string; lang: string }, { text: string }>('getTeaser', req)).text;
     },
+    getPoiText: (req) => call('getPoiText', req),
     async getNarration(req: GetNarrationRequest) {
       const n = await call<GetNarrationRequest, NarrationResponse>('getNarration', req);
       if (n.audioUrl) {
@@ -387,12 +393,44 @@ export function createFirebaseBackend(): Backend {
       return () => unsubs.forEach((u) => u());
     },
     async deleteAccount() {
-      await call('deleteAccount', {});
-      await signOut(auth).catch(() => undefined);
+      const current = auth.currentUser;
+      await deleteAccountWithAppleRevocation({
+        current: () => toUser(auth.currentUser),
+        reauthenticateApple: async () => {
+          if (!current) throw new BackendError('unauthenticated', 'Sign in first');
+          const AppleAuthentication = await import('expo-apple-authentication');
+          const Crypto = await import('expo-crypto');
+          const nonce = Crypto.randomUUID();
+          const response = await AppleAuthentication.signInAsync({
+            requestedScopes: [AppleAuthentication.AppleAuthenticationScope.EMAIL],
+            nonce: await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce),
+          });
+          if (!response.identityToken || !response.authorizationCode)
+            throw new BackendError('unavailable', 'Apple did not return a revocation code');
+          if (auth.currentUser?.uid !== current.uid)
+            throw new BackendError('unauthenticated', 'Account changed');
+          await reauthenticateWithCredential(
+            current,
+            AppleAuthProvider.credential(response.identityToken, nonce),
+          );
+          return response.authorizationCode;
+        },
+        revokeApple: (code) => revokeToken(auth, code),
+        deleteData: () => call('deleteAccount', {}),
+        signOut: () => signOut(auth),
+      });
     },
     exportMyData: () => call('exportMyData', {}),
+    getAiConsent: () => call<Record<string, never>, AiConsentState>('getAiConsent', {}),
+    updateAiConsent: (granted) =>
+      call<{ granted: boolean; version: string }, AiConsentState>('updateAiConsent', {
+        granted,
+        version: AI_CONSENT_VERSION,
+      }),
     claimTourStart: (tourId, sessionId, mode) => call('claimTourStart', { tourId, sessionId, mode }),
-    prepareTourDownload: (tourId, mode) => call('prepareTourDownload', { tourId, mode }),
+    updateTourTime: (req) => call('updateTourTime', req),
+    prepareTourDownload: (tourId, mode, scriptInstanceId) =>
+      call('prepareTourDownload', { tourId, mode, ...(scriptInstanceId ? { scriptInstanceId } : {}) }),
     async recordPurchaseConsent(productId) {
       await call('recordPurchaseConsent', { productId, textVersion: LEGAL_VERSION });
     },
@@ -400,7 +438,8 @@ export function createFirebaseBackend(): Backend {
     submitPartnerApplication: (app) => call('submitPartnerApplication', app),
     createGroup: (req) => call('createTourGroup', req),
     joinGroup: (token) => call('joinTourGroup', { token }),
-    addGroupSeat: (groupId) => call('addTourGroupSeat', { groupId }),
+    addGroupSeat: (groupId, requestId) =>
+      call('addTourGroupSeat', { groupId, ...(requestId ? { requestId } : {}) }),
     async leaveGroup(groupId) {
       await call('leaveTourGroup', { groupId });
     },
@@ -421,6 +460,8 @@ export function createFirebaseBackend(): Backend {
                   capacity: groupCapacity(g.data),
                   status: g.data.status,
                   expiresAt: g.data.expiresAt,
+                  ...(g.data.audio ? { audio: g.data.audio } : {}),
+                  ...(g.data.sessionId ? { sessionId: g.data.sessionId } : {}),
                 }
               : null,
           );
@@ -453,6 +494,9 @@ export function createFirebaseBackend(): Backend {
     },
     async reportNarration(input) {
       await call('reportNarration', input);
+    },
+    async reportContent(input) {
+      await call('reportContent', input);
     },
   };
 }

@@ -8,7 +8,18 @@ export interface AccountAuth {
   getUser(uid: string): Promise<{
     uid: string;
     email?: string | undefined;
-    providerData: { providerId: string }[];
+    emailVerified?: boolean | undefined;
+    phoneNumber?: string | undefined;
+    displayName?: string | undefined;
+    photoURL?: string | undefined;
+    providerData: {
+      providerId: string;
+      uid?: string | undefined;
+      email?: string | undefined;
+      phoneNumber?: string | undefined;
+      displayName?: string | undefined;
+      photoURL?: string | undefined;
+    }[];
     metadata: { creationTime?: string | undefined; lastSignInTime?: string | undefined };
   }>;
   deleteUser(uid: string): Promise<void>;
@@ -42,6 +53,10 @@ const RATE_LIMIT_PREFIXES = [
   'redeem_',
   'tours_user_',
   'teaser_user_',
+  'poi_text_user_',
+  'ai_consent_read_',
+  'ai_consent_write_',
+  'content_report_',
   'nearby_user_',
   'route_',
   'export_data_',
@@ -50,14 +65,25 @@ const RATE_LIMIT_PREFIXES = [
   'partnerApply_',
 ];
 
-async function deleteByQuery(db: Firestore, q: FirebaseFirestore.Query): Promise<number> {
+const accountRateLimits = (db: Firestore, uid: string) =>
+  Promise.all(
+    RATE_LIMIT_PREFIXES.map((prefix) =>
+      db.collection('rateLimits').doc(`${prefix}${uid}`.replace(/\//g, '_')).get(),
+    ),
+  );
+
+async function deleteByQuery(db: Firestore, q: FirebaseFirestore.Query, recursive = false): Promise<number> {
   let n = 0;
   for (;;) {
     const snap = await q.limit(300).get();
     if (snap.empty) return n;
-    const batch = db.batch();
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+    if (recursive) {
+      for (const doc of snap.docs) await db.recursiveDelete(doc.ref);
+    } else {
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
     n += snap.size;
     if (snap.size < 300) return n;
   }
@@ -74,7 +100,11 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
   const summary: Record<string, number> = {};
 
   // Removing a hosted group also revokes guests' access to its copied private route.
-  summary['groupsHosted'] = await deleteByQuery(db, db.collection('groups').where('hostUid', '==', uid));
+  summary['groupsHosted'] = await deleteByQuery(
+    db,
+    db.collection('groups').where('hostUid', '==', uid),
+    true,
+  );
   let memberships = 0;
   for (;;) {
     const joined = await db.collection('groups').where('members', 'array-contains', uid).limit(300).get();
@@ -129,11 +159,7 @@ export async function deleteAccount(deps: AccountDeps, uid: string) {
   );
 
   // Exact keys preserve accounts whose uid starts with this uid.
-  const limits = await Promise.all(
-    RATE_LIMIT_PREFIXES.map((prefix) =>
-      db.collection('rateLimits').doc(`${prefix}${uid}`.replace(/\//g, '_')).get(),
-    ),
-  );
+  const limits = await accountRateLimits(db, uid);
   const limitBatch = db.batch();
   limits.filter((s) => s.exists).forEach((s) => limitBatch.delete(s.ref));
   await limitBatch.commit();
@@ -170,13 +196,26 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
   };
   const hostedGroups = await list(db.collection('groups').where('hostUid', '==', uid));
   const joinedGroups = await list(db.collection('groups').where('members', 'array-contains', uid));
+  const limits = await accountRateLimits(db, uid);
   return {
     generatedAt: deps.now(),
     account: user
       ? {
           uid,
           ...(user.email ? { email: user.email } : {}),
+          ...(user.emailVerified !== undefined ? { emailVerified: user.emailVerified } : {}),
+          ...(user.phoneNumber ? { phoneNumber: user.phoneNumber } : {}),
+          ...(user.displayName ? { displayName: user.displayName } : {}),
+          ...(user.photoURL ? { photoURL: user.photoURL } : {}),
           providers: user.providerData.map((p) => p.providerId),
+          linkedAccounts: user.providerData.map((p) => ({
+            providerId: p.providerId,
+            ...(p.uid ? { uid: p.uid } : {}),
+            ...(p.email ? { email: p.email } : {}),
+            ...(p.phoneNumber ? { phoneNumber: p.phoneNumber } : {}),
+            ...(p.displayName ? { displayName: p.displayName } : {}),
+            ...(p.photoURL ? { photoURL: p.photoURL } : {}),
+          })),
           createdAt: user.metadata.creationTime,
           lastSignIn: user.metadata.lastSignInTime,
         }
@@ -185,6 +224,12 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
     entitlements: await list(db.collection('users').doc(uid).collection('entitlements')),
     wallet: (await db.collection('users').doc(uid).collection('credits').doc('wallet').get()).data() ?? null,
     creditLedger: await list(db.collection('users').doc(uid).collection('creditLedger')),
+    rateLimits: limits
+      .filter((snapshot) => snapshot.exists)
+      .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() })),
+    tourTime: await list(db.collection('users').doc(uid).collection('tourTime')),
+    tourTimeSessions: await list(db.collection('users').doc(uid).collection('tourTimeSessions')),
+    tourDownloads: await list(db.collection('users').doc(uid).collection('tourDownloads')),
     purchases: await list(db.collection('revenuecatPurchases').where('ownerUid', '==', uid)),
     subscriptions: await list(db.collection('revenuecatSubscriptions').where('ownerUid', '==', uid)),
     // Include participation without exposing invite hashes or other members' identities/private routes.
@@ -195,6 +240,7 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
         .map((g) => groupInfo(g, 'member')),
     ],
     consents: await list(db.collection('users').doc(uid).collection('consents')),
+    blockedPartners: await list(db.collection('users').doc(uid).collection('blockedPartners')),
     personalNarrations: await list(db.collection('narrations').where('ownerUid', '==', uid)),
     plannedRoutes: (await list(db.collection('users').doc(uid).collection('sessions'))).map((s) => ({
       id: s.id,
@@ -222,6 +268,9 @@ export async function exportMyData(deps: AccountDeps, uid: string) {
       const r = f as Record<string, unknown>;
       return {
         narrationKey: r['narrationKey'],
+        kind: r['kind'],
+        offerId: r['offerId'],
+        partnerId: r['partnerId'],
         reason: r['reason'],
         text: r['text'],
         status: r['status'],

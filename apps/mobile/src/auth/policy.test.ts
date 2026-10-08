@@ -1,19 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoBackend } from '../backend/demoBackend';
-import { accountStep, authErrorKey, normalizedPhone, requireVerifiedAccount, validPhone } from './policy';
+import { accountStep, authErrorKey, normalizedPhone, requirePrimaryAccount, validPhone } from './policy';
 
-describe('required account and mobile verification', () => {
+describe('primary account and optional mobile verification', () => {
   it('rejects missing and legacy anonymous accounts even if they have a phone number', () => {
     for (const user of [null, { uid: 'old', isAnonymous: true, phoneNumber: '+491701234567' }]) {
       expect(accountStep(user)).toBe('sign-in');
-      expect(() => requireVerifiedAccount(user)).toThrow('Sign in and verify');
+      expect(() => requirePrimaryAccount(user)).toThrow('Sign in');
     }
   });
 
-  it('requires a linked phone for email and social accounts', () => {
+  it('allows email and social accounts without a phone but rejects phone-only accounts', () => {
     const user = { uid: 'u', isAnonymous: false, email: 'test@example.com' };
-    expect(accountStep(user)).toBe('phone');
-    expect(() => requireVerifiedAccount(user)).toThrow();
+    expect(accountStep(user)).toBe('ready');
+    expect(requirePrimaryAccount(user)).toBe(user);
+    for (const provider of ['password', 'apple.com', 'google.com'])
+      expect(accountStep({ ...user, providerIds: [provider] })).toBe('ready');
     expect(accountStep({ ...user, phoneNumber: '+491701234567' })).toBe('ready');
     expect(accountStep({ ...user, providerIds: ['phone'], phoneNumber: '+491701234567' })).toBe('sign-in');
     expect(accountStep({ ...user, providerIds: ['phone', 'apple.com'], phoneNumber: '+491701234567' })).toBe(
@@ -38,12 +40,13 @@ describe('required account and mobile verification', () => {
     const updates: (string | undefined)[] = [];
     const off = auth.onChange((user) => updates.push(user?.phoneNumber));
     await auth.signInWithEmail('test@example.com', 'correct-password', true);
-    await expect(auth.ensureSignedIn()).rejects.toMatchObject({ code: 'unauthenticated' });
+    await expect(auth.ensureSignedIn()).resolves.toMatchObject({ isAnonymous: false });
+    expect(auth.current()?.phoneNumber).toBeUndefined();
     const id = await auth.requestPhoneVerification('+49 170 1234567');
     await expect(auth.confirmPhoneVerification(id, '123456')).rejects.toMatchObject({
       code: 'auth/invalid-verification-code',
     });
-    expect(accountStep(auth.current())).toBe('phone');
+    expect(accountStep(auth.current())).toBe('ready');
     await auth.confirmPhoneVerification(id, '000000');
     await expect(auth.ensureSignedIn()).resolves.toMatchObject({
       phoneNumber: '+491701234567',
@@ -65,7 +68,7 @@ describe('required account and mobile verification', () => {
     await auth.signOut();
     await auth.signInWithApple();
     await expect(auth.confirmPhoneVerification(second, '000000')).rejects.toThrow();
-    expect(accountStep(auth.current())).toBe('phone');
+    expect(accountStep(auth.current())).toBe('ready');
   });
 
   it('keeps provider cancellation quiet and gives an actionable SMS recovery message', () => {

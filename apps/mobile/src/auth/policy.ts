@@ -1,8 +1,8 @@
 import { BackendError, type UserInfo } from '../backend/types';
 
-export type AccountStep = 'sign-in' | 'phone' | 'ready';
+export type AccountStep = 'sign-in' | 'ready';
 
-/** Only Firebase's linked phone credential counts; a locally entered phone number never grants access. */
+/** A primary account enables the app; a phone credential is optional and never grants access by itself. */
 export function accountStep(user: UserInfo | null): AccountStep {
   if (!user || user.isAnonymous) return 'sign-in';
   if (
@@ -10,12 +10,12 @@ export function accountStep(user: UserInfo | null): AccountStep {
     !user.providerIds.some((id) => ['password', 'apple.com', 'google.com'].includes(id))
   )
     return 'sign-in';
-  return user.phoneNumber ? 'ready' : 'phone';
+  return 'ready';
 }
 
-export function requireVerifiedAccount(user: UserInfo | null): UserInfo {
+export function requirePrimaryAccount(user: UserInfo | null): UserInfo {
   if (!user || accountStep(user) !== 'ready')
-    throw new BackendError('unauthenticated', 'Sign in and verify your mobile number to continue');
+    throw new BackendError('unauthenticated', 'Sign in to continue');
   return user;
 }
 

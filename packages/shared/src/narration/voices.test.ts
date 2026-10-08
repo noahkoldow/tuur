@@ -8,9 +8,22 @@ import {
   parseVoiceSpec,
   pickVoiceSpec,
   resolvePersona,
+  voiceDisplayName,
 } from './voices';
 
 describe('voice cast', () => {
+  it('displays Linus while preserving the lina ID and normalizes older remote display names', () => {
+    const linus = resolvePersona(DEFAULT_VOICE_CAST, DEFAULT_VOICE_ID, 'lina');
+    expect(linus.id).toBe('lina');
+    expect(linus.names).toEqual({ de: 'Linus', en: 'Linus' });
+    const legacy = { ...linus, names: { de: 'Lina', en: 'Lina' } };
+    expect(voiceDisplayName(legacy, 'de-DE')).toBe('Linus');
+    expect(voiceDisplayName(legacy, 'en')).toBe('Linus');
+    expect(legacy.names.de).toBe('Lina');
+    expect(voiceDisplayName({ id: 'other', names: { de: 'Anders', en: 'Other' } }, 'de-DE')).toBe('Anders');
+    expect(voiceDisplayName({ id: 'other', names: { en: 'Other' } }, 'fr')).toBe('Other');
+  });
+
   it('ships valid personas with a fallback on the other provider', () => {
     for (const v of DEFAULT_VOICE_CAST) {
       expect(VoicePersonaSchema.safeParse(v).success).toBe(true);

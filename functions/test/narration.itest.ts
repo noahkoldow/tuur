@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AI_CONSENT_VERSION,
   DEFAULT_AI_CONFIG,
   createTourScript,
   buildPois,
@@ -91,6 +92,13 @@ const mk = (over: Partial<NarrationDeps> & { llm?: LlmProvider } = {}, cfg: Part
 
 beforeEach(async () => {
   await clearFirestore();
+  for (const uid of ['u1', 'u2'])
+    await db
+      .collection('users')
+      .doc(uid)
+      .collection('consents')
+      .doc('ai')
+      .set({ granted: true, version: AI_CONSENT_VERSION, updatedAt: clock });
   clock += 3 * 3600_000; // fresh rate-limit / budget window for each test
   const { pois } = buildPois(REGION_FIXTURES[0]!.raw, { now: clock });
   poi = pois.find((p) => p.id === 'wd_Q82425')!;

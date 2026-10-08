@@ -6,7 +6,7 @@ import {
   type Poi,
   type SourceBundle,
 } from '@tuur/shared';
-import { fetchJson } from '../util/http';
+import { fetchJson, type FetchOptions } from '../util/http';
 
 /** Collects the verified source material for a POI (Wikipedia excerpts, Wikidata facts, OSM tags, admin facts). */
 export interface NarrationSourceProvider {
@@ -14,10 +14,17 @@ export interface NarrationSourceProvider {
 }
 
 export class HttpNarrationSources implements NarrationSourceProvider {
+  constructor(
+    private readonly requestOptions: Pick<FetchOptions, 'timeoutMs' | 'retries'> = {},
+    private readonly wikipediaOnly = false,
+  ) {}
+
   async gather(poi: Poi, langs: string[]): Promise<SourceBundle> {
     const wikipedia: SourceBundle['wikipedia'] = [];
     // Prefer the local-language article (usually the richest), then requested languages; max 3 excerpts.
     const refs = [...poi.sources.wikipedia]
+      // Only Wikimedia language subdomains from canonical POI records, never a supplied URL/host.
+      .filter((ref) => /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(ref.lang) && ref.lang.length <= 24)
       .sort(
         (a, b) =>
           Number(langs.indexOf(a.lang) === -1) - Number(langs.indexOf(b.lang) === -1) ||
@@ -33,11 +40,11 @@ export class HttpNarrationSources implements NarrationSourceProvider {
             format: 'json',
             prop: 'extracts',
             explaintext: '1',
-            exchars: '5000',
+            exchars: '1200',
             redirects: '1',
             titles: r.title,
           });
-          const json = await fetchJson(`https://${r.lang}.wikipedia.org/w/api.php?${p}`);
+          const json = await fetchJson(`https://${r.lang}.wikipedia.org/w/api.php?${p}`, this.requestOptions);
           const text = [...parseWikipediaExtracts(json).values()][0];
           if (text)
             wikipedia.push({ lang: r.lang, title: r.title, extract: text, ...(r.url ? { url: r.url } : {}) });
@@ -48,7 +55,7 @@ export class HttpNarrationSources implements NarrationSourceProvider {
     );
     const facts: SourceBundle['facts'] = [];
     const qid = poi.sources.wikidataId;
-    if (qid) {
+    if (qid && !this.wikipediaOnly) {
       try {
         const p = new URLSearchParams({ action: 'wbgetentities', format: 'json', ids: qid, props: 'claims' });
         const parsed = parseWikidataFacts(await fetchJson(`https://www.wikidata.org/w/api.php?${p}`), qid);

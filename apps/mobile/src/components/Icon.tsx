@@ -39,6 +39,7 @@ const SF: Record<string, string> = {
   // media
   play: 'play.fill',
   pause: 'pause.fill',
+  stop: 'stop.fill',
   'play-circle': 'play.circle.fill',
   'skip-forward': 'forward.end.fill',
   'skip-back': 'backward.end.fill',

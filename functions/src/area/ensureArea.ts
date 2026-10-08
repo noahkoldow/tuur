@@ -1,6 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { DEFAULT_CLAIM_POLICY, tileWithNeighbors, tilesAround, type ClaimPolicy } from '@tuur/shared';
-import { FieldValue } from 'firebase-admin/firestore';
 import { claimArea, deferAreaForQuota, markAreaFailed } from './store';
 import { RateLimitError } from '../util/rateLimit';
 
@@ -42,32 +41,40 @@ export async function ensureAreas(
         : [geohash];
   const started: string[] = [];
   const skipped: string[] = [];
-  const day = new Date(deps.now()).toISOString().slice(0, 10);
-  const counter = deps.db.collection('usageDaily').doc(day);
-  if (
-    Number((await counter.get()).get('tilesClaimed') ?? 0) >=
-    (deps.maxClaimsPerDay ?? MAX_TILE_CLAIMS_PER_DAY)
-  )
-    return { started, skipped: tiles };
-  await Promise.all(
-    tiles.map(async (tile) => {
-      const now = deps.now();
-      const claimed = await claimArea(deps.db, tile, now, deps.policy ?? DEFAULT_CLAIM_POLICY);
-      if (!claimed) {
-        skipped.push(tile);
-        return;
-      }
-      await counter.set({ day, tilesClaimed: FieldValue.increment(1) }, { merge: true });
-      try {
-        await deps.enqueueIngest(tile);
-        started.push(tile);
-      } catch (e) {
-        // Emulator ingest runs inline and must preserve the same retryable quota state as Cloud Tasks.
-        if (e instanceof RateLimitError) await deferAreaForQuota(deps.db, tile, e.retryAfterMs, deps.now());
-        else await markAreaFailed(deps.db, tile, `enqueue failed: ${(e as Error).message}`, deps.now());
-        skipped.push(tile);
-      }
-    }),
-  );
+  let quotaRetryAfterMs: number | undefined;
+  // The helpers order the current tile first, then nearby rings. Submit in that order so a small
+  // daily allowance is spent on the user's immediate surroundings before more distant neighbors.
+  for (const tile of tiles) {
+    const now = deps.now();
+    let claimed: boolean;
+    try {
+      claimed = await claimArea(
+        deps.db,
+        tile,
+        now,
+        deps.policy ?? DEFAULT_CLAIM_POLICY,
+        deps.maxClaimsPerDay ?? MAX_TILE_CLAIMS_PER_DAY,
+      );
+    } catch (error) {
+      if (!(error instanceof RateLimitError)) throw error;
+      quotaRetryAfterMs = Math.min(quotaRetryAfterMs ?? Infinity, error.retryAfterMs);
+      skipped.push(tile);
+      continue;
+    }
+    if (!claimed) {
+      skipped.push(tile);
+      continue;
+    }
+    try {
+      await deps.enqueueIngest(tile);
+      started.push(tile);
+    } catch (e) {
+      // Emulator ingest runs inline and must preserve the same retryable quota state as Cloud Tasks.
+      if (e instanceof RateLimitError) await deferAreaForQuota(deps.db, tile, e.retryAfterMs, deps.now());
+      else await markAreaFailed(deps.db, tile, `enqueue failed: ${(e as Error).message}`, deps.now());
+      skipped.push(tile);
+    }
+  }
+  if (!started.length && quotaRetryAfterMs !== undefined) throw new RateLimitError(quotaRetryAfterMs);
   return { started, skipped };
 }

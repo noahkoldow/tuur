@@ -4,10 +4,12 @@ import { BottomSheet, Button, Column, ScrollView, Text } from '@expo/ui';
 import { useTranslation } from 'react-i18next';
 import { Icon } from './Icon';
 import { attributionUrl, photoAttribution, type PhotoAttribution } from './image-attribution';
+import type { PlaceTextStatusProps } from './place-text-status';
 
 export interface PhotoTextSource {
   text: string;
   sourceUrl?: string | undefined;
+  sourceName?: string | undefined;
 }
 
 /** The sheet's web portal is outside Host CSS variables, so its controls need explicit colors. */
@@ -38,10 +40,14 @@ export function PhotoInfo({
   image,
   name,
   summary,
+  onOpen,
+  textStatus,
 }: {
   image?: PhotoAttribution | undefined;
   name: string;
   summary?: PhotoTextSource | undefined;
+  onOpen?: (() => void) | undefined;
+  textStatus?: PlaceTextStatusProps | undefined;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -54,7 +60,7 @@ export function PhotoInfo({
     setLinkError(false);
     void Linking.openURL(url).catch(() => setLinkError(true));
   };
-  if (!credit?.license && !credit?.sourceUrl && !summary) return null;
+  if (!credit?.license && !credit?.sourceUrl && !summary && !textStatus) return null;
   return (
     <>
       <Pressable
@@ -63,6 +69,7 @@ export function PhotoInfo({
         onPress={(event) => {
           event.stopPropagation();
           setLinkError(false);
+          onOpen?.();
           setOpen(true);
         }}
         style={({ pressed }) => ({
@@ -111,20 +118,54 @@ export function PhotoInfo({
                 ) : null}
               </Column>
             ) : null}
+            {!summary && textStatus ? (
+              <Column spacing={8}>
+                <Text textStyle={{ ...ink, fontWeight: '600' }}>{t('cards.text')}</Text>
+                <Text textStyle={ink}>
+                  {t(
+                    textStatus.loading
+                      ? 'stopInfo.loading'
+                      : textStatus.error
+                        ? 'stopInfo.loadError'
+                        : 'stopInfo.unavailable',
+                  )}
+                </Text>
+                {!textStatus.loading ? (
+                  <CreditButton label={t('common.retry')} onPress={textStatus.retry} />
+                ) : null}
+              </Column>
+            ) : null}
             {summary ? (
               <Column spacing={8}>
                 <Text textStyle={{ ...ink, fontWeight: '600' }}>{t('cards.text')}</Text>
                 <Text textStyle={ink}>{summary.text}</Text>
+                {textStatus?.error ? (
+                  <Column spacing={8}>
+                    <Text textStyle={ink}>{t('stopInfo.loadError')}</Text>
+                    <CreditButton label={t('common.retry')} onPress={textStatus.retry} />
+                  </Column>
+                ) : null}
+                {!summary.sourceName ? <Text textStyle={ink}>{t('cards.wikipediaEdited')}</Text> : null}
                 {textSourceUrl ? (
                   <CreditButton
-                    label={t('cards.source', { source: 'Wikipedia' })}
+                    label={t('cards.source', { source: summary.sourceName ?? 'Wikipedia' })}
                     onPress={() => openUrl(textSourceUrl)}
                   />
                 ) : null}
-                <CreditButton
-                  label="CC BY-SA 4.0"
-                  onPress={() => openUrl('https://creativecommons.org/licenses/by-sa/4.0/')}
-                />
+                {!summary.sourceName ? (
+                  <CreditButton
+                    label="CC BY-SA 4.0"
+                    onPress={() => openUrl('https://creativecommons.org/licenses/by-sa/4.0/')}
+                  />
+                ) : (
+                  <Text textStyle={ink}>{t('cards.source', { source: summary.sourceName })}</Text>
+                )}
+                {summary.sourceName === 'OpenStreetMap' ? (
+                  <CreditButton
+                    label={t('cards.osmCredit')}
+                    onPress={() => openUrl('https://www.openstreetmap.org/copyright')}
+                  />
+                ) : null}
               </Column>
             ) : null}
             {linkError ? <Text textStyle={ink}>{t('cards.openLinkError')}</Text> : null}

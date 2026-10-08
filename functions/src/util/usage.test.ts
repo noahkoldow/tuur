@@ -5,6 +5,7 @@ import { BudgetError, dayKey, reserveBudget, settleBudget, spentToday, withBudge
 import { budgetedLlm } from '../providers/budgeted';
 import { MockLlmProvider } from '../providers/llm';
 import { renderAudio } from '../narration/service';
+import { consentBoundLlm, requireAiConsent } from '../privacy/aiConsent';
 
 const time = Date.UTC(2026, 9, 4, 23, 59, 59);
 const cfg: AiConfig = {
@@ -72,6 +73,28 @@ describe('atomic estimated spending reservations', () => {
       BudgetError,
     );
     expect((await spentToday(db, undefined, time)).globalToday).toBeCloseTo(0.9);
+  });
+
+  it('releases the reserved estimate when consent prevents the provider request from being sent', async () => {
+    const { db, docs } = memoryFirestore();
+    const provider = new MockLlmProvider();
+    const generate = vi.spyOn(provider, 'teaser');
+    const llm = budgetedLlm(
+      consentBoundLlm(provider, () => requireAiConsent(db, 'listener')),
+      db,
+      cfg,
+      () => time,
+      { tile: 'area' },
+    );
+    await expect(
+      llm.teaser({ model: 'lite', lang: 'en', name: 'place', sources: 'source' }),
+    ).rejects.toMatchObject({ details: { reason: 'ai_consent_required' } });
+    expect(generate).not.toHaveBeenCalled();
+    expect((await spentToday(db, 'area', time)).globalToday).toBe(0);
+    expect(docs.get(`usageDaily/${dayKey(time)}`)?.['reservedUsd']).toBe(0);
+    expect([...docs.entries()].filter(([path]) => path.startsWith('usageLogs/'))).toEqual([
+      [expect.any(String), expect.objectContaining({ note: 'ai_consent_required', costUsd: 0 })],
+    ]);
   });
 
   it('settles once against the reserved UTC day even after midnight', async () => {

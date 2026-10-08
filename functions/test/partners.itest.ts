@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  AI_CONSENT_VERSION,
   DEFAULT_AI_CONFIG,
   REGION_FIXTURES,
   buildPois,
+  createTourScript,
   partnerIntro,
   type Poi,
+  type Offer,
   type SourceBundle,
 } from '@tuur/shared';
 import { MockLlmProvider } from '../src/providers/llm';
@@ -28,6 +31,8 @@ import {
   type PartnerDeps,
 } from '../src/partners/service';
 import { clearFirestore, testDb } from './helpers';
+import { moderateOffer } from '../src/safety/offers';
+import { reportContent } from '../src/safety/reports';
 
 const db = testDb();
 let clock = 1_800_000_000_000;
@@ -92,8 +97,26 @@ const offerInput = (over: Record<string, unknown> = {}) => ({
 
 const near = { lat: 52.5163, lng: 13.3777 };
 
+/** Consumer fixtures must pass the same revision-specific approval as real partner offers. */
+async function approveOffer(offer: Offer): Promise<Offer> {
+  await moderateOffer(
+    db,
+    'test-moderator',
+    { offerId: offer.id, revision: offer.reviewRevision, status: 'approved' },
+    clock,
+  );
+  return offer;
+}
+
 beforeEach(async () => {
   await clearFirestore();
+  for (const uid of ['u1', 'u2'])
+    await db
+      .collection('users')
+      .doc(uid)
+      .collection('consents')
+      .doc('ai')
+      .set({ granted: true, version: AI_CONSENT_VERSION, updatedAt: clock });
   clock += 3 * 3600_000;
   const { pois } = buildPois(REGION_FIXTURES[0]!.raw, { now: clock });
   poi = pois.find((p) => p.id === 'wd_Q82425')!;
@@ -233,13 +256,15 @@ describe('offers', () => {
 
   it('are listed to listeners only while valid and only for live partners', async () => {
     await livePartner();
-    const o = await saveOffer(deps(), 'pa1', offerInput());
-    await saveOffer(
-      deps(),
-      'pa1',
-      offerInput({ title: 'abgelaufen', validFrom: clock - 5000, validUntil: clock - 1000 }),
+    const o = await approveOffer(await saveOffer(deps(), 'pa1', offerInput()));
+    await approveOffer(
+      await saveOffer(
+        deps(),
+        'pa1',
+        offerInput({ title: 'abgelaufen', validFrom: clock - 5000, validUntil: clock - 1000 }),
+      ),
     );
-    await saveOffer(deps(), 'pa1', offerInput({ title: 'pausiert', active: false }));
+    await approveOffer(await saveOffer(deps(), 'pa1', offerInput({ title: 'pausiert', active: false })));
     const list = await getOffers(deps(), { poiIds: [poi.id] });
     expect(list.map((x) => x.id)).toEqual([o.id]);
     expect(list[0]).toMatchObject({ partnerName: 'Café Linde', title: '10 % auf Kuchen' });
@@ -258,12 +283,82 @@ describe('offers', () => {
       PartnerError,
     );
   });
+
+  it('keeps new and rejected offers private until their exact revision is approved', async () => {
+    await livePartner();
+    const offer = await saveOffer(deps(), 'pa1', offerInput({ moderationStatus: 'approved' }));
+    expect(offer.moderationStatus).toBe('pending');
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toEqual([]);
+    await expect(
+      createRedemptionToken(deps(), 'listener', { offerId: offer.id, position: near }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+
+    await moderateOffer(
+      db,
+      'reviewer',
+      {
+        offerId: offer.id,
+        revision: offer.reviewRevision,
+        status: 'rejected',
+      },
+      clock,
+    );
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toEqual([]);
+    await expect(
+      createRedemptionToken(deps(), 'listener', { offerId: offer.id, position: near }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+
+    await approveOffer(offer);
+    expect((await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).map((item) => item.id)).toEqual([
+      offer.id,
+    ]);
+  });
+
+  it('hides an approved offer again after an edit and invalidates stale approvals and redemption tokens', async () => {
+    await livePartner();
+    const offer = await approveOffer(await saveOffer(deps(), 'pa1', offerInput()));
+    const token = await createRedemptionToken(deps(), 'listener', { offerId: offer.id, position: near });
+    const edited = await saveOffer(deps(), 'pa1', offerInput({ offerId: offer.id, title: 'New terms' }));
+    expect(edited.moderationStatus).toBe('pending');
+    expect(edited.reviewRevision).not.toBe(offer.reviewRevision);
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toEqual([]);
+    await expect(approveOffer(offer)).rejects.toMatchObject({ code: 'failed-precondition' });
+    await expect(redeemToken(deps(), 'pa1', { token: token.token })).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    await approveOffer(edited);
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toEqual([
+      expect.objectContaining({ id: edited.id, title: 'New terms' }),
+    ]);
+  });
+
+  it('hides every offer of the reported partner only for the user who blocked them', async () => {
+    await livePartner();
+    const first = await approveOffer(await saveOffer(deps(), 'pa1', offerInput()));
+    await approveOffer(await saveOffer(deps(), 'pa1', offerInput({ title: 'Second offer' })));
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toHaveLength(2);
+    await reportContent(
+      db,
+      'listener',
+      {
+        requestId: '93fcd207-fb01-47bf-b819-d78bcad30af3',
+        kind: 'offer',
+        offerId: first.id,
+        reason: 'offensive',
+        text: 'Please review this offer.',
+        blockPartner: true,
+      },
+      clock,
+    );
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'listener')).toEqual([]);
+    expect(await getOffers(deps(), { poiIds: [poi.id] }, 'another-listener')).toHaveLength(2);
+  });
 });
 
 describe('QR redemption', () => {
   const setup = async (over: Record<string, unknown> = {}) => {
     await livePartner();
-    return saveOffer(deps(), 'pa1', offerInput(over));
+    return approveOffer(await saveOffer(deps(), 'pa1', offerInput(over)));
   };
 
   it('issues a token near the partner, the partner redeems it once and both sides see the result', async () => {
@@ -375,7 +470,7 @@ describe('QR redemption', () => {
 describe('aggregated statistics', () => {
   it('count impressions and visits once per listener and poi, and redemptions, without user ids', async () => {
     await livePartner();
-    const offer = await saveOffer(deps(), 'pa1', offerInput());
+    const offer = await approveOffer(await saveOffer(deps(), 'pa1', offerInput()));
     for (const uid of ['a', 'a', 'b'])
       await recordPartnerEvent(deps(), uid, { poiId: poi.id, type: 'impression' });
     await recordPartnerEvent(deps(), 'a', { poiId: poi.id, type: 'visit' });
@@ -413,7 +508,14 @@ describe('partner narration', () => {
     now: () => clock,
     config: async () => DEFAULT_AI_CONFIG,
   });
-  const req = { poiId: 'wd_Q82425', lang: 'de', lengthTier: 'short' };
+  const req = {
+    poiId: 'wd_Q82425',
+    lang: 'de',
+    lengthTier: 'short',
+    context: {
+      script: createTourScript({ lang: 'de', interests: ['history'], instanceId: 'partner-revision-test' }),
+    },
+  };
 
   it('announces partner introductions, marks them sponsored and keys them by profile revision', async () => {
     const plain = await getNarration(narrationDeps(), 'u1', req);
@@ -424,7 +526,16 @@ describe('partner narration', () => {
     expect(sp.sponsored).toBe(true);
     expect(sp.text.startsWith(partnerIntro('de'))).toBe(true);
     expect(sp.key).not.toBe(plain.key);
-    expect(sp.key).toContain('-p1');
+    expect((await getNarration(narrationDeps(), 'u1', req)).cached).toBe(true);
+
+    // A user block must also stop reuse of an already cached sponsored recording.
+    const blocked = db.collection('users').doc('u1').collection('blockedPartners').doc('pa1');
+    await blocked.set({ createdAt: clock });
+    const neutral = await getNarration(narrationDeps(), 'u1', req);
+    expect(neutral.sponsored).toBeUndefined();
+    expect(neutral.key).toBe(plain.key);
+    expect(neutral.text).not.toContain(partnerIntro('de'));
+    await blocked.delete();
 
     const en = await getNarration(narrationDeps(), 'u1', { ...req, lang: 'en' });
     expect(en.text.startsWith(partnerIntro('en'))).toBe(true);

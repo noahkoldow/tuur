@@ -1,5 +1,12 @@
 import type { Poi, WikipediaRef } from '@tuur/shared';
 
+export interface PlaceInformation {
+  text: string;
+  sourceUrl?: string;
+  /** Omitted for Wikipedia extracts to preserve the existing attribution. */
+  sourceName?: string;
+}
+
 const SUMMARY_LENGTH = 190;
 
 const ENTITIES: Record<string, string> = {
@@ -77,7 +84,7 @@ function sourceOf(ref: WikipediaRef): string | undefined {
 }
 
 /** Full, readable source text, in the UI language when an extract exists. */
-export function placeInformation(poi: Poi, lang: string): { text: string; sourceUrl?: string } | undefined {
+export function placeInformation(poi: Poi, lang: string): PlaceInformation | undefined {
   const baseLanguage = lang.trim().toLowerCase().split(/[-_]/)[0];
   const available = poi.sources.wikipedia
     .map((ref) => ({ ref, text: cleanExtract(ref.extract ?? '') }))
@@ -86,13 +93,33 @@ export function placeInformation(poi: Poi, lang: string): { text: string; source
     available.find(({ ref }) => ref.lang.toLowerCase() === baseLanguage) ??
     available.find(({ ref }) => ref.lang.toLowerCase() === 'en') ??
     available[0];
-  if (!best) return undefined;
+  if (!best) {
+    const facts = poi.adminFacts.map(cleanExtract).filter(Boolean);
+    if (facts.length) return { text: facts.join('\n\n'), sourceName: 'tuur' };
+    const description = cleanExtract(
+      poi.osmTags[`description:${baseLanguage}`] ?? poi.osmTags.description ?? '',
+    );
+    const inscription = cleanExtract(
+      poi.osmTags[`inscription:${baseLanguage}`] ?? poi.osmTags.inscription ?? '',
+    );
+    const text = [description, inscription].filter(Boolean).join('\n\n');
+    if (!text) return undefined;
+    if (poi.osmTags['tuur:demo'] === 'yes') return { text, sourceName: 'tuur Demo' };
+    const osmId = poi.sources.osmId;
+    return {
+      text,
+      sourceName: 'OpenStreetMap',
+      ...(osmId && /^(node|way|relation)\/\d+$/.test(osmId)
+        ? { sourceUrl: `https://www.openstreetmap.org/${osmId}` }
+        : {}),
+    };
+  }
   const sourceUrl = sourceOf(best.ref);
   return { text: best.text, ...(sourceUrl ? { sourceUrl } : {}) };
 }
 
 /** A short source-backed introduction for cards. Reading a past stop uses the full information above. */
-export function placeSummary(poi: Poi, lang: string): { text: string; sourceUrl?: string } | undefined {
+export function placeSummary(poi: Poi, lang: string): PlaceInformation | undefined {
   const information = placeInformation(poi, lang);
   return information ? { ...information, text: shorten(information.text) } : undefined;
 }

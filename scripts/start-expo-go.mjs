@@ -30,7 +30,7 @@ const child = spawn(
         ? { EXPO_PUBLIC_BACKEND: 'firebase', EXPO_PUBLIC_USE_EMULATORS: 'true', EXPO_NO_DOTENV: '0' }
         : {
             EXPO_PUBLIC_BACKEND: 'demo',
-            EXPO_PUBLIC_PAYWALL: 'off',
+            EXPO_PUBLIC_PAYWALL: 'on',
             EXPO_PUBLIC_PREVIEW_ROUTING: 'osm',
             EXPO_PUBLIC_USE_EMULATORS: 'false',
             EXPO_NO_DOTENV: '1',

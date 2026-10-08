@@ -2,7 +2,7 @@
   "hosting": {
     "site": "tuur-beta-noehxpo",
     "public": "deploy/beta-legal",
-    "ignore": [".*", "**/node_modules/**"],
+    "ignore": ["**/.env*", "**/node_modules/**"],
     "predeploy": ["node scripts/build-beta-legal.mjs"],
     "cleanUrls": true,
     "trailingSlash": false,
@@ -11,6 +11,10 @@
       { "source": "/de/:page", "destination": "/:page", "type": 302 },
       { "source": "/legal/:page", "destination": "/:page", "type": 302 },
       { "source": "/en/legal/:page", "destination": "/en/:page", "type": 302 }
+    ],
+    "rewrites": [
+      { "source": "/join/**", "destination": "/app-link.html" },
+      { "source": "/invite/**", "destination": "/app-link.html" }
     ],
     "headers": [
       {
@@ -22,9 +26,17 @@
           { "key": "X-Robots-Tag", "value": "noindex, follow" },
           {
             "key": "Content-Security-Policy",
-            "value": "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+            "value": "default-src 'none'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
           }
         ]
+      },
+      {
+        "source": "/app-ads.txt",
+        "headers": [{ "key": "Content-Type", "value": "text/plain; charset=utf-8" }]
+      },
+      {
+        "source": "/.well-known/apple-app-site-association",
+        "headers": [{ "key": "Content-Type", "value": "application/json" }]
       }
     ]
   }

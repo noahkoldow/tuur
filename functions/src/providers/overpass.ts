@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { HttpError, USER_AGENT } from '../util/http';
 import { RateLimitError } from '../util/rateLimit';
 
-export const OVERPASS_DAILY_LIMIT = 50;
+export const OVERPASS_DAILY_LIMIT = 1500;
 export const OVERPASS_LEASE_MS = 90_000;
 export const OVERPASS_MAX_BYTES = 4 * 1024 * 1024;
 export const OVERSPAN_ENDPOINT = 'https://api.overspan.dev/api/interpreter';
@@ -16,7 +16,8 @@ export interface OverpassPermit {
   release(retryAfterMs?: number): Promise<void>;
 }
 
-/** Conservative beta allowance shared by every worker: 50 actual attempts/day, one query in flight.
+/** Allowance shared by every worker: OVERPASS_DAILY_LIMIT actual attempts/day, one query in flight.
+ * Stays well below the public instances' fair-use range (roughly 10,000 queries/day); each tile is fetched once and cached.
  * Failed network attempts count too; rejected local reservations do not. No quota refund or fallback.
  */
 export async function reserveOverpassRequest(

@@ -20,6 +20,7 @@ export const SelectNearbyRequestSchema = z.object({
       tourId: z.string().max(200).optional(),
       mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
       groupId: z.string().max(60).optional(),
+      sessionId: z.string().max(200).optional(),
     })
     .optional(),
 });

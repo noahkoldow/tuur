@@ -1,7 +1,15 @@
 import type { Ref } from 'react';
-import { ScrollView, View, type ScrollViewProps, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  ScrollView,
+  View,
+  type ScrollViewProps,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { metrics, sys } from '../theme';
+import { ParentScrollLock, useParentScrollLock } from './nested-scroll';
 
 /**
  * Plain screen without a native header: honors the safe areas and uses the 16 pt side margin of the iPhone layout
@@ -46,23 +54,28 @@ export function ScrollScreen({
   grouped = true,
   contentContainerStyle,
   scrollRef,
+  scrollEnabled = true,
   ...rest
 }: ScrollViewProps & { grouped?: boolean; scrollRef?: Ref<ScrollView> }) {
   const insets = useSafeAreaInsets();
+  const { acquire, locked } = useParentScrollLock();
   return (
-    <ScrollView
-      ref={scrollRef}
-      contentInsetAdjustmentBehavior="automatic"
-      automaticallyAdjustKeyboardInsets
-      keyboardShouldPersistTaps="handled"
-      style={{ flex: 1, backgroundColor: grouped ? sys.grouped : sys.background }}
-      contentContainerStyle={[
-        { gap: 24, padding: metrics.margin, paddingBottom: insets.bottom + 32 },
-        contentContainerStyle,
-      ]}
-      {...rest}
-    >
-      {children}
-    </ScrollView>
+    <ParentScrollLock.Provider value={acquire}>
+      <ScrollView
+        ref={scrollRef}
+        contentInsetAdjustmentBehavior="automatic"
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+        style={{ flex: 1, backgroundColor: grouped ? sys.grouped : sys.background }}
+        contentContainerStyle={[
+          { gap: 24, padding: metrics.margin, paddingBottom: insets.bottom + 32 },
+          contentContainerStyle,
+        ]}
+        {...rest}
+        scrollEnabled={scrollEnabled && (Platform.OS === 'web' || !locked)}
+      >
+        {children}
+      </ScrollView>
+    </ParentScrollLock.Provider>
   );
 }

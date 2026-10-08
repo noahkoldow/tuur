@@ -7,7 +7,12 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { error as logError } from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { EnsureAreaRequestSchema, NarrationLangSchema, rateLimitDecision } from '@tuur/shared';
+import {
+  DEFAULT_CLAIM_POLICY,
+  EnsureAreaRequestSchema,
+  NarrationLangSchema,
+  rateLimitDecision,
+} from '@tuur/shared';
 import { ensureAreas } from './area/ensureArea';
 import { ensureBetaSnapshotArea, BetaSnapshotError } from './area/betaSnapshot';
 import { ingestArea as runIngest } from './area/ingest';
@@ -21,6 +26,7 @@ import {
   llm,
   narrationDeps,
   teaserDeps,
+  poiTextDeps,
   objectStore,
   PARTNER_SECRETS,
   partnerDeps,
@@ -37,6 +43,7 @@ import { getNarration as runGetNarration, NarrationError, reportNarrationIssue }
 import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
 import { selectNearby as runSelectNearby } from './discovery/service';
+import { getPoiText as runGetPoiText, PoiTextError } from './poi/text';
 import { recordVisit as runRecordVisit } from './stats/explorers';
 import { GroupError, addGroupSeat, createGroup, joinGroup, leaveGroup } from './groups/service';
 import { submitPartnerApplication as runSubmitApplication } from './partners/application';
@@ -59,6 +66,14 @@ import { deleteAccount as runDeleteAccount, exportMyData as runExportMyData } fr
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { retentionSweep } from './util/retention';
+import { reportContent as runReportContent, ContentReportError } from './safety/reports';
+import { moderateOffer } from './safety/offers';
+import {
+  getAiConsent as runGetAiConsent,
+  setAiConsent,
+  AiConsentError,
+  AiConsentChoiceSchema,
+} from './privacy/aiConsent';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   PartnerError,
@@ -91,6 +106,7 @@ import {
 } from './billing/entitlements';
 import { completeAdmobCallback, fetchVerifierKeys, verifyAdmobSignature } from './billing/ssv';
 import { prepareTourDownload as runPrepareTourDownload } from './billing/downloads';
+import { updateTourTime as runUpdateTourTime } from './billing/timeBudget';
 import { onRequest } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 
@@ -141,13 +157,15 @@ async function enforceRateLimit(key: string, limit: number, windowMs: number): P
 export const ensureArea = onCall(
   {
     enforceAppCheck,
-    secrets: process.env['TUUR_BETA_SNAPSHOT_TILES'] ? [] : [GEMINI_API_KEY, ORS_API_KEY],
+    // Deployed callers only enqueue work. Provider credentials belong to the worker.
+    secrets: isEmulator ? [GEMINI_API_KEY, ORS_API_KEY] : [],
     timeoutSeconds: 300,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in (anonymous is fine) first');
     const parsed = EnsureAreaRequestSchema.safeParse(request.data);
-    if (!parsed.success) throw new HttpsError('invalid-argument', 'Invalid geohash');
+    if (!parsed.success || parsed.data.geohash.length !== 6)
+      throw new HttpsError('invalid-argument', 'Area discovery requires a six-character geohash');
     await enforceRateLimit(`ensureArea_${request.auth.uid}`, 30, 60_000);
     try {
       const snapshot = await ensureBetaSnapshotArea(
@@ -167,6 +185,14 @@ export const ensureArea = onCall(
       {
         db: db(),
         now: Date.now,
+        ...(process.env['TUUR_DEPLOYMENT_ENV'] === 'beta'
+          ? {
+              maxClaimsPerDay: 50,
+              // Cold neighboring tiles wait behind the serial worker. Do not claim them again
+              // while queued; after this window a new request can recover an abandoned task.
+              policy: { ...DEFAULT_CLAIM_POLICY, staleIngestMs: 2 * 3600_000 },
+            }
+          : {}),
         // Cloud Tasks has no local emulator. Run locally so Expo Go can actually discover places.
         enqueueIngest: async (geohash) => {
           if (isEmulator) {
@@ -181,7 +207,13 @@ export const ensureArea = onCall(
       parsed.data.geohash,
       parsed.data.withNeighbors,
       parsed.data.rings,
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof RateLimitError)
+        throw new HttpsError('resource-exhausted', 'Area discovery is temporarily rate limited', {
+          retryAfterMs: error.retryAfterMs,
+        });
+      throw error;
+    });
     return res;
   },
 );
@@ -189,15 +221,19 @@ export const ensureArea = onCall(
 export const ingestArea = onTaskDispatched(
   {
     serviceAccount: aiServiceAccount,
+    ...(process.env['TUUR_CORE_SERVICE_ACCOUNT']
+      ? { invoker: [process.env['TUUR_CORE_SERVICE_ACCOUNT']] }
+      : {}),
     secrets: [GEMINI_API_KEY, ORS_API_KEY],
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 30 },
-    rateLimits: { maxConcurrentDispatches: 6, maxDispatchesPerSecond: 3 },
+    // Match the shared Overpass single-query lease and wait beyond a timed-out lease before retrying.
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 120, maxBackoffSeconds: 300 },
+    rateLimits: { maxConcurrentDispatches: 1, maxDispatchesPerSecond: 1 },
     timeoutSeconds: 540,
     memory: '512MiB',
   },
   async (req) => {
     const geohash = (req.data as { geohash?: string }).geohash;
-    if (!geohash || !/^[0-9bcdefghjkmnpqrstuvwxyz]{4,8}$/.test(geohash)) return;
+    if (!geohash || !/^[0-9bcdefghjkmnpqrstuvwxyz]{6}$/.test(geohash)) return;
     const ai = await loadAiConfig(db());
     await runIngest(
       { db: db(), sources: poiSources(), geocoder: geocoder(), llm: llm(), ai, now: Date.now },
@@ -207,7 +243,13 @@ export const ingestArea = onTaskDispatched(
 );
 
 function toHttpsError(e: unknown): never {
-  if (e instanceof NarrationError || e instanceof BudgetError)
+  if (
+    e instanceof NarrationError ||
+    e instanceof BudgetError ||
+    e instanceof BillingError ||
+    e instanceof PoiTextError ||
+    e instanceof AiConsentError
+  )
     throw new HttpsError(e.code, e.message, e.details);
   throw e;
 }
@@ -255,6 +297,35 @@ export const reportNarration = onCall({ enforceAppCheck }, async (request) => {
     if (e instanceof Error && e.message === 'rate_limited')
       throw new HttpsError('resource-exhausted', 'Too many reports');
     throw e;
+  }
+});
+
+export const reportContent = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runReportContent(db(), request.auth.uid, request.data, Date.now());
+  } catch (e) {
+    if (e instanceof ContentReportError) throw new HttpsError(e.code, e.message);
+    if (e instanceof RateLimitError) throw new HttpsError('resource-exhausted', 'Too many reports');
+    throw e;
+  }
+});
+
+export const getAiConsent = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  await enforceRateLimit(`ai_consent_read_${request.auth.uid}`, 120, 3600_000);
+  return runGetAiConsent(db(), request.auth.uid);
+});
+
+export const updateAiConsent = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  const input = AiConsentChoiceSchema.safeParse(request.data);
+  if (!input.success) throw new HttpsError('invalid-argument', 'Invalid AI consent choice');
+  await enforceRateLimit(`ai_consent_write_${request.auth.uid}`, 30, 3600_000);
+  try {
+    return await setAiConsent(db(), request.auth.uid, input.data, Date.now());
+  } catch (e) {
+    return toHttpsError(e);
   }
 });
 
@@ -350,6 +421,15 @@ export const getTeaser = onCall(
   },
 );
 
+export const getPoiText = onCall({ enforceAppCheck, timeoutSeconds: 30 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runGetPoiText(poiTextDeps(), request.auth.uid, request.data);
+  } catch (error) {
+    return toHttpsError(error);
+  }
+});
+
 export const selectNearby = onCall(
   { enforceAppCheck, serviceAccount: aiServiceAccount, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
   async (request) => {
@@ -387,6 +467,15 @@ export const claimTourStart = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   try {
     return await runClaimTourStart({ db: db(), now: Date.now }, request.auth.uid, request.data);
+  } catch (e) {
+    return toBilling(e);
+  }
+});
+
+export const updateTourTime = onCall({ enforceAppCheck }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+  try {
+    return await runUpdateTourTime({ db: db(), now: Date.now }, request.auth.uid, request.data);
   } catch (e) {
     return toBilling(e);
   }
@@ -646,7 +735,7 @@ export const redeemToken = onCall(partnerCall, async (request) => {
 export const getOffers = onCall({ enforceAppCheck }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
   try {
-    return await runGetOffers(partnerDeps(), request.data);
+    return await runGetOffers(partnerDeps(), request.data, request.auth.uid);
   } catch (e) {
     return toPartner(e);
   }
@@ -788,6 +877,9 @@ export const adminModeratePoi = adminCallable(moderatePoi);
 export const adminModerateTour = adminCallable(moderateTour);
 export const adminRegenerateNarration = adminCallable(regenerateNarration);
 export const adminResolveFeedback = adminCallable(resolveFeedback);
+export const adminModerateOffer = adminCallable((deps, actor, data) =>
+  moderateOffer(deps.db, actor, data, deps.now()),
+);
 export const adminSaveAiConfig = adminCallable(saveAiConfig);
 export const adminSavePartnerConfig = adminCallable(savePartnerConfig);
 

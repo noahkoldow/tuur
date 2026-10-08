@@ -4,6 +4,7 @@ import {
   REGION_FIXTURES,
   encodeGeohash,
   tileWithNeighbors,
+  tilesAround,
   type Bounds,
   type ImageRef,
   type RawPoi,
@@ -70,6 +71,34 @@ describe('ensureAreas (dedup)', () => {
     expect((await db.collection('areas').doc(tile).get()).get('status')).toBe('failed');
     const later = { ...d, now: () => NOW + 60 * 60_000, enqueueIngest: async () => {} };
     expect((await ensureAreas(later, tile, false)).started).toEqual([tile]);
+  });
+
+  it('enforces one shared daily limit across concurrent Firestore area transactions', async () => {
+    const enqueued: string[] = [];
+    const results = await Promise.allSettled(
+      tilesAround(tile, 2).map((geohash) =>
+        ensureAreas(
+          {
+            db,
+            now: () => NOW,
+            maxClaimsPerDay: 5,
+            enqueueIngest: async (area) => void enqueued.push(area),
+          },
+          geohash,
+          false,
+        ),
+      ),
+    );
+    expect(enqueued).toHaveLength(5);
+    expect(new Set(enqueued).size).toBe(5);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(5);
+    for (const result of results)
+      if (result.status === 'rejected') expect(result.reason).toHaveProperty('retryAfterMs');
+    const day = new Date(NOW).toISOString().slice(0, 10);
+    expect((await db.collection('usageDaily').doc(day).get()).get('tilesClaimed')).toBe(5);
+    const areas = await db.collection('areas').get();
+    expect(areas.docs.filter((area) => area.get('status') === 'ingesting')).toHaveLength(5);
+    expect(areas.docs.filter((area) => area.get('error') === 'rate_limited')).toHaveLength(20);
   });
 });
 

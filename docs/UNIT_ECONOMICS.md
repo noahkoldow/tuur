@@ -1,5 +1,32 @@
 # Unit Economics: Was kostet eine Tourstunde, reicht die Bepreisung?
 
+## Kostenlose Texttouren und bezahlter Audioguide — 2026-10-08
+
+Die aktuelle lokale Produktänderung trennt kostenlose Texttouren von bezahlter Audioführung. Textmodus, Infokarten und Wegführung verbrauchen keine Audiominuten und erzeugen keine Tour-Sprachausgabe. Der eigene Infokartenabruf `getPoiText` lädt und speichert vorhandene Quelltexte ohne LLM oder TTS. Kosten können weiterhin für Ortsdaten, Routing, Firebase und Datenübertragung sowie separat erzeugte Tourbeschreibungen und Ortsvorstellungen entstehen; „ohne TTS“ bedeutet daher nicht „ohne Betriebskosten“. Ein Guthaben bleibt auf 90 aktive Audiotourminuten begrenzt, das 5er-Paket auf 450, Premium auf 500 pro UTC-Kalendermonat. Die Preise wurden nicht verändert. Bestehende kaufbasierte Legacy-Geschenke und vom bezahlten Host finanzierte Gruppen behalten ihren Audiozugang; neue Gratis-/Reward-Audiorechte werden nicht als Werbebelohnung ausgegeben.
+
+Vor jeder neuen kostenlosen Tour wird eine feste Stimmvorstellung und danach, falls verfügbar und datenschutzrechtlich freigegeben, eine Anzeige abgespielt. Die sechs deutsch-/englischsprachigen Gemini-MP3s wurden einmalig mit sechs TTS-Aufrufen erzeugt und mit der App gebündelt: insgesamt 691.314 Bytes, jeweils 17,00–21,48 Sekunden. Ihre wiederholte Wiedergabe verursacht keinen weiteren TTS-Aufruf, keine erneute Audioauslieferung aus unserem Backend und keinen Verbrauch gekaufter Minuten. Die einmaligen Erzeugungskosten wurden nicht als eigene Provider-Rechnung gemessen; die Dateien vergrößern das App-Paket um rund 0,69 MB. Modell, Texte und Hashes stehen in `scripts/voice-previews.manifest.json`.
+
+**AdMob ist am 08.10.2026 laut Live-Konto nicht genehmigt; Werbeerlöse sind nicht nachgewiesen.** Eine angelegte Anzeigen-ID, ein funktionierender SSV-Test oder Google-Testanzeigen sind keine Einnahmen. Die Kontomeldung und E-Mail nennen keinen spezifischen Ablehnungsgrund. Für eine belastbare Rechnung werden später tatsächliche gültige Impressionen, Füllrate, geografischer Nutzungsmix und Netto-eCPM benötigt. Bis dahin gibt es keine bestätigte Kostendeckung kostenloser Texttouren durch Werbung. Die Texttour bleibt bei fehlender oder nicht zulässiger Anzeige zugänglich; auch solche Nutzung kann Infrastrukturkosten verursachen.
+
+Die Modellrechnung vom 07.10. unten beschreibt weiterhin bezahlte Audio-Nutzung unter ihren genannten Annahmen. Sie enthält weder gemessene Texttour-Kosten noch bestätigte Werbeeinnahmen und belegt insbesondere keine neue positive Werbemarge. Die historischen Szenarien vom 30.09. sind keine aktuelle Preis- oder Betriebskostenabrechnung. Diese Änderung wurde noch nicht als Backend-, Legal-, OTA- oder neuer TestFlight-Release veröffentlicht; Build 9 enthält das neue Modell nicht.
+
+## Aktuelle Produktregel — 2026-10-07
+
+Freigegeben und implementiert: **ein Credit = bis zu 90 aktive Tourminuten**, ein 5er-Paket = 450 Minuten, beide Abos = **500 Minuten pro UTC-Kalendermonat**, ohne Übertrag. Pausen verbrauchen keine Minuten. Eine Gruppe hört dieselbe einmal erzeugte Aufnahme; nur das Zeitkonto des Hosts wird belastet. Downloads reservieren ihre geplante Dauer einmalig, gespeicherte Wiedergabe kostet keine weiteren Minuten.
+
+Die folgende Modellrechnung verwendet die bereits diskutierten Annahmen: 19 % Umsatzsteuer, 15 % Store-Anteil auf den Nettopreis, zusätzliche Reserve von 1 % des Bruttopreises und neu erzeugte Inhalte ohne Cache-Vorteil. Als Nutzungsmix dient zur Hälfte Route und zur Hälfte Explore mit normaler Erzähldichte; Text, Faktenprüfung, Gemini-Flash-Sprachausgabe und variable Infrastruktur sind enthalten. Dies sind Kostenschätzungen, keine gemessenen Rechnungen oder Gewinnzusagen.
+
+| Produkt                              |      Bruttopreis | Verfügbar nach Steuer, Store und Reserve | Variable Kosten bei voller Nutzung |  Deckungsbeitrag |
+| ------------------------------------ | ---------------: | ---------------------------------------: | ---------------------------------: | ---------------: |
+| 1 Credit / 90 Minuten                |           1,99 € |                                   1,40 € |                             0,61 € |           0,79 € |
+| 5 Credits / 450 Minuten              |           7,99 € |                                   5,63 € |                             3,06 € |           2,56 € |
+| Monatsabo / 500 Minuten              |           9,99 € |                                   7,04 € |                             3,41 € |           3,63 € |
+| Jahresabo / je 500 Minuten monatlich | 59,99 € jährlich |                         3,52 € monatlich |                   3,41 € monatlich | 0,12 € monatlich |
+
+Rundungsdifferenzen sind möglich. Der Deckungsbeitrag finanziert außerdem Entwicklung, Support, feste Betriebskosten und Marketing; erst nach deren Abzug bleibt Gewinn. Je nach Modus kosten 90 Minuten im Modell ungefähr 0,46 € (Route), 0,47 € (Crossroads), 0,77 € (Explore normal) oder 1,11 € (Explore mit hoher Erzähldichte). **Das Jahresabo zu 59,99 € hat bei voller Auslastung kaum Spielraum**; höhere Erzähldichte kann seinen Deckungsbeitrag negativ machen. Die Preise wurden deshalb nicht stillschweigend als wirtschaftlich abgesichert behandelt oder verändert.
+
+Die Analyse ab dem nächsten Absatz stammt vom 2026-09-30. Ihre damaligen Abo-Preise, Cache-Annahmen und Empfehlungen sind historisch und werden durch die Produktregel oben ersetzt. `scripts/unit-economics.mjs` reproduziert weiterhin diese ältere Szenariorechnung.
+
 Stand 2026-09-30. Alle Zahlen lassen sich mit `node scripts/unit-economics.mjs` nachrechnen; dort stehen alle Annahmen an einer Stelle. Preise in USD stammen von den Anbietern, Umrechnung mit 1 € = 1,15 USD. Was nicht auf einer offiziellen Seite bestätigt werden konnte, ist mit **[unverifiziert]** markiert.
 
 ## 1. Kurzfazit

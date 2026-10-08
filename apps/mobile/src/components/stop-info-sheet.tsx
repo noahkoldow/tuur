@@ -5,21 +5,23 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { encodeGeohash, type Poi } from '@tuur/shared';
 import { palette } from '@tuur/ui';
-import { useBackend } from '../backend';
+import { useBackend, type AccessInfo } from '../backend';
 import { config } from '../config';
 import type { TourRecordStop } from '../state/history';
 import { attributionUrl } from './image-attribution';
 import { placeInformation } from './placeDetails';
+import { usePoiText } from '../hooks/usePoiText';
 
 interface Props {
   stop: TourRecordStop | undefined;
   /** Reuse already-loaded map data before looking up an older stop without a saved narration. */
   poi?: Poi | undefined;
   onDismiss: () => void;
+  access?: AccessInfo | undefined;
 }
 
 /** Reading a stop never changes the tour's destination, playback or progress. */
-export function StopInfoSheet({ stop, poi, onDismiss }: Props) {
+export function StopInfoSheet({ stop, poi, onDismiss, access }: Props) {
   const colors = palette[useColorScheme() === 'dark' ? 'dark' : 'light'];
   return (
     <BottomSheet
@@ -29,12 +31,14 @@ export function StopInfoSheet({ stop, poi, onDismiss }: Props) {
       containerColor={colors.background}
       testID="stop-info-sheet"
     >
-      {stop ? <StopInformation key={stop.id} stop={stop} poi={poi} onDismiss={onDismiss} /> : null}
+      {stop ? (
+        <StopInformation key={stop.id} stop={stop} poi={poi} onDismiss={onDismiss} access={access} />
+      ) : null}
     </BottomSheet>
   );
 }
 
-function StopInformation({ stop, poi, onDismiss }: Props & { stop: TourRecordStop }) {
+function StopInformation({ stop, poi, onDismiss, access }: Props & { stop: TourRecordStop }) {
   const { t, i18n } = useTranslation();
   const backend = useBackend();
   const insets = useSafeAreaInsets();
@@ -71,7 +75,8 @@ function StopInformation({ stop, poi, onDismiss }: Props & { stop: TourRecordSto
     };
   }, [backend, id, lat, lng, needsLookup, attempt]);
 
-  const place = suppliedPoi ?? loadedPoi;
+  const textInfo = usePoiText(suppliedPoi ?? loadedPoi, lang, !narration, access);
+  const place = textInfo.poi;
   const information = !narration && place ? placeInformation(place, lang) : undefined;
   const text = narration?.text ?? information?.text;
   const sources = narration
@@ -80,7 +85,12 @@ function StopInformation({ stop, poi, onDismiss }: Props & { stop: TourRecordSto
         return url ? [{ url, label: source.title ?? t('stopInfo.source') }] : [];
       })
     : information?.sourceUrl
-      ? [{ url: information.sourceUrl, label: t('cards.source', { source: 'Wikipedia' }) }]
+      ? [
+          {
+            url: information.sourceUrl,
+            label: t('cards.source', { source: information.sourceName ?? 'Wikipedia' }),
+          },
+        ]
       : [];
   const openUrl = (url: string) => {
     setLinkError(false);
@@ -132,14 +142,17 @@ function StopInformation({ stop, poi, onDismiss }: Props & { stop: TourRecordSto
                 {paragraph}
               </Text>
             ))
-        ) : needsLookup && loadState === 'loading' ? (
+        ) : (needsLookup && loadState === 'loading') || textInfo.loading ? (
           <Text textStyle={{ color: colors.labelSecondary, fontSize: 17 }}>{t('stopInfo.loading')}</Text>
-        ) : needsLookup && loadState === 'error' ? (
+        ) : (needsLookup && loadState === 'error') || textInfo.error ? (
           <Column spacing={12}>
             <Text textStyle={{ color: colors.label, fontSize: 17 }}>{t('stopInfo.loadError')}</Text>
             {control(t('common.retry'), () => {
-              setLoadState('loading');
-              setAttempt((value) => value + 1);
+              if (place) textInfo.retry();
+              else {
+                setLoadState('loading');
+                setAttempt((value) => value + 1);
+              }
             })}
           </Column>
         ) : (
@@ -148,9 +161,26 @@ function StopInformation({ stop, poi, onDismiss }: Props & { stop: TourRecordSto
         {sources.map((source, index) =>
           control(source.label, () => openUrl(source.url), `${source.url}:${index}`),
         )}
-        {information
+        {text && textInfo.error ? (
+          <Column spacing={8}>
+            <Text textStyle={{ color: colors.labelSecondary, fontSize: 17 }}>{t('stopInfo.loadError')}</Text>
+            {control(t('common.retry'), textInfo.retry)}
+          </Column>
+        ) : null}
+        {information && !information.sourceName
           ? control('CC BY-SA 4.0', () => openUrl('https://creativecommons.org/licenses/by-sa/4.0/'))
           : null}
+        {information && !information.sourceName ? (
+          <Text textStyle={{ color: colors.labelSecondary, fontSize: 14 }}>{t('cards.wikipediaEdited')}</Text>
+        ) : null}
+        {information?.sourceName === 'OpenStreetMap'
+          ? control(t('cards.osmCredit'), () => openUrl('https://www.openstreetmap.org/copyright'))
+          : null}
+        {information?.sourceName ? (
+          <Text textStyle={{ color: colors.labelSecondary, fontSize: 14 }}>
+            {t('cards.source', { source: information.sourceName })}
+          </Text>
+        ) : null}
         {linkError ? (
           <Text textStyle={{ color: colors.label, fontSize: 15 }}>{t('cards.openLinkError')}</Text>
         ) : null}

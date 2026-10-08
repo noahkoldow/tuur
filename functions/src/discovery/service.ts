@@ -13,6 +13,7 @@ import { budgetedLlm } from '../providers/budgeted';
 import { loadAiConfig } from '../util/aiConfig';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 import { spentToday } from '../util/usage';
+import { consentBoundLlm, getAiConsent, requireAiConsent } from '../privacy/aiConsent';
 
 export type SelectNearbyDeps = Pick<TeaserDeps, 'db' | 'llm' | 'now' | 'authorize' | 'config'>;
 
@@ -60,11 +61,13 @@ export async function selectNearby(
   const ids = candidates.map((poi) => poi.id);
   const fallback: SelectNearbyResult = { poiIds: ids, source: 'fallback' };
   if (ids.length < 2) return fallback;
+  if (!(await getAiConsent(deps.db, uid)).granted) return fallback;
 
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
   if (!budgetDecision(cfg, await spentToday(deps.db, anchor.tile, deps.now())).allowed) return fallback;
   try {
-    const selected = await budgetedLlm(deps.llm, deps.db, cfg, deps.now, { tile: anchor.tile }).selectNearby({
+    const llm = consentBoundLlm(deps.llm, () => requireAiConsent(deps.db, uid));
+    const selected = await budgetedLlm(llm, deps.db, cfg, deps.now, { tile: anchor.tile }).selectNearby({
       model: cfg.models.lite,
       lang: req.lang,
       interests: req.interests,

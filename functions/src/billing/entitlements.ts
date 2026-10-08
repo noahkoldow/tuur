@@ -3,12 +3,14 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import {
   DEFAULT_PRODUCTS,
   EntitlementSchema,
+  GroupSchema,
   MAX_INVITES_PER_TOUR,
   REWARDED_DAILY_LIMIT_DEFAULT,
-  SESSION_DURATION_MS,
-  SUBSCRIPTION_TOUR_STARTS_PER_MONTH,
-  decideAccess,
+  CREDIT_TOUR_MINUTES,
+  hasRemainingTourTime,
+  decideAudioAccess,
   decideDownloadAccess,
+  decideGroupAccess,
   decideInvite,
   decideRedeem,
   decideReward,
@@ -27,6 +29,7 @@ import { dayKey } from '../util/usage';
 import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 
 import { BillingError } from './errors';
+import { assertDownloadTimeAccess, assertTourTimeAccess, updateTourTime } from './timeBudget';
 export { BillingError } from './errors';
 import { consumePurchaseUnit } from './purchaseLedger';
 import type { RevenueCatReader } from './revenuecat';
@@ -46,8 +49,6 @@ const walletRef = (db: Firestore, uid: string) =>
   db.collection('users').doc(uid).collection('credits').doc('wallet');
 const ledger = (db: Firestore, uid: string) => db.collection('users').doc(uid).collection('creditLedger');
 
-const utcMonthKey = (now: number) => new Date(now).toISOString().slice(0, 7);
-
 export const ClaimTourStartSchema = z
   .object({
     tourId: z.string().min(1).max(200),
@@ -62,7 +63,7 @@ export const ClaimTourStartSchema = z
     'Invalid tour start session',
   );
 
-/** Server-side standard-tour start check and monthly subscription quota, serialized in one transaction. */
+/** Compatibility entry point. New clients use updateTourTime for all four modes and heartbeats. */
 export async function claimTourStart(
   deps: BillingDeps,
   uid: string,
@@ -70,85 +71,11 @@ export async function claimTourStart(
 ): Promise<{ counted: boolean; remaining: number | null }> {
   const parsed = ClaimTourStartSchema.safeParse(raw);
   if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid tour start');
-  const { tourId, sessionId, mode } = parsed.data;
-  const { db } = deps;
-  const now = deps.now();
-  const month = utcMonthKey(now);
-  const usageRef = db.collection('users').doc(uid).collection('tourUsage').doc(month);
-  return db.runTransaction(async (tx) => {
-    const planned = mode === 'planned';
-    const plannedSessionRef = planned
-      ? db
-          .collection('users')
-          .doc(uid)
-          .collection('sessions')
-          .doc(tourId.replace(/^planned_/, ''))
-      : undefined;
-    if (planned && !tourId.startsWith('planned_'))
-      throw new BillingError('invalid-argument', 'Invalid planned route id');
-    const [tourSnap, plannedSessionSnap, all, usageSnap] = await Promise.all([
-      planned ? Promise.resolve(undefined) : tx.get(db.collection('tours').doc(tourId)),
-      plannedSessionRef ? tx.get(plannedSessionRef) : Promise.resolve(undefined),
-      readEntitlements(tx, db, uid),
-      tx.get(usageRef),
-    ]);
-    if (planned) {
-      if (
-        !plannedSessionSnap?.exists ||
-        plannedSessionSnap.get('kind') !== 'planned' ||
-        !(Number(plannedSessionSnap.get('expiresAt')) > now)
-      )
-        throw new BillingError('not-found', 'Planned route is no longer available');
-    } else if (!tourSnap?.exists || tourSnap.get('locked') === true) {
-      throw new BillingError('not-found', 'Tour not available');
-    }
-    const usage = usageSnap.data() as { starts?: number; sessions?: Record<string, string> } | undefined;
-    const sessions = usage?.sessions ?? {};
-    const existingTourId = sessions[sessionId];
-    if (existingTourId) {
-      if (existingTourId !== tourId) throw new BillingError('already-exists', 'Session already used');
-      return {
-        counted: true,
-        remaining: Math.max(0, SUBSCRIPTION_TOUR_STARTS_PER_MONTH - Number(usage?.starts ?? 0)),
-      };
-    }
-
-    const subscriber = isSubscriber(all, now);
-    const placeId = String((planned ? plannedSessionSnap : tourSnap)?.get('placeId') ?? '');
-    const allowedBySession = all.some(
-      (e) => e.type === 'session' && e.placeId === placeId && e.expiresAt > now,
-    );
-    const tourFree = !planned && tourSnap?.get('free') === true;
-    const tourEntitled =
-      !planned &&
-      all.some(
-        (e) =>
-          e.type === 'tour' &&
-          e.tourId === tourId &&
-          (e.expiresAt === null || e.expiresAt > now) &&
-          (!tourFree || e.source === 'credit' || (e.source === 'free' && e.placeId === placeId)),
-      );
-    if (!subscriber && (planned ? !allowedBySession : !tourEntitled))
-      throw new BillingError('permission-denied', 'Tour is locked', {
-        reason: tourFree ? 'ad_required' : 'denied',
-      });
-    if (!subscriber) return { counted: false, remaining: null };
-
-    const starts = Number(usage?.starts ?? 0);
-    if (starts >= SUBSCRIPTION_TOUR_STARTS_PER_MONTH)
-      throw new BillingError('resource-exhausted', 'Monthly tour limit reached', {
-        reason: 'monthly_tour_limit',
-        limit: SUBSCRIPTION_TOUR_STARTS_PER_MONTH,
-        month,
-      });
-    tx.set(usageRef, {
-      month,
-      starts: starts + 1,
-      sessions: { ...sessions, [sessionId]: tourId },
-      updatedAt: now,
-    });
-    return { counted: true, remaining: SUBSCRIPTION_TOUR_STARTS_PER_MONTH - starts - 1 };
-  });
+  const result = await updateTourTime(deps, uid, { ...parsed.data, sequence: 0, state: 'active' });
+  return {
+    counted: result.source === 'subscription',
+    remaining: result.remainingSeconds === null ? null : Math.floor(result.remainingSeconds / 60),
+  };
 }
 
 export async function loadEntitlements(db: Firestore, uid: string): Promise<Entitlement[]> {
@@ -192,22 +119,24 @@ const readWallet = async (tx: Transaction, db: Firestore, uid: string): Promise<
 
 export interface AccessRequest {
   tourId?: string | undefined;
+  groupId?: string | undefined;
   mode?: 'tour' | 'planned' | 'fork' | 'roam' | undefined;
   /** POIs the request concerns; they must belong to the tour when a tour context is claimed. */
   poiIds: string[];
   /** Tile of the first POI, used to derive the place for dynamic sessions server-side. */
   tile?: string | undefined;
   download?: boolean | undefined;
+  sessionId?: string | undefined;
+  downloadId?: string | undefined;
+  /** Preparation of a route happens before its active walking session exists. */
+  planning?: boolean | undefined;
+  /** Only prepareTourDownload may skip an already-existing reservation check. */
+  preparingDownload?: boolean | undefined;
 }
 
-export async function authorizeContent(
-  deps: BillingDeps,
-  uid: string,
-  req: AccessRequest,
-): Promise<{ reason: string }> {
+async function contentContext(deps: BillingDeps, uid: string, req: AccessRequest): Promise<AccessContext> {
   const { db } = deps;
   const now = deps.now();
-  const all = await loadEntitlements(db, uid);
   const ctx: AccessContext = {};
   if (req.download && (!req.tourId || (req.mode && req.mode !== 'tour' && req.mode !== 'planned')))
     throw new BillingError('permission-denied', 'Only fixed itineraries can be downloaded', {
@@ -240,14 +169,6 @@ export async function authorizeContent(
     const area = !planned && req.tile ? await db.collection('areas').doc(req.tile).get() : undefined;
     const placeId = (planned ?? area)?.get('placeId') as string | undefined;
     if (placeId) ctx.placeId = placeId;
-    if (!req.download && req.tourId && isSubscriber(all, now)) {
-      const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
-      const sessions = usage.get('sessions') as Record<string, string> | undefined;
-      if (!Object.values(sessions ?? {}).includes(req.tourId))
-        throw new BillingError('permission-denied', 'Start the tour before requesting tour content', {
-          reason: 'tour_start_required',
-        });
-    }
   } else if (req.tourId) {
     const tour = await db.collection('tours').doc(req.tourId).get();
     const stops = (tour.get('stops') as { poiId: string }[] | undefined) ?? [];
@@ -265,24 +186,71 @@ export async function authorizeContent(
     ctx.placeId = String(tour.get('placeId') ?? '');
     ctx.mode = 'tour';
   }
+  return ctx;
+}
+
+/** Source text and navigation never read wallets/entitlements or settle audio time. */
+export async function authorizeTextContent(
+  deps: BillingDeps,
+  uid: string,
+  req: AccessRequest,
+): Promise<{ reason: 'text' }> {
+  if (req.download)
+    throw new BillingError('permission-denied', 'Audio downloads require paid access', {
+      reason: 'download_requires_purchase',
+    });
+  for (const id of req.poiIds) {
+    const poi = await deps.db.collection('pois').doc(id).get();
+    if (!poi.exists || poi.get('hidden') === true) throw new BillingError('not-found', 'POI not available');
+  }
+  let contextUid = uid;
+  if (req.groupId) {
+    if (!/^[A-Za-z0-9]{10,40}$/.test(req.groupId))
+      throw new BillingError('permission-denied', 'Group not available');
+    const snapshot = await deps.db.collection('groups').doc(req.groupId).get();
+    const group = snapshot.exists ? GroupSchema.safeParse(snapshot.data()) : undefined;
+    if (
+      !group?.success ||
+      !decideGroupAccess(group.data, uid, req, deps.now()) ||
+      (req.tourId !== undefined && req.tourId !== group.data.tour.id) ||
+      (req.mode !== undefined && req.mode !== group.data.mode)
+    )
+      throw new BillingError('permission-denied', 'Group not available');
+    // Text remains free; membership identifies the private route owner without reading audio funding.
+    contextUid = group.data.hostUid;
+    req = { ...req, tourId: group.data.tour.id, mode: group.data.mode };
+  }
+  const ctx = await contentContext(deps, contextUid, req);
+  if (req.mode && req.mode !== 'tour' && !ctx.placeId)
+    throw new BillingError('not-found', 'Place not available');
+  return { reason: 'text' };
+}
+
+/** Paid audio authorization runs before cached audio URLs, generation and downloads. */
+export async function authorizeContent(
+  deps: BillingDeps,
+  uid: string,
+  req: AccessRequest,
+): Promise<{ reason: string }> {
+  const ctx = await contentContext(deps, uid, req);
+  const all = await loadEntitlements(deps.db, uid);
+  const now = deps.now();
   if (req.download) {
     const download = decideDownloadAccess(all, ctx, now);
     if (!download.allowed)
       throw new BillingError('permission-denied', 'Downloads require Premium or paid tour access', {
         reason: download.reason,
       });
+    if (!req.preparingDownload)
+      await assertDownloadTimeAccess(deps, uid, { ...ctx, downloadId: req.downloadId });
     return { reason: download.reason };
   }
-  const d = decideAccess(all, ctx, now);
-  if (!d.allowed) throw new BillingError('permission-denied', 'Content is locked', { reason: d.reason });
-  if (!req.download && ctx.mode === 'tour' && ctx.tourId && isSubscriber(all, now)) {
-    const usage = await db.collection('users').doc(uid).collection('tourUsage').doc(utcMonthKey(now)).get();
-    const sessions = usage.get('sessions') as Record<string, string> | undefined;
-    if (!Object.values(sessions ?? {}).includes(ctx.tourId))
-      throw new BillingError('permission-denied', 'Start the tour before requesting tour content', {
-        reason: 'tour_start_required',
-      });
-  }
+  const d = decideAudioAccess(all, ctx, now);
+  if (!d.allowed)
+    throw new BillingError('permission-denied', 'Audio requires Premium or a paid credit', {
+      reason: d.reason === 'no_context' ? d.reason : 'audio_requires_purchase',
+    });
+  await assertTourTimeAccess(deps, uid, { ...ctx, sessionId: req.sessionId, planning: req.planning });
   return { reason: d.reason };
 }
 
@@ -294,7 +262,7 @@ export const SpendRequestSchema = z
     kind: z.enum(['tour', 'session']),
     tourId: z.string().max(200).optional(),
     placeId: z.string().max(200).optional(),
-    /** Explicit paid tour purchase for downloads, including upgrades from reward/invite/free access. */
+    /** Older download clients send this flag; all spends now buy paid audio access. */
     paidOnly: z.boolean().optional(),
   })
   .refine((request) => !request.paidOnly || request.kind === 'tour', 'Paid-only purchases require a tour');
@@ -306,15 +274,13 @@ export async function spendCredit(
 ): Promise<{ used: 'reward' | 'paid'; wallet: Wallet; entitlementId: string }> {
   const parsed = SpendRequestSchema.safeParse(raw);
   if (!parsed.success) throw new BillingError('invalid-argument', 'Invalid request');
-  const { kind, tourId, placeId, paidOnly = false } = parsed.data;
+  const { kind, tourId, placeId, paidOnly } = parsed.data;
   if (kind === 'tour' && !tourId) throw new BillingError('invalid-argument', 'tourId required');
   if (kind === 'session' && !placeId) throw new BillingError('invalid-argument', 'placeId required');
   const { db } = deps;
   if (kind === 'tour') {
     const t = await db.collection('tours').doc(tourId!).get();
     if (!t.exists || t.get('locked') === true) throw new BillingError('not-found', 'Tour not available');
-    if (t.get('free') === true && !paidOnly)
-      throw new BillingError('failed-precondition', 'This tour is free', { reason: 'free' });
   } else {
     const p = await db.collection('places').doc(placeId!).get();
     if (!p.exists) throw new BillingError('not-found', 'Place not found');
@@ -330,11 +296,17 @@ export async function spendCredit(
             (e) =>
               e.type === 'tour' &&
               e.tourId === tourId &&
+              hasRemainingTourTime(e) &&
               (e.expiresAt === null || e.expiresAt > now) &&
-              (!paidOnly || e.source === 'credit'),
+              (e.source === 'credit' ||
+                (!paidOnly && e.source === 'invite' && e.timeAllowanceSeconds === undefined)),
           )
-        : all.some((e) => e.type === 'session' && e.placeId === placeId && e.expiresAt > now);
-    const d = decideSpend(wallet, kind, alreadyUnlocked, isSubscriber(all, now), paidOnly);
+        : all.some(
+            (e) =>
+              e.type === 'session' && e.placeId === placeId && e.expiresAt > now && hasRemainingTourTime(e),
+          );
+    // Every credit spend buys audio. Existing rewarded balances are retained, never consumed here.
+    const d = decideSpend(wallet, kind, alreadyUnlocked, isSubscriber(all, now), true);
     if (!d.ok)
       throw new BillingError(
         d.reason === 'insufficient' ? 'failed-precondition' : 'already-exists',
@@ -354,13 +326,17 @@ export async function spendCredit(
             source: d.use === 'reward' ? 'reward' : 'credit',
             grantedAt: now,
             expiresAt: null,
+            timeAllowanceSeconds: CREDIT_TOUR_MINUTES * 60,
+            timeRemainingSeconds: CREDIT_TOUR_MINUTES * 60,
           }
         : {
             type: 'session',
             placeId,
             source: 'credit',
             grantedAt: now,
-            expiresAt: now + SESSION_DURATION_MS,
+            expiresAt: Number.MAX_SAFE_INTEGER,
+            timeAllowanceSeconds: CREDIT_TOUR_MINUTES * 60,
+            timeRemainingSeconds: CREDIT_TOUR_MINUTES * 60,
           },
     );
     tx.set(ledger(db, uid).doc(), {

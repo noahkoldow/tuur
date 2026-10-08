@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { placeProminence, type Poi } from '@tuur/shared';
@@ -15,6 +15,8 @@ import { INTEREST_ICON } from './icons';
 import { interestOf } from './StopCards';
 import { placeInformation } from './placeDetails';
 import { PhotoInfo } from './photo-info';
+import { usePoiText } from '../hooks/usePoiText';
+import { PlaceTextStatus } from './place-text-status';
 
 export const PLACE_CARD_WIDTH = 320;
 
@@ -42,9 +44,11 @@ export function PlaceCard({
 }) {
   const { t, i18n } = useTranslation();
   const lang = i18n.resolvedLanguage ?? i18n.language;
+  const [readingId, setReadingId] = useState<string>();
+  const textInfo = usePoiText(poi, lang, readingId === poi.id);
   const interest = interestOf(poi);
   const img = poi.imageRefs[0];
-  const information = placeInformation(poi, lang);
+  const information = placeInformation(textInfo.poi ?? poi, lang);
   const prominence = placeProminence(poi);
   const prominenceLabel = t(`home.placeProminence.${prominence}`);
   const walk = minutes === undefined ? undefined : t('home.placeWalk', { count: minutes });
@@ -64,6 +68,9 @@ export function PlaceCard({
   return (
     <FlipCard
       identity={poi.id}
+      onFlipChange={(open) => {
+        if (open) setReadingId(poi.id);
+      }}
       frontAccessibilityLabel={`${poi.name}. ${meta}`}
       style={{
         width,
@@ -132,18 +139,27 @@ export function PlaceCard({
             {[prominenceLabel, walk, distance, visit].filter(Boolean).join(' · ')}
           </Text>
           {teaser ? <Text variant="body">{teaser}</Text> : null}
+          {information ? <Text variant="body">{information.text}</Text> : <PlaceTextStatus {...textInfo} />}
+          {information && textInfo.error ? <PlaceTextStatus {...textInfo} /> : null}
           {information ? (
-            <Text variant="body">{information.text}</Text>
-          ) : !teaser ? (
-            <Text variant="subheadline">{t('cards.noInfo')}</Text>
+            <Text variant="caption">
+              {information.sourceName
+                ? t('cards.source', { source: information.sourceName })
+                : t('cards.fromWikipedia')}
+            </Text>
           ) : null}
-          {information ? <Text variant="caption">{t('cards.fromWikipedia')}</Text> : null}
           {poi.partnerId ? <Text variant="caption">{t('partner.adLabel')}</Text> : null}
         </>
       }
       overlay={
         <>
-          <PhotoInfo image={img} name={poi.name} summary={information} />
+          <PhotoInfo
+            image={img}
+            name={poi.name}
+            summary={information}
+            onOpen={() => setReadingId(poi.id)}
+            textStatus={textInfo}
+          />
           <View style={{ position: 'absolute', right: 12, bottom: 12 }}>
             <IconButton
               icon="navigation"

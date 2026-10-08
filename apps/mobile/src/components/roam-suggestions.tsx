@@ -33,7 +33,6 @@ export function RoamSuggestions({
           {t('home.roamNearby')}
         </Text>
       ) : null}
-      <Text variant="subheadline">{t('roam.suggestionsHint')}</Text>
       {!position ? <Text variant="subheadline">{t('home.waitingForLocation')}</Text> : null}
       {error ? (
         <View style={{ gap: 8 }}>

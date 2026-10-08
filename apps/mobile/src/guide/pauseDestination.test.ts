@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PoiSchema, destinationPoint, type Poi } from '@tuur/shared';
-import { nearbyPausePlaces, openPauseDirections, pauseKind } from './pauseDestination';
+import { nearbyPausePlaces, openApplePauseSearch, openPauseDirections, pauseKind } from './pauseDestination';
 
 const center = { lat: 52.52, lng: 13.4 };
 const place = (id: string, distance: number, osmTags: Record<string, string> = { amenity: 'cafe' }): Poi =>
@@ -46,6 +46,16 @@ describe('pause destinations', () => {
     ).toEqual(['park']);
   });
 
+  it('includes public toilets and filters out private toilets', () => {
+    const toilet = place('toilet', 80, { amenity: 'toilets' });
+    const privateToilet = place('private-toilet', 20, { amenity: 'toilets', access: 'private' });
+    expect(
+      nearbyPausePlaces(center, [toilet, privateToilet, place('cafe', 40)], 'toilets').map(
+        ({ poi }) => poi.id,
+      ),
+    ).toEqual(['toilet']);
+  });
+
   it('pauses the tour before handing off directions without replacing its route', async () => {
     const tour = { getState: () => ({ paused: false }), pause: vi.fn(), resume: vi.fn() };
     const open = vi.fn(async (url: string) => {
@@ -72,5 +82,40 @@ describe('pause destinations', () => {
     ).rejects.toThrow('unavailable');
     expect(tour.pause).toHaveBeenCalledTimes(paused ? 0 : 1);
     expect(tour.resume).toHaveBeenCalledTimes(paused ? 0 : 1);
+  });
+
+  it('opens walking directions in Apple Maps using only the transient destination', async () => {
+    const tour = { getState: () => ({ paused: false }), pause: vi.fn(), resume: vi.fn() };
+    const open = vi.fn(async (url: string) => {
+      expect(tour.pause).toHaveBeenCalledOnce();
+      const target = new URL(url);
+      expect(target.hostname).toBe('maps.apple.com');
+      expect(target.searchParams.get('daddr')).toBe(`${center.lat},${center.lng}`);
+      expect(target.searchParams.get('dirflg')).toBe('w');
+      expect(target.searchParams.has('saddr')).toBe(false);
+    });
+    await openPauseDirections(
+      { id: 'apple-session-place', name: 'Coffee', location: center },
+      open,
+      tour,
+      'apple',
+    );
+    expect(tour.resume).not.toHaveBeenCalled();
+  });
+
+  it('opens an encoded Apple search fallback and restores playback if handoff fails', async () => {
+    const tour = { getState: () => ({ paused: false }), pause: vi.fn(), resume: vi.fn() };
+    const open = vi.fn(async (url: string) => {
+      const target = new URL(url);
+      expect(target.hostname).toBe('maps.apple.com');
+      expect(target.searchParams.get('q')).toBe('Cafés & Bäckereien');
+      expect(target.searchParams.get('sll')).toBe(`${center.lat},${center.lng}`);
+      throw new Error('Maps unavailable');
+    });
+    await expect(openApplePauseSearch(center, 'Cafés & Bäckereien', open, tour)).rejects.toThrow(
+      'Maps unavailable',
+    );
+    expect(tour.pause).toHaveBeenCalledOnce();
+    expect(tour.resume).toHaveBeenCalledOnce();
   });
 });

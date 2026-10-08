@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { REGION_FIXTURES, buildPois, encodePolyline, type Tour } from '@tuur/shared';
+import { REGION_FIXTURES, buildPois, createTourScript, encodePolyline, type Tour } from '@tuur/shared';
 import { addGroupSeat, createGroup, hasGroupAccess, joinGroup, leaveGroup } from '../src/groups/service';
 import { clearFirestore, testDb } from './helpers';
 import { processRevenueCatEvent } from '../src/billing/entitlements';
 import { purchaseKey } from '../src/billing/purchaseLedger';
+import { updateTourTime } from '../src/billing/timeBudget';
 
 const db = testDb();
 let clock = 1_800_000_000_000;
 const deps = () => ({ db, now: () => clock });
 const { pois } = buildPois(REGION_FIXTURES[0]!.raw, { now: clock });
 const stops = pois.slice(0, 3);
+const audio = { lang: 'en', script: createTourScript({ lang: 'en', instanceId: 'group-walk' }) };
 
 function tour(): Tour {
   return {
@@ -61,8 +63,23 @@ beforeEach(async () => {
 });
 
 describe('live group tours', () => {
+  it.each(['free', 'reward'])('does not let a retained %s host grant fund shared audio', async (source) => {
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
+    await joinGroup(deps(), 'friend', { token });
+    const entitlement = db.doc('users/host/entitlements/tour_tour_g1');
+    await entitlement.update({ source });
+    expect(await hasGroupAccess(deps(), 'friend', group.id, { poiIds: [stops[0]!.id] })).toBe(false);
+    await expect(
+      createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio }),
+    ).rejects.toMatchObject({
+      code: 'permission-denied',
+      details: { reason: 'audio_requires_purchase' },
+    });
+    expect((await entitlement.get()).get('source')).toBe(source);
+  });
+
   it('revokes a subscription-backed group when the host loses the subscription', async () => {
-    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
     await joinGroup(deps(), 'friend', { token });
     await db.collection('groups').doc(group.id).update({ hostSubscriber: true });
     const subscription = db.collection('users').doc('host').collection('entitlements').doc('subscription');
@@ -73,14 +90,29 @@ describe('live group tours', () => {
       expiresAt: clock + 10000,
       updatedAt: clock,
     });
+    await db.collection('groups').doc(group.id).update({ sessionId: 'group-time-session' });
+    await updateTourTime(deps(), 'host', {
+      sessionId: 'group-time-session',
+      sequence: 1,
+      mode: 'tour',
+      tourId: 'tour_g1',
+      state: 'active',
+    });
     const request = { poiIds: [stops[0]!.id] };
     expect(await hasGroupAccess(deps(), 'friend', group.id, request)).toBe(true);
     await subscription.update({ active: false });
     expect(await hasGroupAccess(deps(), 'friend', group.id, request)).toBe(false);
   });
 
+  it('preserves existing group audio rights funded by a purchase-backed legacy gift', async () => {
+    await db.doc('users/host/entitlements/tour_tour_g1').update({ source: 'invite', inviteFrom: 'buyer' });
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
+    await joinGroup(deps(), 'friend', { token });
+    expect(await hasGroupAccess(deps(), 'friend', group.id, { poiIds: [stops[0]!.id] })).toBe(true);
+  });
+
   it('lets two friends ride along for free, refuses the third and only while the group is live', async () => {
-    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
     expect(group.capacity).toBe(3);
     await joinGroup(deps(), 'f1', { token });
     await joinGroup(deps(), 'f2', { token });
@@ -97,7 +129,7 @@ describe('live group tours', () => {
   });
 
   it('rejects forged links and hosts without access to the tour', async () => {
-    const { token } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
+    const { token } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
     const [id] = token.split('.');
     await expect(joinGroup(deps(), 'f1', { token: `${id}.${'x'.repeat(43)}` })).rejects.toMatchObject({
       code: 'not-found',
@@ -105,11 +137,13 @@ describe('live group tours', () => {
     await expect(joinGroup(deps(), 'f1', { token: 'garbage' })).rejects.toMatchObject({
       code: 'invalid-argument',
     });
-    await expect(createGroup(deps(), 'stranger', { tourId: 'tour_g1', mode: 'tour' })).rejects.toThrow();
+    await expect(
+      createGroup(deps(), 'stranger', { tourId: 'tour_g1', mode: 'tour', audio }),
+    ).rejects.toThrow();
   });
 
   it('ends after the TTL and adds bought seats (host only, one credit each)', async () => {
-    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour' });
+    const { token, group } = await createGroup(deps(), 'host', { tourId: 'tour_g1', mode: 'tour', audio });
     await expect(addGroupSeat(deps(), 'host', { groupId: group.id })).rejects.toMatchObject({
       reason: 'no_seat_credit',
     });

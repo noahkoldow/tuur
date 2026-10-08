@@ -71,6 +71,7 @@ export default function OffersPage() {
         active: draft.active,
       });
       setDraft(undefined);
+      setMsg({ tone: 'success', text: t('offers.submitted') });
     } catch {
       setMsg({ tone: 'error', text: t('common.error') });
     } finally {
@@ -92,6 +93,7 @@ export default function OffersPage() {
         {allowed && !draft ? <Button onClick={() => setDraft(blank())}>{t('offers.add')}</Button> : null}
       </div>
       {!allowed ? <Notice tone="warning">{t('offers.needPlan')}</Notice> : null}
+      <Notice>{t('offers.reviewHint')}</Notice>
       {msg ? <Notice tone={msg.tone}>{msg.text}</Notice> : null}
 
       {draft ? (
@@ -157,7 +159,7 @@ export default function OffersPage() {
             </label>
             <div className="row">
               <Button type="submit" busy={busy}>
-                {t('common.save')}
+                {t('offers.submitReview')}
               </Button>
               <Button type="button" variant="ghost" onClick={() => setDraft(undefined)}>
                 {t('common.cancel')}
@@ -173,11 +175,23 @@ export default function OffersPage() {
           <li key={o.id} className="card">
             <div className="row between">
               <h3>{o.title}</h3>
-              <Badge tone={o.active ? 'ok' : 'off'}>
-                {o.active ? t('common.active') : t('common.inactive')}
+              <Badge
+                tone={
+                  o.moderationStatus === 'approved'
+                    ? 'ok'
+                    : o.moderationStatus === 'rejected'
+                      ? 'bad'
+                      : 'wait'
+                }
+              >
+                {t(`offers.review.${o.moderationStatus ?? 'pending'}`)}
               </Badge>
             </div>
             <p>{o.description}</p>
+            {o.moderationStatus === 'rejected' ? (
+              <Notice tone="warning">{t('offers.rejectedHint')}</Notice>
+            ) : null}
+            {!o.active ? <Badge tone="off">{t('common.inactive')}</Badge> : null}
             <p className="muted">
               {formatDate(o.validFrom, lang)} – {formatDate(o.validUntil, lang)}
               {o.dailyLimit ? ` · ${t('offers.perDay', { count: o.dailyLimit })}` : ''}

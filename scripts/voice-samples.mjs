@@ -41,7 +41,7 @@ const CANDIDATES = [
   {
     provider: 'openai',
     voice: 'coral',
-    note: 'Ersatz für "Lina"',
+    note: 'Ersatz für "Linus"',
     personality: 'friendly, upbeat, a little playful',
   },
   { provider: 'openai', voice: 'ballad', note: 'Alternative', personality: 'gentle and expressive' },
@@ -61,7 +61,7 @@ const CANDIDATES = [
   {
     provider: 'gemini',
     voice: 'Achird',
-    note: 'tuur "Lina" (Friendly)',
+    note: 'tuur "Linus" (Friendly)',
     personality: 'friendly, upbeat, a little playful',
   },
   {

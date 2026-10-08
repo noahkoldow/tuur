@@ -152,6 +152,8 @@ export const OfflineManifestSchema = z.object({
   lang: z.string(),
   tour: TourSchema,
   script: TourScriptSchema.optional(),
+  /** Fixed for the saved recording; changing app settings must not mix voices during retries. */
+  voiceId: z.string().optional(),
   access: OfflineDownloadAccessSchema.optional(),
   narrations: z.record(OfflineNarrationSchema),
   transitions: z.record(

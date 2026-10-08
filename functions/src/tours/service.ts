@@ -44,9 +44,9 @@ export interface TourDeps {
   now: () => number;
   templates?: TourTemplate[];
   config?: () => Promise<AiConfig>;
-  /** Entitlement check for paid dynamic modes (planned route); throws to deny. */
+  /** Visibility/context check for free text navigation; throws to deny. */
   authorize?: (uid: string, req: { mode: 'planned'; tile: string }) => Promise<void>;
-  /** Best-effort pre-generation of the first stop narrations (cost brake, spec 4.3). */
+  /** @deprecated Retained for old callers but never invoked: free planning cannot generate audio. */
   pregenerate?: (poiIds: string[], lang: string) => Promise<void>;
 }
 
@@ -395,14 +395,7 @@ export async function generateAutoTours(
     }
     await batch.commit();
 
-    const first = finals.find((t) => t.free) ?? finals[0];
-    if (first && deps.pregenerate)
-      await deps
-        .pregenerate(
-          first.stops.slice(0, 2).map((s) => s.poiId),
-          input.lang,
-        )
-        .catch(() => undefined);
+    // Free route/text generation must never warm up paid narration or TTS.
     return { status: finals.length ? 'ready' : 'no_tours', placeId, tours: summarize(finals) };
   } finally {
     await lockRef.delete().catch(() => undefined);

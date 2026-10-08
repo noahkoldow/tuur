@@ -23,7 +23,7 @@ const subscriber: { entitlements: Entitlement[] } = {
 };
 
 describe('pricing overview and contextual paywalls', () => {
-  it('keeps prices visible in the unlocked demo and after a demo subscription', () => {
+  it('keeps the price overview visible in the demo and after a demo subscription', () => {
     previewConfig.paywall = false;
     expect(paywallContext(empty, { intent: 'pricing' })).toMatchObject({ browsing: true, unlocked: false });
     expect(paywallContext(subscriber, { intent: 'pricing' }).unlocked).toBe(false);
@@ -46,10 +46,11 @@ describe('pricing overview and contextual paywalls', () => {
       true,
     );
     previewConfig.paywall = false;
-    expect(paywallContext(empty, { tourId: 'tour-a' }).unlocked).toBe(true);
+    expect(paywallContext(empty, { tourId: 'tour-a' }).unlocked).toBe(false);
+    expect(paywallContext(empty, { kind: 'session', placeId: 'berlin', mode: 'fork' }).unlocked).toBe(false);
   });
 
-  it('keeps purchase-only downloads gated when demo playback is unlocked', () => {
+  it('keeps purchase-only downloads gated when the old preview flag is disabled', () => {
     previewConfig.paywall = false;
     expect(paywallContext(empty, { tourId: 'tour-a', intent: 'download' })).toEqual({
       browsing: false,

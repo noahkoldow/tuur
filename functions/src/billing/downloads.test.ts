@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildPois, DEFAULT_AI_CONFIG, REGION_FIXTURES } from '@tuur/shared';
-import type { Firestore } from 'firebase-admin/firestore';
+import { memoryFirestore } from '../../test/memoryFirestore';
 import { authorizeContent, ClaimTourStartSchema } from './entitlements';
 import { prepareTourDownload } from './downloads';
 import { getNarration, type NarrationDeps } from '../narration/service';
@@ -38,32 +38,15 @@ function fixture() {
       },
     ],
   ]);
-  const snapshot = (path: string) => ({
-    exists: docs.has(path),
-    data: () => docs.get(path),
-    get: (key: string) => docs.get(path)?.[key],
-  });
-  const ref = (path: string, collection: boolean): unknown => ({
-    doc: (id: string) => ref(`${path}/${id}`, false),
-    collection: (id: string) => ref(`${path}/${id}`, true),
-    get: async () =>
-      collection
-        ? {
-            docs: [...docs.keys()]
-              .filter(
-                (key) => key.startsWith(`${path}/`) && key.slice(path.length + 1).split('/').length === 1,
-              )
-              .map(snapshot),
-          }
-        : snapshot(path),
-  });
-  const db = { collection: (id: string) => ref(id, true) } as unknown as Firestore;
-  return { docs, deps: { db, now: () => now }, now };
+  const memory = memoryFirestore();
+  for (const [path, value] of docs) memory.docs.set(path, value);
+  const { db } = memory;
+  return { docs: memory.docs, deps: { db, now: () => now }, now };
 }
 
 describe('fixed itinerary download authorization', () => {
   it.each(['reward', 'invite', 'free'])(
-    'denies new downloads from a %s grant while preserving online access',
+    'retains online audio only for purchase-backed gifts, and denies new %s downloads',
     async (source) => {
       const { docs, deps, now } = fixture();
       docs.delete('users/u/entitlements/sub');
@@ -74,9 +57,9 @@ describe('fixed itinerary download authorization', () => {
         grantedAt: now,
         expiresAt: null,
       });
-      await expect(
-        authorizeContent(deps, 'u', { tourId: 'ready', mode: 'tour', poiIds: ['p1'] }),
-      ).resolves.toMatchObject({ reason: 'tour' });
+      const online = authorizeContent(deps, 'u', { tourId: 'ready', mode: 'tour', poiIds: ['p1'] });
+      if (source === 'invite') await expect(online).resolves.toEqual({ reason: 'tour' });
+      else await expect(online).rejects.toMatchObject({ details: { reason: 'audio_requires_purchase' } });
       await expect(prepareTourDownload(deps, 'u', { tourId: 'ready', mode: 'tour' })).rejects.toMatchObject({
         code: 'permission-denied',
         details: { reason: 'download_requires_purchase' },
@@ -188,25 +171,36 @@ describe('fixed itinerary download authorization', () => {
     },
   );
 
-  it('grants permanent planned and ready-made receipts without requiring or writing a tour start', async () => {
+  it('grants permanent receipts after reserving subscription minutes, without starting playback', async () => {
     const { docs, deps, now } = fixture();
     const before = [...docs.keys()];
     expect(
-      await prepareTourDownload(deps, 'u', { tourId: 'planned_abcdefghijklmnopqrst', mode: 'planned' }),
+      await prepareTourDownload(deps, 'u', {
+        tourId: 'planned_abcdefghijklmnopqrst',
+        mode: 'planned',
+        scriptInstanceId: 'planned-download',
+      }),
     ).toEqual({
       tourId: 'planned_abcdefghijklmnopqrst',
       mode: 'planned',
       grantedAt: now,
       expiresAt: null,
     });
-    expect(await prepareTourDownload(deps, 'u', { tourId: 'ready', mode: 'tour' })).toMatchObject({
+    expect(
+      await prepareTourDownload(deps, 'u', {
+        tourId: 'ready',
+        mode: 'tour',
+        scriptInstanceId: 'ready-download',
+      }),
+    ).toMatchObject({
       mode: 'tour',
       expiresAt: null,
     });
-    expect([...docs.keys()]).toEqual(before);
+    expect([...docs.keys()].filter((key) => !before.includes(key))).toHaveLength(3);
+    expect(docs.get('users/u/tourTime/budget')?.usedSeconds).toBe(180 * 60);
     await expect(
       authorizeContent(deps, 'u', { tourId: 'ready', mode: 'tour', poiIds: ['p1'] }),
-    ).rejects.toMatchObject({ details: { reason: 'tour_start_required' } });
+    ).rejects.toMatchObject({ details: { reason: 'tour_time_required' } });
   });
 
   it('denies another owner, expired sessions and places outside the saved plan', async () => {

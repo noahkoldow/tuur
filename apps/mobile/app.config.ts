@@ -2,6 +2,9 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 const brand = '../../assets/brand/app';
 const expoGoPreview = process.env.EXPO_PUBLIC_EXPO_GO === '1';
+const betaFirebase =
+  process.env.EXPO_PUBLIC_BACKEND === 'firebase' &&
+  process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID === 'tuur-beta-noehxpo';
 
 /** Native Firebase config files are provided per environment (never committed), see docs/SETUP.md. */
 const googleServicesIos = process.env.GOOGLE_SERVICES_INFO_PLIST ?? './GoogleService-Info.plist';
@@ -33,7 +36,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // Firebase App Check rejects attestations from Apple's sandbox environment.
       'com.apple.developer.devicecheck.appattest-environment': 'production',
     },
-    associatedDomains: ['applinks:tuur.app'],
+    associatedDomains: ['applinks:tuur.app', ...(betaFirebase ? ['applinks:tuur-beta-noehxpo.web.app'] : [])],
     ...(googleServicesIos ? { googleServicesFile: googleServicesIos } : {}),
     infoPlist: {
       NSSupportsLiveActivities: true,

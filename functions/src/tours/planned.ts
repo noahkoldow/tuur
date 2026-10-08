@@ -6,6 +6,7 @@ import {
   encodePolyline,
   evaluateOrder,
   fitToBudget,
+  fallbackTourConcept,
   simplifyPath,
   themesOf,
   type LatLng,
@@ -19,6 +20,7 @@ import { consumeRateLimit, RateLimitError } from '../util/rateLimit';
 import { spentToday } from '../util/usage';
 import { budgetedRouting } from '../providers/budgeted';
 import { TourError, conceptInput, kindOf, makeConcept, type TourDeps } from './service';
+import { consentBoundLlm, getAiConsent, requireAiConsent } from '../privacy/aiConsent';
 
 /**
  * composePlannedRoute (spec 5.2): re-checks the client-planned route with real routing times, drops the least
@@ -134,7 +136,14 @@ export async function composePlannedRoute(
     { template: 'planned', durationMinutes: ev?.totalMinutes ?? req.budgetMinutes, themes, stops: stopInfo },
     req.lang,
   );
-  const concept = await makeConcept(deps, cfg, input, tile);
+  const concept = (await getAiConsent(deps.db, uid)).granted
+    ? await makeConcept(
+        { ...deps, llm: consentBoundLlm(deps.llm, () => requireAiConsent(deps.db, uid)) },
+        cfg,
+        input,
+        tile,
+      )
+    : fallbackTourConcept(input);
   const { suggestedOrder: _ignored, ...text } = concept as TourConcept;
   void _ignored;
 

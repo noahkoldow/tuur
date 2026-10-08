@@ -25,6 +25,8 @@ export const GetNarrationRequestSchema = z.object({
       mode: z.enum(['tour', 'planned', 'fork', 'roam']).optional(),
       /** Live group the listener joined (D47); the server checks membership, never trusts the claim. */
       groupId: z.string().max(60).optional(),
+      sessionId: z.string().max(200).optional(),
+      downloadId: z.string().max(200).optional(),
     })
     .optional(),
   /** Set by the offline download manager: uses the download rate-limit bucket. */
@@ -59,6 +61,8 @@ export const NarrationDocSchema = z.object({
   ownerUid: z.string().optional(),
   scriptInstanceId: z.string().optional(),
   poiId: z.string(),
+  /** The other endpoint of a hand-over; used to safely share an existing group recording. */
+  transitionFromPoiId: z.string().optional(),
   lang: z.string(),
   lengthTier: z.enum(LENGTH_TIERS),
   primaryInterest: z.string(),
@@ -76,6 +80,14 @@ export const NarrationDocSchema = z.object({
   /** Set only for grounded output; grounded narrations are not shared/cached (see D16). */
   grounded: z.boolean().default(false),
   groundedExpiresAt: z.number().optional(),
+  /** Attribution retained when a host reopens or shares this grounded recording. */
+  grounding: z
+    .object({
+      queries: z.number(),
+      searchEntryPointHtml: z.string().optional(),
+      sources: z.array(z.object({ uri: z.string(), title: z.string().optional() })),
+    })
+    .optional(),
   /** Partner introduction (announced as such in the audio and labeled in the app, spec 7.3). */
   sponsored: z.boolean().default(false),
   status: z.enum(NARRATION_STATUSES).default('ok'),

@@ -129,16 +129,46 @@ export class DownloadManager {
     const now = this.d.now ?? Date.now;
     if (signal?.cancelled) throw new DownloadError('cancelled', 'Cancelled');
     const mode = downloadTourMode(tour)!;
-    const access = OfflineDownloadAccessSchema.parse(await this.d.backend.prepareTourDownload(tour.id, mode));
-    if (
-      access.tourId !== tour.id ||
-      access.mode !== mode ||
-      (access.expiresAt !== null && access.expiresAt <= now())
-    )
-      throw new DownloadError('failed', 'Download access is no longer valid');
     const need = estimateDownloadBytes(tour);
     const previous = library.get(tour.id);
     const brief = createTourScript({ lang, tour });
+    const ownerUid = this.d.backend.auth.current()?.uid;
+    if (!ownerUid) throw new DownloadError('cancelled', 'Account changed');
+    const reservationPath = `downloads/${tour.id}/reservation.json`;
+    const signature = JSON.stringify([
+      ownerUid,
+      tour.id,
+      mode,
+      lang,
+      brief.id,
+      tour.version,
+      tour.fingerprint,
+      tour.stops.map((stop) => stop.poiId),
+    ]);
+    let reservation: { scriptInstanceId: string; voiceId?: string } | undefined;
+    const savedReservation = await files.readText(reservationPath);
+    if (savedReservation) {
+      try {
+        const parsed: unknown = JSON.parse(savedReservation);
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          'ownerUid' in parsed &&
+          parsed.ownerUid === ownerUid &&
+          'signature' in parsed &&
+          parsed.signature === signature &&
+          'scriptInstanceId' in parsed &&
+          typeof parsed.scriptInstanceId === 'string' &&
+          /^[A-Za-z0-9_-]{1,120}$/.test(parsed.scriptInstanceId)
+        )
+          reservation = {
+            scriptInstanceId: parsed.scriptInstanceId,
+            ...('voiceId' in parsed && typeof parsed.voiceId === 'string' ? { voiceId: parsed.voiceId } : {}),
+          };
+      } catch {
+        // An interrupted reservation write cannot invalidate an existing complete archive.
+      }
+    }
     const resumable = Boolean(
       previous &&
       previous.lang === lang &&
@@ -151,11 +181,41 @@ export class DownloadManager {
       ...(resumable && previous?.script ? previous.script : brief),
       instanceId:
         (resumable ? previous?.script?.instanceId : undefined) ??
+        reservation?.scriptInstanceId ??
         this.d.newScriptInstanceId?.() ??
         globalThis.crypto.randomUUID(),
     };
+    // A persisted identity owns its voice, even if settings changed after a lost response or partial download.
+    const voiceId = resumable ? previous?.voiceId : reservation ? reservation.voiceId : this.d.voice?.();
     if (!previous && (await files.freeBytes()) < need * 1.2)
       throw new DownloadError('no_space', 'Not enough free storage');
+
+    // Keep quota idempotency separate from the playable manifest. A denied replacement must not erase an archive.
+    if (signal?.cancelled || this.d.backend.auth.current()?.uid !== ownerUid)
+      throw new DownloadError('cancelled', 'Account changed');
+    await files.writeText(
+      reservationPath,
+      JSON.stringify({
+        version: 1,
+        ownerUid,
+        signature,
+        scriptInstanceId: script.instanceId,
+        ...(voiceId ? { voiceId } : {}),
+      }),
+    );
+    if (signal?.cancelled || this.d.backend.auth.current()?.uid !== ownerUid)
+      throw new DownloadError('cancelled', 'Account changed');
+    const access = OfflineDownloadAccessSchema.parse(
+      await this.d.backend.prepareTourDownload(tour.id, mode, script.instanceId),
+    );
+    if (
+      access.tourId !== tour.id ||
+      access.mode !== mode ||
+      (access.expiresAt !== null && access.expiresAt <= now())
+    )
+      throw new DownloadError('failed', 'Download access is no longer valid');
+    if (signal?.cancelled || this.d.backend.auth.current()?.uid !== ownerUid)
+      throw new DownloadError('cancelled', 'Account changed');
 
     const items = planDownload(tour);
     const fractions: Record<string, number> = {};
@@ -165,6 +225,7 @@ export class DownloadManager {
             ...previous,
             tour,
             script,
+            ...(voiceId ? { voiceId } : {}),
             access,
             narrations: { ...previous.narrations },
             transitions: { ...previous.transitions },
@@ -176,6 +237,7 @@ export class DownloadManager {
             lang,
             tour,
             script,
+            ...(voiceId ? { voiceId } : {}),
             access,
             narrations: {},
             transitions: {},
@@ -319,8 +381,12 @@ export class DownloadManager {
           item.poiId!,
         ),
         download: true,
-        ...(this.d.voice?.() ? { voice: this.d.voice()! } : {}),
-        access: { tourId: tour.id, mode: downloadTourMode(tour)! },
+        ...(m.voiceId ? { voice: m.voiceId } : {}),
+        access: {
+          tourId: tour.id,
+          mode: downloadTourMode(tour)!,
+          ...(m.script?.instanceId ? { downloadId: m.script.instanceId } : {}),
+        },
       });
       const audioFile = `downloads/${tour.id}/audio/${hash(n.key)}.mp3`;
       await files.download(n.audioUrl ?? (await backend.audioUrl(n.audioPath)), audioFile);
@@ -351,8 +417,12 @@ export class DownloadManager {
         tourTitle: (m.script ?? createTourScript({ lang, tour })).title,
         ...(m.script?.instanceId ? { scriptInstanceId: m.script.instanceId } : {}),
         download: true,
-        ...(this.d.voice?.() ? { voice: this.d.voice()! } : {}),
-        access: { tourId: tour.id, mode: downloadTourMode(tour)! },
+        ...(m.voiceId ? { voice: m.voiceId } : {}),
+        access: {
+          tourId: tour.id,
+          mode: downloadTourMode(tour)!,
+          ...(m.script?.instanceId ? { downloadId: m.script.instanceId } : {}),
+        },
       });
       const audioFile = `downloads/${tour.id}/audio/${hash(t.key)}.mp3`;
       await files.download(t.audioUrl ?? (await backend.audioUrl(t.audioPath)), audioFile);

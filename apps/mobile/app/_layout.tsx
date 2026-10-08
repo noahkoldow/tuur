@@ -1,5 +1,6 @@
 import '../src/i18n';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -15,6 +16,7 @@ import {
 import { BackendProvider } from '../src/backend';
 import { AuthProvider, useAuth } from '../src/auth/session';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { FreeTourIntroHost } from '../src/components/free-tour-intro';
 import { useEntitlementSync } from '../src/billing/entitlements';
 import { getOfflineLibrary } from '../src/offline';
 import { initializeTourLiveActivities } from '../src/liveActivity/service';
@@ -42,6 +44,7 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
+  const { t } = useTranslation();
   const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_400Regular,
     PlusJakartaSans_500Medium,
@@ -80,6 +83,7 @@ function RootNavigator() {
       <Stack
         screenOptions={{
           headerShown: false,
+          headerBackTitle: t('common.back'),
           contentStyle: { backgroundColor: sys.background },
           headerTintColor: sys.accentText as string,
           headerTitleStyle: { color: sys.label as string },
@@ -90,14 +94,14 @@ function RootNavigator() {
       >
         <Stack.Screen name="index" options={{ animation: 'fade' }} />
         <Stack.Screen name="legal/[doc]" />
-        <Stack.Protected guard={auth.step !== 'ready'}>
-          <Stack.Screen name="sign-in" options={{ animation: 'fade', gestureEnabled: false }} />
-        </Stack.Protected>
+        <Stack.Screen name="account/delete" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="sign-in" options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Protected guard={auth.step === 'ready' && !onboarded}>
           <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
         </Stack.Protected>
         <Stack.Protected guard={auth.step === 'ready' && onboarded}>
           <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+          <Stack.Screen name="report" options={{ headerShown: true, title: '' }} />
           <Stack.Screen name="tours" />
           <Stack.Screen name="tour/[id]" />
           <Stack.Screen name="plan" />
@@ -123,6 +127,7 @@ function RootNavigator() {
           <Stack.Screen name="join/[token]" options={{ presentation: 'modal' }} />
         </Stack.Protected>
       </Stack>
+      <FreeTourIntroHost />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import {
@@ -327,6 +327,8 @@ export async function saveOffer(deps: PartnerDeps, uid: string, raw: unknown): P
     poiId: partner.poiId,
     createdAt: prev?.exists ? Number(prev.get('createdAt')) : now,
     updatedAt: now,
+    moderationStatus: 'pending',
+    reviewRevision: randomUUID(),
   });
   await ref.set(offer);
   return offer;
@@ -343,7 +345,7 @@ export async function deleteOffer(deps: PartnerDeps, uid: string, raw: unknown):
 }
 
 /** Offers listeners may see: live partner with an offers plan, offer inside its validity window. */
-export async function getOffers(deps: PartnerDeps, raw: unknown): Promise<PublicOffer[]> {
+export async function getOffers(deps: PartnerDeps, raw: unknown, uid?: string): Promise<PublicOffer[]> {
   const parsed = z.object({ poiIds: z.array(z.string().min(1).max(120)).min(1).max(10) }).safeParse(raw);
   if (!parsed.success) throw new PartnerError('invalid-argument', 'Invalid request');
   const { db } = deps;
@@ -353,7 +355,8 @@ export async function getOffers(deps: PartnerDeps, raw: unknown): Promise<Public
   const cache = new Map<string, Partner | undefined>();
   for (const d of snap.docs) {
     const o = OfferSchema.safeParse(d.data());
-    if (!o.success || offerWindow(o.data, now) !== 'open') continue;
+    if (!o.success || o.data.moderationStatus !== 'approved' || offerWindow(o.data, now) !== 'open') continue;
+    if (uid && (await db.collection('users').doc(uid).collection('blockedPartners').doc(o.data.partnerId).get()).exists) continue;
     if (!cache.has(o.data.partnerId)) cache.set(o.data.partnerId, await loadPartner(db, o.data.partnerId));
     const p = cache.get(o.data.partnerId);
     if (!p || !canHaveOffers(p, now)) continue;
@@ -452,6 +455,8 @@ export async function createRedemptionToken(deps: PartnerDeps, uid: string, raw:
   const offerSnap = await db.collection('offers').doc(parsed.data.offerId).get();
   const offer = offerSnap.exists ? OfferSchema.safeParse(offerSnap.data()) : undefined;
   if (!offer?.success) throw new PartnerError('not-found', 'Offer not found');
+  if (offer.data.moderationStatus !== 'approved')
+    throw new PartnerError('failed-precondition', 'Offer is awaiting review', { reason: 'offer_inactive' });
   const partner = await loadPartner(db, offer.data.partnerId);
   const poi = await db.collection('pois').doc(offer.data.poiId).get();
   if (!partner || !poi.exists) throw new PartnerError('not-found', 'Offer not found');
@@ -538,6 +543,8 @@ export async function redeemToken(deps: PartnerDeps, uid: string, raw: unknown) 
     const offerSnap = await tx.get(db.collection('offers').doc(offerId));
     const offer = OfferSchema.safeParse(offerSnap.data());
     if (!offer.success) throw new PartnerError('failed-precondition', 'Invalid token', { reason: 'invalid' });
+    if (offer.data.moderationStatus !== 'approved')
+      throw new PartnerError('failed-precondition', 'Offer unavailable', { reason: 'offer_inactive' });
     const day = dayKeyUtc(now);
     const cRef = counterRef(db, offerId, day);
     const redeemedToday = Number((await tx.get(cRef)).get('redeemed') ?? 0);

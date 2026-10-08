@@ -131,7 +131,20 @@ export class GeminiLlmProvider implements LlmProvider {
   }
 
   async selectNearby(req: NearbySelectionInput): Promise<SelectNearbyResult & { usage: Usage }> {
-    const { model, ...input } = req;
+    const { model } = req;
+    const input = {
+      lang: req.lang,
+      interests: req.interests,
+      thread: req.thread,
+      previousPoiName: req.previousPoiName,
+      candidates: req.candidates.map(({ id, name, interests, kind, sourceHint }) => ({
+        id,
+        name,
+        interests,
+        kind,
+        sourceHint,
+      })),
+    };
     const res = await this.ai.models.generateContent({
       model,
       contents: JSON.stringify(input),
