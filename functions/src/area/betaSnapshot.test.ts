@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Firestore } from 'firebase-admin/firestore';
-import { ensureBetaSnapshotArea } from './betaSnapshot';
+import { encodeGeohash } from '@tuur/shared';
+import { ensureBetaSnapshotArea, parseBetaRegion } from './betaSnapshot';
+
+const tileAt = (lat: number, lng: number) => encodeGeohash(lat, lng, 6);
 
 const env = {
   TUUR_DEPLOYMENT_ENV: 'beta',
@@ -51,6 +54,50 @@ describe('bounded beta snapshot areas', () => {
       ensureBetaSnapshotArea(db, 'u33dbb', true, 1, { ...env, ...overrides }),
     ).rejects.toMatchObject({ reason: 'beta_config_invalid' });
     expect(getAll).not.toHaveBeenCalled();
+  });
+  describe('live ingestion limited to a region', () => {
+    const live = {
+      TUUR_DEPLOYMENT_ENV: 'beta',
+      GCLOUD_PROJECT: 'tuur-beta-test',
+      TUUR_BETA_FIREBASE_PROJECT_ID: 'tuur-beta-test',
+      TUUR_BETA_REGION_BBOX: '52.28,12.90,52.78,13.92',
+    };
+    it('allows Berlin and its fringe and leaves the ingestion path to the caller', async () => {
+      const { db, getAll } = database();
+      for (const tile of [tileAt(52.52, 13.405), tileAt(52.39, 13.065), tileAt(52.3, 13.6)])
+        expect(await ensureBetaSnapshotArea(db, tile, true, 1, live)).toBeUndefined();
+      expect(getAll).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['Hamburg', tileAt(53.55, 10.0)],
+      ['Paris', tileAt(48.857, 2.352)],
+    ])('rejects %s before any ingestion', async (_name, tile) => {
+      const { db } = database();
+      await expect(ensureBetaSnapshotArea(db, tile, true, 1, live)).rejects.toMatchObject({
+        reason: 'beta_area_unavailable',
+      });
+    });
+    it.each([
+      { TUUR_BETA_REGION_BBOX: 'garbage' },
+      { TUUR_BETA_REGION_BBOX: '52.78,12.90,52.28,13.92' },
+      { TUUR_BETA_REGION_BBOX: '-90,-180,90,180' },
+      { TUUR_DEPLOYMENT_ENV: 'production' },
+      { GCLOUD_PROJECT: 'tuur-prod', TUUR_BETA_FIREBASE_PROJECT_ID: 'tuur-prod' },
+    ])('fails closed on unsafe region configuration %j', async (overrides) => {
+      const { db } = database();
+      await expect(ensureBetaSnapshotArea(db, 'u33dbc', true, 1, { ...live, ...overrides })).rejects.toMatchObject(
+        { reason: 'beta_config_invalid' },
+      );
+    });
+    it('parses only bounded rectangles', () => {
+      expect(parseBetaRegion('52.28,12.90,52.78,13.92')).toEqual({
+        south: 52.28,
+        west: 12.9,
+        north: 52.78,
+        east: 13.92,
+      });
+      expect(parseBetaRegion('1,2,3')).toBeUndefined();
+    });
   });
   it.each([{ exists: false }, { locked: false }, { status: 'failed' }])(
     'does not silently ingest an unavailable snapshot %j',

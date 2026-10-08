@@ -187,7 +187,8 @@ export const ensureArea = onCall(
         now: Date.now,
         ...(process.env['TUUR_DEPLOYMENT_ENV'] === 'beta'
           ? {
-              maxClaimsPerDay: 50,
+              // Matches OVERPASS_DAILY_LIMIT: a cold neighbourhood needs up to 25 tiles, each fetched once.
+              maxClaimsPerDay: 1500,
               // Cold neighboring tiles wait behind the serial worker. Do not claim them again
               // while queued; after this window a new request can recover an abandoned task.
               policy: { ...DEFAULT_CLAIM_POLICY, staleIngestMs: 2 * 3600_000 },
