@@ -242,3 +242,37 @@ describe('global Overpass request guard', () => {
     expect(docs.get(quotaPath)?.count).toBe(1);
   });
 });
+
+describe('Overpass failover', () => {
+  const first = 'https://one.example.net/api/interpreter';
+  const second = 'https://two.example.net/api/interpreter';
+
+  it('hands over to the next endpoint when the first one fails', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('Internal Server Error', { status: 500 }))
+      .mockResolvedValueOnce(Response.json(response));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await new HttpPoiSources(`${first}, ${second}`).fetchOsm(bounds);
+    expect(result).toHaveLength(1);
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([first, second]);
+  });
+
+  it('reports the last failure when every endpoint fails', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('down', { status: 500 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(new HttpPoiSources(`${first},${second}`).fetchOsm(bounds)).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not spend more attempts after a local quota rejection', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const reserveRequest = vi.fn().mockRejectedValue(new RateLimitError(1000));
+    await expect(
+      new HttpPoiSources(`${first},${second}`, undefined, { reserveRequest }).fetchOsm(bounds),
+    ).rejects.toBeInstanceOf(RateLimitError);
+    expect(reserveRequest).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});

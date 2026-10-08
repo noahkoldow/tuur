@@ -40,6 +40,8 @@ describe('legal documents', () => {
       'AdMob',
       'Stripe',
       'Crashlytics',
+      'Apple MapKit',
+      'Museen und Kulturorte',
       'Kartenraster',
       'Aufsichtsbehörde',
       'widerrufen',

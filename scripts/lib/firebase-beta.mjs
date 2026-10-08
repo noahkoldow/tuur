@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 process.env.DEBUG = '';
 
 /** Uses the existing Firebase CLI login in memory. Never print credentials or response tokens. */
-async function accessToken() {
+export async function accessToken() {
   const auth = require('firebase-tools/lib/auth');
   const account = auth.getProjectDefaultAccount(process.cwd());
   if (!account?.tokens?.refresh_token) throw new Error('Firebase CLI login is required');

@@ -12,6 +12,7 @@ import {
   type RawPoi,
 } from '@tuur/shared';
 import { fetchJson } from '../util/http';
+import { RateLimitError } from '../util/rateLimit';
 import { fetchOverpass, type OverpassOptions } from './overpass';
 
 /** Upstream POI data providers (OSM, Wikidata, Wikipedia, Commons) behind one interface. */
@@ -30,8 +31,23 @@ export class HttpPoiSources implements PoiSourceClient {
     private readonly overpassOptions: OverpassOptions = {},
   ) {}
 
+  /** `OVERPASS_ENDPOINT` may list several comma-separated interpreters; a failing one hands over to the next. */
   async fetchOsm(b: Bounds): Promise<RawPoi[]> {
-    return fetchOverpass(this.overpass, b, this.overpassOptions);
+    const endpoints = this.overpass
+      .split(',')
+      .map((endpoint) => endpoint.trim())
+      .filter(Boolean);
+    let failure: unknown;
+    for (const endpoint of endpoints) {
+      try {
+        return await fetchOverpass(endpoint, b, this.overpassOptions);
+      } catch (error) {
+        // A local quota or lease rejection applies to every endpoint: do not spend more attempts.
+        if (error instanceof RateLimitError) throw error;
+        failure = error;
+      }
+    }
+    throw failure ?? new Error('No Overpass endpoint configured');
   }
 
   async fetchWikidata(b: Bounds): Promise<RawPoi[]> {

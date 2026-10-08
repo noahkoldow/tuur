@@ -13,9 +13,12 @@ export function releaseProblems(env, { target = 'all', channel = 'production' } 
     need(key, 'public HTTPS endpoint');
     if (!env[key]) return;
     try {
-      const url = new URL(env[key]);
-      if (url.protocol !== 'https:' || ['localhost', '127.0.0.1', 'example.com'].includes(url.hostname))
-        problems.push(`${key} must be a public HTTPS URL`);
+      // OVERPASS_ENDPOINT may list several interpreters for failover.
+      for (const part of key === 'OVERPASS_ENDPOINT' ? env[key].split(',') : [env[key]]) {
+        const url = new URL(part.trim());
+        if (url.protocol !== 'https:' || ['localhost', '127.0.0.1', 'example.com'].includes(url.hostname))
+          problems.push(`${key} must be a public HTTPS URL`);
+      }
     } catch {
       problems.push(`${key} is not a valid URL`);
     }
