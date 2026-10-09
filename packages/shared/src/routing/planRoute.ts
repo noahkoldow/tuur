@@ -38,6 +38,8 @@ export interface PlannedRoute {
   distanceMeters: number;
   score: number;
   issues: TourIssue[];
+  /** Candidate pool the route was chosen from; the server re-plans among them with real routing times. */
+  candidateIds?: string[];
 }
 
 const eligible = (p: Poi, minScore: number) =>
@@ -105,7 +107,7 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
   if (!result.order.length || required.some((p) => !result.order.includes(p.id))) return undefined;
   if (!evaluateOrder({ candidates, minutes: m.minutes, maxLegMinutes: maxLeg }, result.order)?.legsOk)
     return undefined;
-  return assemble(req, pool, m, result.order, result.totalScore);
+  return { ...assemble(req, pool, m, result.order, result.totalScore), candidateIds: pool.map((p) => p.id) };
 }
 
 /** Builds the route summary for a given order (also used to re-evaluate a corrected order). */

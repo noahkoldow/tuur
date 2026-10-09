@@ -6,6 +6,7 @@ import {
   encodePolyline,
   evaluateOrder,
   fitToBudget,
+  solveOrienteering,
   fallbackTourConcept,
   simplifyPath,
   themesOf,
@@ -37,12 +38,17 @@ export async function composePlannedRoute(
   const req = parsed.data;
   const cfg = await (deps.config ?? (() => loadAiConfig(deps.db, deps.now())))();
 
-  const snaps = await Promise.all(req.stops.map((id) => deps.db.collection('pois').doc(id).get()));
+  const extraIds = (req.candidateIds ?? []).filter((id) => !req.stops.includes(id));
+  const snaps = await Promise.all(
+    [...req.stops, ...extraIds].map((id) => deps.db.collection('pois').doc(id).get()),
+  );
   const pois: Poi[] = [];
-  for (const s of snaps) {
+  for (const [i, s] of snaps.entries()) {
     const p = s.exists ? PoiSchema.safeParse(s.data()) : undefined;
-    if (!p?.success || p.data.hidden || !p.data.accessible)
+    if (!p?.success || p.data.hidden || !p.data.accessible) {
+      if (i >= req.stops.length) continue; // an unavailable extra candidate is simply not offered
       throw new TourError('not-found', 'Unknown or unavailable stop');
+    }
     pois.push(p.data);
   }
   if (new Set(req.stops).size !== req.stops.length)
@@ -77,13 +83,38 @@ export async function composePlannedRoute(
   const withOpenEnd = open ? zeroEnd(m.minutes) : m.minutes;
   // Without a start position the tour begins at its first stop: nothing to walk to reach it.
   const minutes = req.start ? withOpenEnd : withOpenEnd.map((row, i) => (i === 0 ? row.map(() => 0) : row));
-  const fit = fitToBudget(
-    pois,
-    { minutes, meters: m.meters },
-    req.budgetMinutes,
-    req.interests,
-    req.requiredStopIds,
-  );
+  // With a candidate pool the route is re-planned on real times (it can swap or add stops); otherwise stops are only dropped.
+  let fit: { order: string[]; totalMinutes: number; dropped: string[] };
+  if (extraIds.length) {
+    const solved = solveOrienteering({
+      candidates: pois.map((p) => ({
+        id: p.id,
+        location: p.location,
+        score: p.score,
+        dwellMinutes: p.dwellMinutes,
+        interests: p.interests,
+        ...(p.partnerId ? { partner: true } : {}),
+      })),
+      minutes,
+      budgetMinutes: req.budgetMinutes,
+      interests: req.interests,
+      forcedIds: req.requiredStopIds ?? [],
+      maxLegMinutes: 20,
+    });
+    fit = {
+      order: solved.order,
+      totalMinutes: solved.totalMinutes,
+      dropped: req.stops.filter((id) => !solved.order.includes(id)),
+    };
+  } else {
+    fit = fitToBudget(
+      pois,
+      { minutes, meters: m.meters },
+      req.budgetMinutes,
+      req.interests,
+      req.requiredStopIds,
+    );
+  }
   const kept = fit.order.map((id) => pois.find((p) => p.id === id)!);
   if (kept.length === 0 || fit.totalMinutes > req.budgetMinutes + 0.5)
     throw new TourError('failed-precondition', 'No stops fit the time budget');

@@ -112,6 +112,7 @@ export default function Plan() {
     try {
       const res = await backend.composePlannedRoute({
         stops: preview.stops.map((s) => s.id),
+        ...(preview.candidateIds ? { candidateIds: preview.candidateIds } : {}),
         requiredStopIds,
         start: roundPosition(position),
         ...(destination ? { end: destination.location } : {}),

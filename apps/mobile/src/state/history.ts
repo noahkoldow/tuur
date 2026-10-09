@@ -156,12 +156,6 @@ export const useHistory = create<HistoryState>()(
       finish: (id, endedAt) => {
         const cur = get().records.find((r) => r.id === id);
         if (!cur) return undefined;
-        const moved = cur.track.length >= 3;
-        const lasted = endedAt - cur.startedAt >= 30_000;
-        if (!cur.stops.length && !moved && !lasted) {
-          set((s) => ({ records: s.records.filter((r) => r.id !== id) }));
-          return undefined;
-        }
         const done = { ...cur, endedAt: cur.endedAt ?? endedAt, updatedAt: Date.now() };
         set((s) => ({ records: s.records.map((r) => (r.id === id ? done : r)) }));
         return done;

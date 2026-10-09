@@ -86,6 +86,8 @@ export const ComposeRouteRequestSchema = z.object({
   /** POI ids in the planned order (from the client-side planner). */
   stops: z.array(z.string().min(1).max(120)).min(1).max(25),
   requiredStopIds: z.array(z.string().min(1).max(120)).max(25).optional(),
+  /** Optional wider pool: the server re-plans among these with real routing times instead of only dropping stops. */
+  candidateIds: z.array(z.string().min(1).max(120)).max(30).optional(),
   /** Used only to route; never stored. Omitted = start at the first stop. */
   start: LatLngSchema.optional(),
   end: LatLngSchema.optional(),
