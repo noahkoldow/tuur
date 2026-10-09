@@ -18,7 +18,7 @@ import { interestOf } from '../src/components/StopCards';
 import { Text } from '../src/components/Text';
 import { TuurMap } from '../src/components/TuurMap';
 import { usePoiPool } from '../src/hooks/usePoiPool';
-import { formatDurationShort, formatKm } from '../src/format';
+import { formatDurationShort } from '../src/format';
 import { roundPosition } from '../src/location/privacy';
 import { usePosition } from '../src/location/usePosition';
 import { haptics } from '../src/motion';
@@ -178,9 +178,7 @@ export default function Plan() {
         partner: Boolean(s.partnerId),
         ...(interestOf(s) ? { interest: interestOf(s)! } : {}),
       }));
-  const cta = preview
-    ? `${t('plan.curateRoute')} · ${t('common.minutes', { count: Math.round(preview.totalMinutes) })}`
-    : t('plan.curateRoute');
+  const cta = t('plan.curateRoute');
 
   return (
     <KeyboardAvoidingView behavior="height" style={{ flex: 1, backgroundColor: sys.grouped }}>
@@ -404,7 +402,7 @@ export default function Plan() {
       <FloatingAction>
         {preview && !busy ? (
           <Text variant="footnote" align="center" style={{ paddingTop: 6 }}>
-            {t('plan.estimate', { km: formatKm(preview.distanceMeters, language) })}
+            {t('plan.estimate')}
           </Text>
         ) : !busy && position && !ready ? (
           <Text variant="footnote" align="center" style={{ paddingTop: 6 }}>
