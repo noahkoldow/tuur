@@ -14,6 +14,10 @@ import {
   type SourceBundle,
   type Usage,
   type SelectNearbyResult,
+  FACT_SHEET_FACT_KEYS,
+  FACT_SHEET_SECTION_KINDS,
+  fallbackFactSheet,
+  type FactSheetSourceInput,
 } from '@tuur/shared';
 import { INTERESTS } from '@tuur/shared';
 import { LLM_OUTPUT_LIMITS } from './limits';
@@ -83,6 +87,14 @@ export interface LlmProvider {
     name: string;
     sources: string;
   }): Promise<{ text: string; usage: Usage }>;
+  /** Structured place fact sheet (JSON, raw: the caller normalizes and verifies it against the sources). */
+  factSheet(req: {
+    model: string;
+    system: string;
+    user: string;
+    /** Structured inputs, used by the mock provider. */
+    fallback: FactSheetSourceInput & { name: string };
+  }): Promise<{ output: unknown; usage: Usage }>;
   /** Narrative thread for a tour (title, teaser, intro, hand-overs, outro) from route + names (spec 4.3). */
   generateTourConcept(req: {
     model: string;
@@ -325,6 +337,49 @@ export class GeminiLlmProvider implements LlmProvider {
     return { output: TourConceptSchema.parse(parseJson(res.text)), usage: this.usage(res, false) };
   }
 
+  async factSheet(req: { model: string; system: string; user: string }) {
+    const res = await this.ai.models.generateContent({
+      model: req.model,
+      contents: req.user,
+      config: {
+        systemInstruction: req.system,
+        temperature: 0.2,
+        maxOutputTokens: LLM_OUTPUT_LIMITS.factSheet,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING },
+            facts: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  key: { type: Type.STRING, enum: [...FACT_SHEET_FACT_KEYS] },
+                  value: { type: Type.STRING },
+                },
+                required: ['key', 'value'],
+              },
+            },
+            sections: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  kind: { type: Type.STRING, enum: [...FACT_SHEET_SECTION_KINDS] },
+                  items: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['kind', 'items'],
+              },
+            },
+          },
+          required: ['summary', 'facts', 'sections'],
+        },
+      },
+    });
+    return { output: parseJson(res.text), usage: this.usage(res, true) };
+  }
+
   async teaser(req: { model: string; lang: string; name: string; sources: string }) {
     const res = await this.ai.models.generateContent({
       model: req.model,
@@ -410,6 +465,16 @@ export class MockLlmProvider implements LlmProvider {
 
   async generateTourConcept(req: { input: TourConceptInput }) {
     return { output: fallbackTourConcept(req.input), usage: { inputTokens: 200, outputTokens: 200 } };
+  }
+
+  async factSheet(req: { fallback: FactSheetSourceInput & { name: string } }) {
+    // Same shape as the real provider, derived deterministically from the sources.
+    const sheet = fallbackFactSheet(req.fallback) ?? {
+      summary: req.fallback.name,
+      facts: [],
+      sections: [],
+    };
+    return { output: sheet, usage: { liteInputTokens: 30, liteOutputTokens: 30 } };
   }
 
   async teaser(req: { name: string; sources: string }): Promise<{ text: string; usage: Usage }> {

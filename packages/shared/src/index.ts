@@ -65,4 +65,5 @@ export * from './partner/stripe';
 export * from './partner/traction';
 export * from './legal';
 export * from './poi/curation';
+export * from './poi/factSheet';
 export * from './privacy/aiConsent';

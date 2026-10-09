@@ -5,6 +5,7 @@ export const LLM_OUTPUT_LIMITS = {
   classifyInterests: 4096,
   generateTourConcept: 4096,
   teaser: 120,
+  factSheet: 900,
   transition: 200,
   selectNearby: 256,
 } as const;

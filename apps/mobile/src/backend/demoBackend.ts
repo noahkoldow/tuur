@@ -71,6 +71,7 @@ import { previewWalkingPath } from './previewRouting';
 import { normalizedPhone, requirePrimaryAccount, validPhone } from '../auth/policy';
 import { createDemoTimeBudget } from './demoTimeBudget';
 import { withDemoPlaceText } from './demoPlaceText';
+import { localFactSheet } from '../components/factSheetLocal';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isNarrationResponse = (
@@ -626,6 +627,12 @@ export function createDemoBackend(opts: { latencyMs?: number; enforceAccess?: bo
       return req.lang === 'de'
         ? `Ein Ort der Kategorie ${kind}, an dem sich ein kurzer Halt lohnt.`
         : `A ${kind} that is worth a short stop.`;
+    },
+    async getFactSheet(req) {
+      await sleep(latency);
+      const sheet = localFactSheet(poiIndex.get(req.poiId), req.lang);
+      if (!sheet) throw new BackendError('not_found', 'Place is not available');
+      return { sheet, origin: 'fallback' };
     },
     async getPoiText(req) {
       await sleep(latency);

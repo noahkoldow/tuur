@@ -45,6 +45,7 @@ export function withOfflineFirst(
     composePlannedRoute: (req) => base.composePlannedRoute(req),
     getTeaser: (req) => base.getTeaser(req),
     getPoiText: (req) => base.getPoiText(req),
+    getFactSheet: (req) => base.getFactSheet(req),
     reportNarration: (i) => base.reportNarration(i),
     async getAutoTours(tile, lang) {
       try {

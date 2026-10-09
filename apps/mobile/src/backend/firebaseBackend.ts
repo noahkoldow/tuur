@@ -69,6 +69,7 @@ import {
   type TransitionResponse,
   type Unsubscribe,
   type UserInfo,
+  type FactSheetResponse,
 } from './types';
 
 const toUser = (u: User | null): UserInfo | null =>
@@ -337,6 +338,9 @@ export function createFirebaseBackend(): Backend {
     composePlannedRoute: (req) => call('composePlannedRoute', req),
     async getTeaser(req) {
       return (await call<{ poiId: string; lang: string }, { text: string }>('getTeaser', req)).text;
+    },
+    async getFactSheet(req) {
+      return await call<typeof req, FactSheetResponse>('getFactSheet', req);
     },
     getPoiText: (req) => call('getPoiText', req),
     async getNarration(req: GetNarrationRequest) {

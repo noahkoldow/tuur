@@ -647,6 +647,7 @@ describe('offline downloads', () => {
       composePlannedRoute: dead,
       getTeaser: dead,
       getPoiText: dead,
+      getFactSheet: dead,
       getNarration: dead,
       getTransition: dead,
       audioUrl: dead,

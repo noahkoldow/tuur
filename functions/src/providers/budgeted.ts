@@ -44,6 +44,7 @@ export function budgetedLlm(
     generateTourConcept: (req) =>
       call('generateTourConcept', 'narration', req.model, req, false, () => inner.generateTourConcept(req)),
     teaser: (req) => call('teaser', 'teaser', req.model, req, true, () => inner.teaser(req)),
+    factSheet: (req) => call('factSheet', 'teaser', req.model, req, true, () => inner.factSheet(req)),
     transition: (req) => call('transition', 'transition', req.model, req, true, () => inner.transition(req)),
     selectNearby: (req) =>
       call('selectNearby', 'classify', req.model, req, true, () => inner.selectNearby(req)),

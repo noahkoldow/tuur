@@ -21,9 +21,16 @@ import type {
   UpdateTourTimeRequest,
   TourTimeResult,
   AiConsentState,
+  FactSheet,
 } from '@tuur/shared';
 
 export type Unsubscribe = () => void;
+
+export interface FactSheetResponse {
+  sheet: FactSheet;
+  /** `ai` = written by the model from the place sources (must be labelled); `fallback` = deterministic restructuring. */
+  origin: 'ai' | 'fallback';
+}
 
 export interface ContentReportInput {
   requestId: string;
@@ -146,6 +153,8 @@ export interface Backend {
   composePlannedRoute(req: ComposeRouteRequest): Promise<{ tour: Tour; dropped: string[] }>;
   /** One-sentence teaser for crossroads cards. */
   getTeaser(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<string>;
+  /** Structured fact sheet (AI with deterministic fallback, server cached); never audio. */
+  getFactSheet(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<FactSheetResponse>;
   /** Free source text for a place; never generates narration or consumes audio time. */
   getPoiText(req: { poiId: string; lang: string; access?: AccessInfo }): Promise<Poi>;
   /** Live entitlements and credit wallet (server-written, read-only for the client). */

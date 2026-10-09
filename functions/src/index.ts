@@ -42,6 +42,7 @@ import { RoutingUnavailableError } from './providers/routing';
 import { getNarration as runGetNarration, NarrationError, reportNarrationIssue } from './narration/service';
 import { getTransition as runGetTransition } from './narration/transition';
 import { getTeaser as runGetTeaser } from './narration/teaser';
+import { getFactSheet as runGetFactSheet } from './poi/factSheet';
 import { selectNearby as runSelectNearby } from './discovery/service';
 import { getPoiText as runGetPoiText, PoiTextError } from './poi/text';
 import { recordVisit as runRecordVisit } from './stats/explorers';
@@ -416,6 +417,18 @@ export const getTeaser = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
     try {
       return await runGetTeaser(teaserDeps(), request.auth.uid, request.data);
+    } catch (e) {
+      return toHttpsError(e);
+    }
+  },
+);
+
+export const getFactSheet = onCall(
+  { enforceAppCheck, serviceAccount: aiServiceAccount, secrets: [GEMINI_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first');
+    try {
+      return await runGetFactSheet(teaserDeps(), request.auth.uid, request.data);
     } catch (e) {
       return toHttpsError(e);
     }

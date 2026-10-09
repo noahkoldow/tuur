@@ -15,6 +15,8 @@ import type { AccessInfo } from '../backend/types';
 import { usePoiText } from '../hooks/usePoiText';
 import { useLocalizedPoi } from '../hooks/useLocalizedPoi';
 import { PlaceTextStatus } from './place-text-status';
+import { FactSheetView } from './fact-sheet';
+import { useFactSheet } from '../hooks/useFactSheet';
 
 const HERO_H = 220;
 const GALLERY_W = 168;
@@ -59,6 +61,7 @@ export function StopCards({
   const { t } = useTranslation();
   const textInfo = usePoiText(poi, lang, true, access);
   const textPoi = useLocalizedPoi(textInfo.poi, lang);
+  const factSheet = useFactSheet(textPoi, lang, access);
   const pop = useRef(new Animated.Value(0)).current;
   const id = poi?.id ?? name;
   const [expanded, setExpanded] = useState(false);
@@ -120,7 +123,26 @@ export function StopCards({
 
         <View style={{ padding: 16, gap: 18 }}>
           <Section title={t('cards.about')}>
-            {body ? (
+            {factSheet.sheet ? <FactSheetView sheet={factSheet.sheet} ai={factSheet.ai} /> : null}
+            {body && factSheet.sheet ? (
+              <>
+                <Text
+                  variant="label"
+                  style={{ color: sys.accentText, minHeight: 44, textAlignVertical: 'center' }}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded }}
+                  onPress={() => setExpanded((v) => !v)}
+                >
+                  {expanded ? t('factSheet.hideFullText') : t('factSheet.fullText')}
+                </Text>
+                {expanded ? <Text variant="body">{body}</Text> : null}
+                {foreign ? (
+                  <Text variant="caption">
+                    {t('cards.originalLanguage', { language: languageName(foreign, lang) })}
+                  </Text>
+                ) : null}
+              </>
+            ) : body ? (
               <>
                 <Text
                   variant="body"
