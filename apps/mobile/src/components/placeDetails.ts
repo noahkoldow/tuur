@@ -83,16 +83,29 @@ function sourceOf(ref: WikipediaRef): string | undefined {
   return `https://${locale}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, '_'))}`;
 }
 
-/** Full, readable source text, in the UI language when an extract exists. */
-export function placeInformation(poi: Poi, lang: string): PlaceInformation | undefined {
-  const baseLanguage = lang.trim().toLowerCase().split(/[-_]/)[0];
+function bestExtract(poi: Poi, baseLanguage: string | undefined) {
   const available = poi.sources.wikipedia
     .map((ref) => ({ ref, text: cleanExtract(ref.extract ?? '') }))
     .filter(({ text }) => text.length > 0);
-  const best =
+  return (
     available.find(({ ref }) => ref.lang.toLowerCase() === baseLanguage) ??
     available.find(({ ref }) => ref.lang.toLowerCase() === 'en') ??
-    available[0];
+    available[0]
+  );
+}
+
+/** Language code of the shown Wikipedia text when it is not the UI language, so the card can say so. */
+export function foreignTextLanguage(poi: Poi, lang: string): string | undefined {
+  const baseLanguage = lang.trim().toLowerCase().split(/[-_]/)[0];
+  const best = bestExtract(poi, baseLanguage);
+  const code = best?.ref.lang.toLowerCase();
+  return code && code !== baseLanguage ? code : undefined;
+}
+
+/** Full, readable source text, in the UI language when an extract exists. */
+export function placeInformation(poi: Poi, lang: string): PlaceInformation | undefined {
+  const baseLanguage = lang.trim().toLowerCase().split(/[-_]/)[0];
+  const best = bestExtract(poi, baseLanguage);
   if (!best) {
     const facts = poi.adminFacts.map(cleanExtract).filter(Boolean);
     if (facts.length) return { text: facts.join('\n\n'), sourceName: 'tuur' };

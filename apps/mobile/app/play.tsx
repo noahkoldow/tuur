@@ -545,7 +545,7 @@ function PlayInner({ session }: { session: ActiveSession }) {
             </View>
           ) : null}
           {cardStop && (ui.phase !== 'finished' || inspectedStop) ? (
-            <View style={{ marginHorizontal: -metrics.margin }}>
+            <View>
               <StopCards
                 access={{
                   mode: session.mode,

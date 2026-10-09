@@ -479,6 +479,11 @@ export const de = {
     away: '{{distance}}',
     here: 'Du bist da',
     swipe: 'Wische für mehr',
+    about: 'Über diesen Ort',
+    photos: 'Fotos',
+    readMore: 'Weiterlesen',
+    readLess: 'Weniger anzeigen',
+    originalLanguage: 'Originaltext auf {{language}}',
   },
   player: {
     textMode: 'Entdecken & lesen',

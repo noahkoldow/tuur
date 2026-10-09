@@ -228,7 +228,7 @@ export function ActiveHome({ session }: { session: ActiveSession }) {
                   onPress={() => setSelectedStopId(undefined)}
                 />
               </View>
-              <View style={{ marginHorizontal: -metrics.margin }}>
+              <View>
                 <StopCards
                   access={{
                     mode: session.mode,

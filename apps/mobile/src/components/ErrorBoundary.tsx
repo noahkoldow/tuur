@@ -9,11 +9,11 @@ import { Mascot } from './Mascot';
 import { Text } from './Text';
 
 /** Last line of defence: a render error shows a calm message with a retry instead of a white screen. */
-export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean; detail?: string }> {
+  state: { failed: boolean; detail?: string } = { failed: false };
 
-  static getDerivedStateFromError() {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown) {
+    return { failed: true, detail: error instanceof Error ? error.message.slice(0, 240) : undefined };
   }
 
   componentDidCatch(error: unknown) {
@@ -31,7 +31,11 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
           tuur
         </Text>
         <Banner tone="error" text={i18n.t('errors.generic')} />
-        <Button label={i18n.t('common.retry')} onPress={() => this.setState({ failed: false })} />
+        {this.state.detail ? <Text variant="caption">{this.state.detail}</Text> : null}
+        <Button
+          label={i18n.t('common.retry')}
+          onPress={() => this.setState({ failed: false, detail: undefined })}
+        />
       </View>
     );
   }

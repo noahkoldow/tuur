@@ -24,8 +24,7 @@ export function usePoiText(poi: Poi | undefined, lang: string, enabled = true, a
     poi &&
     (poi.sources.wikipedia.some((ref) => ref.lang === language && ref.extract?.trim()) ||
       poi.adminFacts.length ||
-      poi.osmTags[`description:${language}`] ||
-      poi.osmTags.description),
+      poi.osmTags[`description:${language}`]),
   );
   const needed = enabled && Boolean(poi) && !hasLocalText;
   const current = result?.key === key ? result : undefined;

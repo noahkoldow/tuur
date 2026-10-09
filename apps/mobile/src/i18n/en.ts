@@ -474,6 +474,11 @@ export const en: Widen<typeof de> = {
     away: '{{distance}}',
     here: "You're here",
     swipe: 'Swipe for more',
+    about: 'About this place',
+    photos: 'Photos',
+    readMore: 'Read more',
+    readLess: 'Show less',
+    originalLanguage: 'Original text in {{language}}',
   },
   player: {
     textMode: 'Explore & read',
