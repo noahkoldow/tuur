@@ -20,6 +20,7 @@ export const endpoints = [
   'getWalkingRoute',
   'getTeaser',
   'getPoiText',
+  'getFactSheet',
   'selectNearby',
   'spendCredit',
   'claimTourStart',
