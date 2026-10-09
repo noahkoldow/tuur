@@ -461,6 +461,31 @@ export const de = {
     stops_other: '{{count}} Stationen',
     settings: 'Einstellungen, Datenschutz & Rechtliches',
   },
+  factSheet: {
+    facts: 'Eckdaten',
+    aiNote: 'Von KI aus öffentlichen Quellen zusammengefasst. Kann Fehler enthalten.',
+    fullText: 'Ganzer Quellentext',
+    hideFullText: 'Quellentext ausblenden',
+    section: {
+      what: 'Was es ist',
+      history: 'Geschichte',
+      worth: 'Warum sich ein Halt lohnt',
+      visit: 'Besuch',
+      details: 'Gut zu wissen',
+    },
+    fact: {
+      built: 'Erbaut',
+      architect: 'Architekt',
+      style: 'Stil',
+      artist: 'Künstler',
+      height: 'Höhe',
+      heritage: 'Denkmalstatus',
+      openingHours: 'Öffnungszeiten',
+      fee: 'Eintritt',
+      address: 'Adresse',
+      namedAfter: 'Benannt nach',
+    },
+  },
   cards: {
     showInfo: 'Tippen für Ortsinfos',
     showPhoto: 'Foto anzeigen',
@@ -591,6 +616,17 @@ export const de = {
     tuuIntro: 'Sag mir, wie viel Zeit du hast. Ich bau dir die Route.',
     tuuPreview: 'Deine Route steht. Schau sie dir in Ruhe an.',
     tuuBuilding: 'Ich stelle deine Geschichten zusammen…',
+    sheetHandle: 'Routeneinstellungen. Zum Ändern der Größe ziehen.',
+    summary: '{{n}} Stationen · {{km}} km · {{time}}',
+    summaryNone: 'Noch keine Route',
+    stopMeta: '{{minutes}} Min. Aufenthalt',
+    pickBadge: 'Deine Wahl',
+    stopsHint:
+      'Tippe auf eine Station, um sie auf der Karte zu sehen, oder entferne sie mit dem Minus. Graue Marker sind weitere Orte zum Hinzufügen.',
+    addToRoute: 'Zur Route hinzufügen',
+    removeFromRoute: 'Entfernen',
+    removeStop: '{{name}} aus der Route entfernen',
+    nearbyPlaces: 'Weitere Orte in der Nähe',
   },
   fork: {
     loadingChoices: 'tuur sucht die nächsten Wege…',
@@ -705,7 +741,8 @@ export const de = {
     pricingHint:
       'Texttouren sind mit Werbung kostenlos. Mit Guthaben oder Premium hörst du die Geschichten unterwegs: bis zu 90 Minuten pro Guthaben oder 500 Minuten pro Monat im Abo.',
     offersUnavailable: 'Gerade sind keine Preise verfügbar. Versuche es erneut.',
-    storeUnavailable: 'Käufe sind in dieser Version der App noch nicht verfügbar. Text-Touren bleiben kostenlos.',
+    storeUnavailable:
+      'Käufe sind in dieser Version der App noch nicht verfügbar. Text-Touren bleiben kostenlos.',
     demoNotice:
       'Demo: Hier kannst du die Preise ansehen und Käufe kostenlos ausprobieren. Es wird kein Geld abgebucht.',
     demoAction: 'Kostenloser Demo-Kauf; es wird kein Geld abgebucht.',

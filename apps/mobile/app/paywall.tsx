@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -52,7 +52,20 @@ export default function Paywall() {
   const { browsing, downloading, unlocked } = paywallContext(ent, params);
   const demo = backend.kind === 'demo' || config.backend === 'demo' || Platform.OS === 'web';
   const isSub = subscribed(ent);
-  const close = () => (router.canGoBack() ? router.back() : router.replace('/profile'));
+  // Stable options: a fresh object (with a fresh headerRight function) per render makes expo-router call
+  // navigation.setOptions in a layout effect on every render, which re-renders the native header each time.
+  const closeLabel = t('paywall.close');
+  const close = useCallback(() => (router.canGoBack() ? router.back() : router.replace('/profile')), [router]);
+  const headerOptions = useMemo(
+    () => ({
+      headerShown: true,
+      title: '',
+      headerShadowVisible: false,
+      headerStyle: { backgroundColor: sys.grouped as string },
+      headerRight: () => <CloseButton label={closeLabel} onPress={close} />,
+    }),
+    [close, closeLabel],
+  );
 
   useEffect(() => {
     let active = true;
@@ -143,15 +156,7 @@ export default function Paywall() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          title: '',
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: sys.grouped as string },
-          headerRight: () => <CloseButton label={t('paywall.close')} onPress={close} />,
-        }}
-      />
+      <Stack.Screen options={headerOptions} />
       <ScrollScreen>
         <View style={{ gap: 8 }}>
           <Wordmark width={72} />

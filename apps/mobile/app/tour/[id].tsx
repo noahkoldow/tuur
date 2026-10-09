@@ -32,6 +32,9 @@ import { useSettings } from '../../src/state/settings';
 import { metrics, sys } from '../../src/theme';
 import { useStopPois } from '../../src/hooks/useStopPois';
 
+/** Module-level so expo-router does not call navigation.setOptions on every render. */
+const TOUR_HEADER = { headerShown: true, title: '', headerTransparent: true, headerShadowVisible: false } as const;
+
 /** Tour preview (spec 5): map with the route, facts, stops with walking times, start. */
 export default function TourDetail() {
   const { id, curated, adjusted, lang, download } = useLocalSearchParams<{
@@ -182,9 +185,7 @@ export default function TourDetail() {
 
   return (
     <View style={{ flex: 1, backgroundColor: sys.grouped }}>
-      <Stack.Screen
-        options={{ headerShown: true, title: '', headerTransparent: true, headerShadowVisible: false }}
-      />
+      <Stack.Screen options={TOUR_HEADER} />
       <View style={{ height: 280 }}>
         <TuurMap
           center={tour.stops[0]!.location}
