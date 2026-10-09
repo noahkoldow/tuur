@@ -3,7 +3,7 @@ import { REGION_FIXTURES } from '../fixtures/regions';
 import { syntheticRawPois } from '../demo/synthetic';
 import { destinationPoint, distanceMeters, encodeGeohash } from '../geo/geohash';
 import { buildPois } from '../poi/pipeline';
-import { fitToBudget, planCustomRoute } from './planRoute';
+import { fitToBudget, maxLegMinutesFor, planCustomRoute } from './planRoute';
 import { haversineMatrix } from './matrix';
 
 const NOW = 1_700_000_000_000;
@@ -220,5 +220,35 @@ describe('fitToBudget (server re-check with real times)', () => {
     if (fitted.dropped.length) expect(fitted.order.length + fitted.dropped.length).toBe(r.stops.length);
     const unchanged = fitToBudget(r.stops, m, 1000, []);
     expect(unchanged.dropped).toEqual([]);
+  });
+});
+
+describe('planCustomRoute in sparse suburbs', () => {
+  it('walking with 90 min visits several stations when places are ~1.7 km apart', () => {
+    const origin = { lat: 52.6, lng: 13.2 };
+    const base = berlin.find((p) => p.accessible && !p.hidden && p.interests.length > 0)!;
+    const raw = Array.from({ length: 8 }, (_, i) => {
+      const loc = destinationPoint(origin, i * 45, 1100 + (i % 2) * 400);
+      return { ...base, partnerId: undefined, id: `sparse-${i}`, name: `S${i}`, location: loc, score: 60, dwellMinutes: 6 };
+    });
+    const walk = planCustomRoute({
+      start: origin,
+      budgetMinutes: 90,
+      profile: 'foot-walking',
+      interests: [],
+      pois: raw,
+    });
+    expect(walk).toBeDefined();
+    expect(walk!.stops.length).toBeGreaterThanOrEqual(2);
+    expect(walk!.totalMinutes).toBeLessThanOrEqual(90.1);
+    expect(walk!.issues).not.toContain('leg_too_long');
+  });
+});
+
+describe('maxLegMinutesFor', () => {
+  it('stays at 20 min for short budgets and grows with long ones', () => {
+    expect(maxLegMinutesFor(30)).toBe(20);
+    expect(maxLegMinutesFor(90)).toBe(36);
+    expect(maxLegMinutesFor(600)).toBe(45);
   });
 });

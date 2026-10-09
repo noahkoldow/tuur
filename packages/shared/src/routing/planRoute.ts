@@ -42,6 +42,14 @@ export interface PlannedRoute {
   candidateIds?: string[];
 }
 
+/**
+ * Longest single leg for a time budget. A fixed 20 min cap left on foot (about 1.5 km as the crow flies) no way to
+ * hop between the sparse places of a suburb, so a plan ended after the first station; it grows with the budget.
+ */
+export function maxLegMinutesFor(budgetMinutes: number): number {
+  return Math.min(45, Math.max(20, Math.round(budgetMinutes * 0.4)));
+}
+
 const eligible = (p: Poi, minScore: number) =>
   !p.hidden && p.accessible && p.interests.length > 0 && p.score >= minScore;
 
@@ -91,7 +99,7 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
     interests: p.interests,
     ...(p.partnerId ? { partner: true } : {}),
   }));
-  const maxLeg = req.maxLegMinutes ?? 20;
+  const maxLeg = req.maxLegMinutes ?? maxLegMinutesFor(req.budgetMinutes);
   const result = solveOrienteering({
     candidates,
     minutes: m.minutes,
@@ -107,12 +115,12 @@ export function planCustomRoute(req: PlanRequest): PlannedRoute | undefined {
   if (!result.order.length || required.some((p) => !result.order.includes(p.id))) return undefined;
   if (!evaluateOrder({ candidates, minutes: m.minutes, maxLegMinutes: maxLeg }, result.order)?.legsOk)
     return undefined;
-  return { ...assemble(req, pool, m, result.order, result.totalScore), candidateIds: pool.map((p) => p.id) };
+  return { ...assemble({ ...req, maxLegMinutes: maxLeg }, pool, m, result.order, result.totalScore), candidateIds: pool.map((p) => p.id) };
 }
 
 /** Builds the route summary for a given order (also used to re-evaluate a corrected order). */
 export function assemble(
-  req: Pick<PlanRequest, 'budgetMinutes' | 'profile'>,
+  req: Pick<PlanRequest, 'budgetMinutes' | 'profile'> & { maxLegMinutes?: number },
   pool: Poi[],
   m: TravelMatrix,
   order: string[],
@@ -149,7 +157,7 @@ export function assemble(
       legMinutes: legMinutes.slice(1),
       totalMinutes: total,
     },
-    { ...DEFAULT_TOUR_RULES, minStops: 1, maxLegMinutes: 20, budgetMinutes: req.budgetMinutes },
+    { ...DEFAULT_TOUR_RULES, minStops: 1, maxLegMinutes: req.maxLegMinutes ?? maxLegMinutesFor(req.budgetMinutes), budgetMinutes: req.budgetMinutes },
   );
   return {
     stops,

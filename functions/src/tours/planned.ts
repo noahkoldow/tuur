@@ -6,6 +6,7 @@ import {
   encodePolyline,
   evaluateOrder,
   fitToBudget,
+  maxLegMinutesFor,
   solveOrienteering,
   fallbackTourConcept,
   simplifyPath,
@@ -99,7 +100,7 @@ export async function composePlannedRoute(
       budgetMinutes: req.budgetMinutes,
       interests: req.interests,
       forcedIds: req.requiredStopIds ?? [],
-      maxLegMinutes: 20,
+      maxLegMinutes: maxLegMinutesFor(req.budgetMinutes),
     });
     fit = {
       order: solved.order,

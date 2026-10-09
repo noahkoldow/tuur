@@ -19,6 +19,8 @@ export interface MapSpot {
   /** 0..1 marker size. */
   scale: number;
   hot: boolean;
+  /** Neutral grey marker for places that are available but not part of the current selection. */
+  muted?: boolean;
 }
 
 export interface TuurMapProps {

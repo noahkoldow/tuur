@@ -25,7 +25,7 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
   const { t } = useTranslation();
   const d = spotDiameter(spot.scale);
   const glyph = spot.interest ? INTEREST_ICON[spot.interest] : 'map-pin';
-  const tone = spot.interest ? categoryColors[spot.interest] : undefined;
+  const tone = spot.interest && !spot.muted ? categoryColors[spot.interest] : undefined;
   return (
     <View
       accessible
@@ -41,7 +41,9 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
           borderRadius: radii.pill,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: tone?.background ?? (spot.hot ? sys.accentTint : sys.elevated),
+          backgroundColor: spot.muted
+            ? sys.fill
+            : (tone?.background ?? (spot.hot ? sys.accentTint : sys.elevated)),
           borderWidth: spot.hot ? 2 : 1,
           borderColor: tone?.foreground ?? (spot.hot ? sys.accentText : sys.separator),
           boxShadow: mapMarker.shadow,
@@ -50,7 +52,11 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
         <Icon
           name={glyph}
           size={mapMarker.icon}
-          color={tone?.foreground ?? (spot.hot ? sys.accentText : sys.labelSecondary)}
+          color={
+            spot.muted
+              ? sys.labelTertiary
+              : (tone?.foreground ?? (spot.hot ? sys.accentText : sys.labelSecondary))
+          }
           weight="semibold"
         />
       </View>
