@@ -269,6 +269,9 @@ export class RoamController {
   private pinnedTargetId: string | undefined;
   private revision = 0;
   private detached = false;
+  private queued: Poi[] = [];
+  private readonly queueListeners = new Set<() => void>();
+  private queueSnapshot: readonly Poi[] = [];
   constructor(private readonly o: RoamOpts) {
     this.clock = o.clock ?? realClock;
     this.pinnedTargetId = o.pinnedTargetId;
@@ -294,6 +297,7 @@ export class RoamController {
   }
   detach() {
     this.unsub?.();
+    if (this.queued.length) this.setQueue([]);
     this.detached = true;
     this.revision++;
   }
@@ -302,6 +306,44 @@ export class RoamController {
   canChoose(): boolean {
     const st = this.o.runtime.getState();
     return !this.detached && st.open && !st.finished && !st.playback && !st.pending && !st.pendingTransition;
+  }
+
+  /** Places the listener lined up to visit after the current target, in order. Stable between changes. */
+  getQueue = (): readonly Poi[] => this.queueSnapshot;
+  subscribeQueue = (listener: () => void) => {
+    this.queueListeners.add(listener);
+    return () => void this.queueListeners.delete(listener);
+  };
+  private setQueue(next: Poi[]) {
+    this.queued = next;
+    this.queueSnapshot = [...next];
+    for (const l of [...this.queueListeners]) l();
+  }
+
+  /** Add a place after the current target; with nothing to walk to it simply becomes the target. */
+  enqueue(poi: Poi): boolean {
+    const st = this.o.runtime.getState();
+    if (this.detached || poi.hidden || !poi.accessible || this.queued.some((q) => q.id === poi.id)) return false;
+    if (st.visited.includes(poi.id) || st.skipped.includes(poi.id) || st.narrated.includes(poi.id)) return false;
+    const target = st.route[st.index];
+    if (target?.id === poi.id) return false;
+    const walking = target && !st.awaitingRoute && !st.reached[target.id] && !st.narrated.includes(target.id);
+    if (!walking && this.choose(poi)) return true;
+    this.setQueue([...this.queued, poi]);
+    return true;
+  }
+  dequeue(poiId: string) {
+    if (this.queued.some((q) => q.id === poiId)) this.setQueue(this.queued.filter((q) => q.id !== poiId));
+  }
+
+  /** The first queued place that can still be visited becomes the target; stale entries are dropped. */
+  private advanceQueue(): boolean {
+    while (this.queued.length) {
+      const [next, ...rest] = this.queued;
+      this.setQueue(rest);
+      if (next && this.choose(next)) return true;
+    }
+    return false;
   }
 
   /** Pick the next place in this walk without restarting GPS, audio or the history record. */
@@ -379,6 +421,8 @@ export class RoamController {
     const idle = st.awaitingRoute || !target || st.route.length === 0;
     const cooled = this.clock.now() - this.lastNarrated >= cfg.cooldownSec * 1000;
     const busy = Boolean(st.playback) || Boolean(st.pending) || Boolean(st.pendingTransition);
+    // A place the listener lined up goes before any automatic pick, once the current stop is done.
+    if (!busy && this.queued.length && (idle || st.reached[target!.id]) && this.advanceQueue()) return;
     if (busy || (!idle && st.reached[target!.id])) return;
     if (idle && !cooled && st.narrated.length > 0) return;
     if (target && !idle && cooled && mode === 'walking') {

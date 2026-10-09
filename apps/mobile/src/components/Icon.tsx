@@ -19,6 +19,7 @@ const SF: Record<string, string> = {
   'more-horizontal': 'ellipsis',
   coffee: 'cup.and.saucer',
   check: 'checkmark',
+  plus: 'plus',
   'check-circle': 'checkmark.circle.fill',
   'plus-circle': 'plus.circle.fill',
   settings: 'gearshape',

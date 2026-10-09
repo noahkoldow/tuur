@@ -330,6 +330,37 @@ describe('choosing a destination during roam', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('queues a place behind the unreached target and makes it the target once the first stop is done', async () => {
+    const first = place('first');
+    const queued = place('queued', 270);
+    const { runtime, roam, pool, clock } = await setup([first]);
+    vi.spyOn(pool, 'load').mockResolvedValue(undefined);
+    vi.spyOn(pool, 'all').mockReturnValue([first, queued]);
+    expect(roam.enqueue(queued)).toBe(true);
+    expect(roam.getQueue().map((p) => p.id)).toEqual(['queued']);
+    expect(runtime.getState().route.map((s) => s.id)).toEqual(['first']);
+    expect(roam.enqueue(queued)).toBe(false);
+    expect(roam.enqueue(first)).toBe(false);
+    runtime.skip();
+    runtime.onFix({ ...paris, ts: clock.now() + 10_000, accuracy: 5, heading: 90 });
+    await clock.flush();
+    expect(roam.getQueue()).toEqual([]);
+    expect(runtime.getState().route.map((s) => s.id)).toContain('queued');
+    roam.detach();
+    await runtime.dispose();
+  });
+
+  it('removes a queued place again', async () => {
+    const first = place('first');
+    const queued = place('queued', 270);
+    const { runtime, roam } = await setup([first]);
+    roam.enqueue(queued);
+    roam.dequeue('queued');
+    expect(roam.getQueue()).toEqual([]);
+    roam.detach();
+    await runtime.dispose();
+  });
+
   it('appends after an exhausted route without repeating skipped stops', async () => {
     const first = place('first');
     const next = place('next');

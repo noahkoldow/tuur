@@ -21,6 +21,8 @@ export interface MapSpot {
   hot: boolean;
   /** Neutral grey marker for places that are available but not part of the current selection. */
   muted?: boolean;
+  /** 1-based position in the listener's visit queue; the marker shows it as a numbered badge. */
+  queued?: number;
 }
 
 export interface TuurMapProps {

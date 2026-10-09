@@ -27,6 +27,8 @@ export function PlaceCard({
   poi,
   minutes,
   onNavigate,
+  onQueue,
+  queuePosition,
   navigate = false,
   disabled = false,
   width = PLACE_CARD_WIDTH,
@@ -36,6 +38,10 @@ export function PlaceCard({
   poi: Poi;
   minutes?: number | undefined;
   onNavigate: () => void;
+  /** Adds the place after the current target (or removes it again when `queuePosition` is set). */
+  onQueue?: (() => void) | undefined;
+  /** 1-based position in the visit queue when this place is lined up. */
+  queuePosition?: number | undefined;
   navigate?: boolean;
   disabled?: boolean;
   width?: number | '100%';
@@ -100,6 +106,20 @@ export function PlaceCard({
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
               {interest ? <CategoryBadge interest={interest} /> : null}
+              {queuePosition ? (
+                <View
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 10,
+                    backgroundColor: sys.accent,
+                  }}
+                >
+                  <Text variant="caption" color={sys.onAccent} style={{ fontWeight: '700' }}>
+                    {t('cards.queued', { count: queuePosition })}
+                  </Text>
+                </View>
+              ) : null}
               <Icon name={prominence === 'landmark' ? 'star' : 'map-pin'} size={13} color="#FFFFFF" />
               <Text variant="caption" color="#FFFFFF" style={{ fontWeight: '600' }}>
                 {prominenceLabel}
@@ -160,7 +180,15 @@ export function PlaceCard({
             onOpen={() => setReadingId(poi.id)}
             textStatus={textInfo}
           />
-          <View style={{ position: 'absolute', right: 12, bottom: 12 }}>
+          <View style={{ position: 'absolute', right: 12, bottom: 12, flexDirection: 'row', gap: 8 }}>
+            {onQueue ? (
+              <IconButton
+                icon={queuePosition ? 'check' : 'plus'}
+                label={t(queuePosition ? 'cards.unqueue' : 'cards.queue', { name: poi.name })}
+                hint={t('cards.queueHint')}
+                onPress={onQueue}
+              />
+            ) : null}
             <IconButton
               icon="navigation"
               primary

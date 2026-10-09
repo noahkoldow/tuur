@@ -23,6 +23,9 @@ interface Props {
   disabled?: boolean;
   /** Only the card's navigation button chooses a destination; tapping its body flips it. */
   onNavigate: (poi: Poi) => void;
+  /** Lines the place up as the stop after the current target; toggles it off when already queued. */
+  onQueue?: ((poi: Poi) => void) | undefined;
+  queuedIds?: readonly string[] | undefined;
   /** A map selection scrolls the matching card into view without starting its activity. */
   selectedId?: string | null | undefined;
   /** Increment when selecting the same map pin again after manually browsing cards. */
@@ -36,6 +39,8 @@ export function PlacesCarousel({
   navigate = false,
   disabled = false,
   onNavigate,
+  onQueue,
+  queuedIds,
   selectedId,
   selectionKey,
 }: Props) {
@@ -193,6 +198,8 @@ export function PlacesCarousel({
             navigate={navigate}
             disabled={disabled}
             onNavigate={() => onNavigate(poi)}
+            onQueue={onQueue ? () => onQueue(poi) : undefined}
+            queuePosition={queuedIds && queuedIds.includes(poi.id) ? queuedIds.indexOf(poi.id) + 1 : undefined}
           />
         ))}
       </Animated.ScrollView>
@@ -211,6 +218,8 @@ function CarouselPlace({
   navigate,
   disabled,
   onNavigate,
+  onQueue,
+  queuePosition,
 }: {
   poi: Poi;
   index: number;
@@ -222,6 +231,8 @@ function CarouselPlace({
   navigate: boolean;
   disabled: boolean;
   onNavigate: () => void;
+  onQueue: (() => void) | undefined;
+  queuePosition: number | undefined;
 }) {
   const style = useAnimatedStyle(() => {
     const input = [(index - 1) * interval, index * interval, (index + 1) * interval];
@@ -250,6 +261,8 @@ function CarouselPlace({
         navigate={navigate}
         disabled={disabled}
         onNavigate={onNavigate}
+        onQueue={onQueue}
+        queuePosition={queuePosition}
       />
     </Animated.View>
   );

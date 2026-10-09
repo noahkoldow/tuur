@@ -29,7 +29,11 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
   return (
     <View
       accessible
-      accessibilityLabel={[spot.name, spot.interest ? t(`interests.${spot.interest}`) : undefined]
+      accessibilityLabel={[
+        spot.name,
+        spot.interest ? t(`interests.${spot.interest}`) : undefined,
+        spot.queued ? t('home.queuePosition', { count: spot.queued }) : undefined,
+      ]
         .filter(Boolean)
         .join(', ')}
       style={{ width: mapMarker.hit, height: mapMarker.hit, alignItems: 'center', justifyContent: 'center' }}
@@ -60,6 +64,28 @@ export function SpotMarker({ spot }: { spot: MapSpot }) {
           weight="semibold"
         />
       </View>
+      {spot.queued ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: (mapMarker.hit - d) / 2 - 6,
+            right: (mapMarker.hit - d) / 2 - 8,
+            minWidth: 18,
+            height: 18,
+            paddingHorizontal: 4,
+            borderRadius: 9,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: sys.accent,
+            borderWidth: 1.5,
+            borderColor: sys.background,
+          }}
+        >
+          <Text variant="label" color={sys.onAccent} style={{ fontSize: 11, fontWeight: '700' }}>
+            {spot.queued}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

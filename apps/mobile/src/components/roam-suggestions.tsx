@@ -25,7 +25,7 @@ export function RoamSuggestions({
   showTitle?: boolean;
 }) {
   const { t } = useTranslation();
-  const { places, ready, error, reload, canChoose } = suggestions;
+  const { places, ready, error, reload, canChoose, queuedIds, toggleQueue } = suggestions;
   return (
     <View style={{ gap: 12 }}>
       {showTitle ? (
@@ -52,6 +52,8 @@ export function RoamSuggestions({
               selectedId={selectedId}
               selectionKey={selectionKey}
               onNavigate={onChoose}
+              onQueue={toggleQueue}
+              queuedIds={queuedIds}
             />
           </View>
         </>
