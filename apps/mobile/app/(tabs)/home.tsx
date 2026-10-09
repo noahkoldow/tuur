@@ -308,7 +308,8 @@ function ExploreHome({ onResumed }: { onResumed: () => void }) {
             hasPosition: position !== null,
             osmPlaceCount: displayedPlaces.length,
             osmReady: poolReady,
-            osmFailed: Boolean(discoveryError || poolError),
+            // A slow search counts as failed: Apple Maps shows results while OSM ingestion is still queued.
+            osmFailed: Boolean(discoveryError || poolError || slow),
           }) ? (
             <AppleNearbyFallback position={discoveryPosition} />
           ) : null}

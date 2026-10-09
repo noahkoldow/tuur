@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_AI_CONFIG, encodeGeohash } from '@tuur/shared';
+import { DEFAULT_AI_CONFIG, encodeGeohash, tileWithNeighbors } from '@tuur/shared';
+import { RateLimitError } from '../util/rateLimit';
 import { memoryFirestore } from '../../test/memoryFirestore';
 import { MockLlmProvider } from '../providers/llm';
 import { MockPoiSources } from '../providers/poiSources';
@@ -45,6 +46,25 @@ describe('on-demand area ingestion', () => {
     expect(f.reverse).not.toHaveBeenCalled();
     expect(f.wiki).not.toHaveBeenCalled();
     expect(f.docs.get(`areas/${tile}`)).toMatchObject({ status: 'failed' });
+  });
+
+  it('keeps the tile usable when the geocoder is rate limited but a neighbor already knows the place', async () => {
+    const f = fixture();
+    const neighbor = tileWithNeighbors(tile).find((t) => t !== tile)!;
+    f.docs.set(`areas/${tile}`, { ...newArea(tile, 0), status: 'ingesting' });
+    f.docs.set(`areas/${neighbor}`, { ...newArea(neighbor, 0), status: 'ready', placeId: 'FR_paris' });
+    f.docs.set('places/FR_paris', {
+      id: 'FR_paris',
+      name: 'Paris',
+      countryCode: 'FR',
+      location: { lat: 48.86, lng: 2.335 },
+      sourceLangs: ['fr'],
+      createdAt: 0,
+    });
+    f.reverse.mockRejectedValue(new RateLimitError(60_000));
+    const result = await ingestArea(f.deps, tile);
+    expect(result.poiCount).toBeGreaterThan(0);
+    expect(f.docs.get(`areas/${tile}`)).toMatchObject({ status: result.status, placeId: 'FR_paris' });
   });
 
   it('persists provider places outside Berlin without a manually imported region', async () => {

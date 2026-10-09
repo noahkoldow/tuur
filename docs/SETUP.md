@@ -79,3 +79,15 @@ Native offline downloads support ready-made and curated fixed itineraries. Deplo
 Signed URLs are created by the Cloud Functions runtime service account. Grant it the token-creator role on itself once per project:
 `gcloud iam service-accounts add-iam-policy-binding <sa>@<project>.iam.gserviceaccount.com --member=serviceAccount:<sa>@<project>.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator`.
 Deploy `firestore.indexes.json` with `firebase deploy --only firestore:indexes` so the TTL policies (`expireAt`) and composite indexes are created.
+
+## Beta: places missing in a district (2026-10-09)
+
+Symptom: Home says nearby places could not be loaded. Cause seen in `tuur-beta-noehxpo`: tiles in `areas/{geohash}` stuck on `status: failed, error: rate_limited` (Hakenfelde `u337h*`, 37 tiles). The ingest worker called the Pelias geocoder (limit 1000/day, used up by prefill) only to name the city and failed the whole tile when it was rate limited. The worker now falls back to the place of an ingested neighbor tile (`resolvePlace` in `functions/src/area/ingest.ts`).
+
+Run once, in this order (needs the Firebase CLI login):
+
+1. `pnpm --filter @tuur/functions build`
+2. `node scripts/deploy-beta-backend.mjs --include-ingestion --functions=ingestArea --apply`
+3. `node scripts/reset-failed-areas.mjs` (plan), then `node scripts/reset-failed-areas.mjs --run` to make the failed tiles claimable again. The next app request or `node scripts/prefill-beta-areas.mjs --preset=hakenfelde,spandau --snapshot --run` ingests them.
+
+Only about 1,100 of the ~9,000 imported tiles with places are ingested so far; keep the prefill running (it is resumable) to avoid cold-tile waits. Stale `ingesting` claims clear automatically after 2 hours. The device build must use the beta project (`EXPO_PUBLIC_FIREBASE_PROJECT_ID=tuur-beta-noehxpo` in the EAS `preview` environment, already set); `tuur-prod` has no Cloud Functions.

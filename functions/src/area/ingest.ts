@@ -4,6 +4,7 @@ import {
   scoreWithPartner,
   DEFAULT_QUALITY,
   PoiSchema,
+  PlaceSchema,
   buildPois,
   countQualityPois,
   geohashBounds,
@@ -15,6 +16,8 @@ import {
   type AiConfig,
   type ImageRef,
   type Interest,
+  type LatLng,
+  type Place,
   type Poi,
   type QualityOptions,
   type RawPoi,
@@ -51,6 +54,25 @@ async function settled<T>(p: Promise<T>, fallback: T, label: string, warnings: s
 }
 
 /**
+ * The geocoder only names the surrounding city. A quota or outage there must not fail a tile whose places
+ * are already in hand: fall back to the place of an already ingested neighbor, and fail only without one.
+ */
+async function resolvePlace(deps: IngestDeps, geohash: string, center: LatLng): Promise<Place> {
+  try {
+    return placeFromGeocode(await deps.geocoder.reverse(center), center, deps.now());
+  } catch (error) {
+    for (const neighbor of tileWithNeighbors(geohash).filter((t) => t !== geohash)) {
+      const placeId = (await deps.db.collection(AREAS).doc(neighbor).get()).get('placeId');
+      if (typeof placeId !== 'string' || !placeId) continue;
+      const known = await deps.db.collection('places').doc(placeId).get();
+      const parsed = PlaceSchema.safeParse(known.data());
+      if (parsed.success) return parsed.data;
+    }
+    throw error;
+  }
+}
+
+/**
  * Ingest one tile: fetch OSM + Wikidata + Wikipedia (local language, DE, EN), merge, classify (rules, then
  * the lite LLM for edge cases), score relative to the surroundings and persist POIs plus the area status.
  * OSM is the anchor source: if it fails the job fails (and is retried) instead of publishing a hollow area.
@@ -78,7 +100,7 @@ export async function ingestArea(
   try {
     // OSM is required. Do not spend geocoding/enrichment calls when it is unavailable or quota-blocked.
     const osm = await deps.sources.fetchOsm(bounds);
-    const place = placeFromGeocode(await deps.geocoder.reverse(center), center, deps.now());
+    const place = await resolvePlace(deps, geohash, center);
     const langs = sourceLangsFor(place.countryCode);
     const [wikidata, ...wikis] = await Promise.all([
       settled(deps.sources.fetchWikidata(bounds), [] as RawPoi[], 'wikidata', warnings),
